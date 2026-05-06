@@ -17,4 +17,4 @@ export function listProviders(): ProviderAdapter[] {
   return Object.values(providers);
 }
 
-export type { ProviderAdapter, ProviderId } from './types.js';
+export type { ModelPricing, ProviderAdapter, ProviderId, UsageCost } from './types.js';

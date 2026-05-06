@@ -1,4 +1,6 @@
+import type { LanguageModelUsage } from 'ai';
 import { randomUUID } from 'node:crypto';
+import type { UsageCost } from '../providers/registry.js';
 import { getDB } from './db.js';
 
 export interface ChatRow {
@@ -20,6 +22,8 @@ export interface MessageContent {
     result?: { ok: boolean; content: string };
     status: 'pending' | 'success' | 'error';
   }>;
+  usage?: LanguageModelUsage;
+  cost?: UsageCost;
 }
 
 export interface MessageRow {

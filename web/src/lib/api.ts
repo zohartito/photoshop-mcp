@@ -64,11 +64,39 @@ export interface PersistedToolCall {
   status: 'pending' | 'success' | 'error';
 }
 
+export interface UsageDetails {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  inputTokenDetails?: {
+    noCacheTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+  outputTokenDetails?: {
+    textTokens?: number;
+    reasoningTokens?: number;
+  };
+}
+
+export interface UsageCost {
+  totalUsd: number;
+  inputUsd: number;
+  outputUsd: number;
+  cachedReadUsd: number;
+  cachedWriteUsd: number;
+}
+
 export interface PersistedMessage {
   id: string;
   chatId: string;
   role: 'user' | 'assistant';
-  content: { text: string; toolCalls: PersistedToolCall[] };
+  content: {
+    text: string;
+    toolCalls: PersistedToolCall[];
+    usage?: UsageDetails;
+    cost?: UsageCost;
+  };
   createdAt: number;
 }
 

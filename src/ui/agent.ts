@@ -1,9 +1,9 @@
 import { createMCPClient, type MCPClient } from '@ai-sdk/mcp';
 import { Experimental_StdioMCPTransport } from '@ai-sdk/mcp/mcp-stdio';
-import { stepCountIs, streamText, type ModelMessage } from 'ai';
+import { stepCountIs, streamText, type LanguageModelUsage, type ModelMessage } from 'ai';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { ProviderAdapter } from './providers/registry.js';
+import type { ModelPricing, ProviderAdapter, UsageCost } from './providers/registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -33,6 +33,11 @@ export interface RunChatStreamEvent {
   payload: unknown;
 }
 
+export interface RunChatFinishInfo {
+  usage: LanguageModelUsage;
+  cost?: UsageCost;
+}
+
 export interface RunChatOptions {
   prompt: string;
   history: ModelMessage[];
@@ -41,6 +46,7 @@ export interface RunChatOptions {
   modelId: string;
   abortSignal: AbortSignal;
   onAssistantBuffer?: (buf: AssistantBuffer) => void;
+  onFinish?: (info: RunChatFinishInfo) => void;
 }
 
 export const PHOTOSHOP_SYSTEM_PROMPT = `
@@ -141,12 +147,13 @@ export async function* runChat(opts: RunChatOptions): AsyncGenerator<RunChatStre
           break;
         }
         case 'finish': {
+          const usage = part.totalUsage;
+          const pricing = opts.provider.getModelPricing(opts.modelId);
+          const cost = pricing ? computeCost(usage, pricing) : undefined;
+          opts.onFinish?.({ usage, cost });
           yield {
             type: 'finish',
-            payload: {
-              finishReason: part.finishReason,
-              usage: part.totalUsage,
-            },
+            payload: { finishReason: part.finishReason, usage, cost },
           };
           break;
         }
@@ -164,6 +171,33 @@ export async function* runChat(opts: RunChatOptions): AsyncGenerator<RunChatStre
   } finally {
     if (mcp) await mcp.close().catch(() => undefined);
   }
+}
+
+export function computeCost(usage: LanguageModelUsage, pricing: ModelPricing): UsageCost {
+  const cacheRead = usage.inputTokenDetails?.cacheReadTokens ?? 0;
+  const cacheWrite = usage.inputTokenDetails?.cacheWriteTokens ?? 0;
+  // Prefer the explicit non-cache count when the provider reports it; otherwise
+  // derive it from the total minus cache buckets so we don't double-bill.
+  const totalInput = usage.inputTokens ?? 0;
+  const noCache =
+    usage.inputTokenDetails?.noCacheTokens ??
+    Math.max(0, totalInput - cacheRead - cacheWrite);
+  const output = usage.outputTokens ?? 0;
+
+  const inputUsd = (noCache / 1_000_000) * pricing.inputUsdPerMTok;
+  const outputUsd = (output / 1_000_000) * pricing.outputUsdPerMTok;
+  const cachedReadUsd =
+    (cacheRead / 1_000_000) * (pricing.cachedInputUsdPerMTok ?? pricing.inputUsdPerMTok);
+  const cachedWriteUsd =
+    (cacheWrite / 1_000_000) * (pricing.cachedWriteUsdPerMTok ?? pricing.inputUsdPerMTok);
+
+  return {
+    totalUsd: inputUsd + outputUsd + cachedReadUsd + cachedWriteUsd,
+    inputUsd,
+    outputUsd,
+    cachedReadUsd,
+    cachedWriteUsd,
+  };
 }
 
 function stringifyToolOutput(output: unknown): string {

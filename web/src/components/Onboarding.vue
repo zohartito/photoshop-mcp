@@ -12,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import AdobeAppIcon from '@/components/AdobeAppIcon.vue';
 import {
   apiListProviders,
   apiSaveKey,
@@ -63,7 +64,7 @@ async function submit(): Promise<void> {
   <div class="flex min-h-screen items-center justify-center p-6">
     <Card class="w-full max-w-md">
       <CardHeader>
-        <img src="/ps-logo-icon.svg" alt="Photoshop" class="mb-2 h-10 w-10" />
+        <AdobeAppIcon app="ps" :size="40" class="mb-2" />
         <CardTitle>Connect an AI provider</CardTitle>
         <CardDescription>
           Photoshop MCP UI uses your own API key to talk to a model. The key is stored

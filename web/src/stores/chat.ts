@@ -1,4 +1,4 @@
-import { reactive, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import {
   abortChat,
   apiCreateChat,
@@ -10,6 +10,8 @@ import {
   type ChatSummary,
   type PersistedToolCall,
   type ProviderId,
+  type UsageCost,
+  type UsageDetails,
 } from '@/lib/api';
 
 export interface ToolCall extends PersistedToolCall {}
@@ -19,6 +21,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   text: string;
   toolCalls: ToolCall[];
+  usage?: UsageDetails;
+  cost?: UsageCost;
   createdAt: number;
 }
 
@@ -30,9 +34,42 @@ export interface ChatStreamEventPayload {
   ok?: boolean;
   content?: string;
   finishReason?: string;
-  usage?: { totalTokens?: number };
+  usage?: UsageDetails;
+  cost?: UsageCost;
   message?: string;
 }
+
+export interface ChatTotals {
+  totalUsd: number;
+  inputUsd: number;
+  outputUsd: number;
+  cachedReadUsd: number;
+  cachedWriteUsd: number;
+  totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedReadTokens: number;
+  cachedWriteTokens: number;
+  reasoningTokens: number;
+  assistantTurns: number;
+  pricedTurns: number;
+}
+
+const EMPTY_TOTALS: ChatTotals = {
+  totalUsd: 0,
+  inputUsd: 0,
+  outputUsd: 0,
+  cachedReadUsd: 0,
+  cachedWriteUsd: 0,
+  totalTokens: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  cachedReadTokens: 0,
+  cachedWriteTokens: 0,
+  reasoningTokens: 0,
+  assistantTurns: 0,
+  pricedTurns: 0,
+};
 
 export function useChatStore() {
   const chats = ref<ChatSummary[]>([]);
@@ -40,9 +77,34 @@ export function useChatStore() {
   const messages = reactive<ChatMessage[]>([]);
   const sending = ref(false);
   const error = ref<string | null>(null);
-  const lastResult = ref<{ tokens?: number } | null>(null);
   let activeRequestId: string | null = null;
   let abortController: AbortController | null = null;
+
+  const chatTotals = computed<ChatTotals>(() => {
+    const totals: ChatTotals = { ...EMPTY_TOTALS };
+    for (const m of messages) {
+      if (m.role !== 'assistant') continue;
+      if (!m.usage && !m.cost) continue;
+      totals.assistantTurns += 1;
+      if (m.cost) {
+        totals.pricedTurns += 1;
+        totals.totalUsd += m.cost.totalUsd;
+        totals.inputUsd += m.cost.inputUsd;
+        totals.outputUsd += m.cost.outputUsd;
+        totals.cachedReadUsd += m.cost.cachedReadUsd;
+        totals.cachedWriteUsd += m.cost.cachedWriteUsd;
+      }
+      if (m.usage) {
+        totals.totalTokens += m.usage.totalTokens ?? 0;
+        totals.inputTokens += m.usage.inputTokens ?? 0;
+        totals.outputTokens += m.usage.outputTokens ?? 0;
+        totals.cachedReadTokens += m.usage.inputTokenDetails?.cacheReadTokens ?? 0;
+        totals.cachedWriteTokens += m.usage.inputTokenDetails?.cacheWriteTokens ?? 0;
+        totals.reasoningTokens += m.usage.outputTokenDetails?.reasoningTokens ?? 0;
+      }
+    }
+    return totals;
+  });
 
   async function loadChats(): Promise<void> {
     chats.value = await apiListChats();
@@ -52,7 +114,6 @@ export function useChatStore() {
     activeChatId.value = id;
     messages.splice(0, messages.length);
     error.value = null;
-    lastResult.value = null;
     const detail = await apiGetChat(id);
     for (const m of detail.messages) {
       messages.push({
@@ -60,6 +121,8 @@ export function useChatStore() {
         role: m.role,
         text: m.content.text,
         toolCalls: m.content.toolCalls ?? [],
+        usage: m.content.usage,
+        cost: m.content.cost,
         createdAt: m.createdAt,
       });
     }
@@ -71,7 +134,6 @@ export function useChatStore() {
     activeChatId.value = created.id;
     messages.splice(0, messages.length);
     error.value = null;
-    lastResult.value = null;
     return created;
   }
 
@@ -131,7 +193,9 @@ export function useChatStore() {
         tc.status = data.ok ? 'success' : 'error';
       }
     } else if (event === 'finish') {
-      lastResult.value = { tokens: data.usage?.totalTokens };
+      const m = ensureAssistantMessage();
+      if (data.usage) m.usage = data.usage;
+      if (data.cost) m.cost = data.cost;
     } else if (event === 'error') {
       error.value = data.message ?? 'Unknown error';
     }
@@ -143,7 +207,6 @@ export function useChatStore() {
 
     sending.value = true;
     error.value = null;
-    lastResult.value = null;
 
     messages.push({
       id: crypto.randomUUID(),
@@ -194,7 +257,7 @@ export function useChatStore() {
     messages,
     sending,
     error,
-    lastResult,
+    chatTotals,
     loadChats,
     selectChat,
     newChat,

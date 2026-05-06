@@ -2,9 +2,25 @@ import type { LanguageModel } from 'ai';
 
 export type ProviderId = 'anthropic' | 'openai' | 'openrouter';
 
+export interface ModelPricing {
+  inputUsdPerMTok: number;
+  outputUsdPerMTok: number;
+  cachedInputUsdPerMTok?: number;
+  cachedWriteUsdPerMTok?: number;
+}
+
 export interface ProviderModel {
   id: string;
   label: string;
+  pricing?: ModelPricing;
+}
+
+export interface UsageCost {
+  totalUsd: number;
+  inputUsd: number;
+  outputUsd: number;
+  cachedReadUsd: number;
+  cachedWriteUsd: number;
 }
 
 export interface ApiKeyValidation {
@@ -22,4 +38,5 @@ export interface ProviderAdapter {
   listModels(): ProviderModel[];
   defaultModel(): string;
   getLanguageModel(opts: { apiKey: string; modelId: string }): LanguageModel;
+  getModelPricing(modelId: string): ModelPricing | undefined;
 }

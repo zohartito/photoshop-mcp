@@ -1,10 +1,39 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
-import type { ProviderAdapter } from './types.js';
+import type { ProviderAdapter, ProviderModel } from './types.js';
 
-const MODELS = [
-  { id: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
-  { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
-  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+// Public list pricing (USD per 1M tokens). Cache-write reflects the 5-minute
+// tier; we don't currently differentiate the 1-hour tier.
+const MODELS: ProviderModel[] = [
+  {
+    id: 'claude-opus-4-5',
+    label: 'Claude Opus 4.5',
+    pricing: {
+      inputUsdPerMTok: 5,
+      outputUsdPerMTok: 25,
+      cachedInputUsdPerMTok: 0.5,
+      cachedWriteUsdPerMTok: 6.25,
+    },
+  },
+  {
+    id: 'claude-sonnet-4-5',
+    label: 'Claude Sonnet 4.5',
+    pricing: {
+      inputUsdPerMTok: 3,
+      outputUsdPerMTok: 15,
+      cachedInputUsdPerMTok: 0.3,
+      cachedWriteUsdPerMTok: 3.75,
+    },
+  },
+  {
+    id: 'claude-haiku-4-5',
+    label: 'Claude Haiku 4.5',
+    pricing: {
+      inputUsdPerMTok: 1,
+      outputUsdPerMTok: 5,
+      cachedInputUsdPerMTok: 0.1,
+      cachedWriteUsdPerMTok: 1.25,
+    },
+  },
 ];
 
 export const anthropicAdapter: ProviderAdapter = {
@@ -30,12 +59,15 @@ export const anthropicAdapter: ProviderAdapter = {
     }
   },
   listModels() {
-    return [...MODELS];
+    return MODELS.map((m) => ({ ...m }));
   },
   defaultModel() {
     return 'claude-sonnet-4-5';
   },
   getLanguageModel({ apiKey, modelId }) {
     return createAnthropic({ apiKey })(modelId);
+  },
+  getModelPricing(modelId) {
+    return MODELS.find((m) => m.id === modelId)?.pricing;
   },
 };

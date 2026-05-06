@@ -99,6 +99,9 @@
 }
 
 @layer base {
+  :root {
+    --font-mnemonic: "Source Sans 3 Variable", "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  }
   * {
     @apply border-border outline-ring/50;
   }

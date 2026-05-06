@@ -4,12 +4,12 @@ import { MessageSquarePlus, MoreHorizontal, Pencil, Settings2, Trash2 } from 'lu
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
+import AdobeAppIcon, { type AdobeApp as AdobeAppId } from '@/components/AdobeAppIcon.vue';
 import type { ChatSummary } from '@/lib/api';
 
 interface AdobeApp {
-  id: string;
+  id: AdobeAppId;
   name: string;
-  icon: string;
   active: boolean;
 }
 
@@ -31,13 +31,13 @@ const renamingId = ref<string | null>(null);
 const renameDraft = ref('');
 
 const adobeApps: AdobeApp[] = [
-  { id: 'ps', name: 'Photoshop', icon: '/ps-logo-icon.svg', active: true },
-  { id: 'ai', name: 'Illustrator', icon: '/adobe-ai-icon.svg', active: false },
-  { id: 'ae', name: 'After Effects', icon: '/adobe-ae-icon.svg', active: false },
-  { id: 'pr', name: 'Premiere Pro', icon: '/adobe-pr-icon.svg', active: false },
-  { id: 'id', name: 'InDesign', icon: '/adobe-id-icon.svg', active: false },
-  { id: 'xd', name: 'XD', icon: '/adobe-xd-icon.svg', active: false },
-  { id: 'lr', name: 'Lightroom', icon: '/adobe-lr-icon.svg', active: false },
+  { id: 'ps', name: 'Photoshop', active: true },
+  { id: 'ai', name: 'Illustrator', active: false },
+  { id: 'ae', name: 'After Effects', active: false },
+  { id: 'pr', name: 'Premiere Pro', active: false },
+  { id: 'id', name: 'InDesign', active: false },
+  { id: 'xd', name: 'XD', active: false },
+  { id: 'lr', name: 'Lightroom', active: false },
 ];
 
 function toggleMenu(id: string, event: Event): void {
@@ -90,7 +90,7 @@ function formatDate(ts: number): string {
             class="flex items-center gap-2 rounded-md transition-colors hover:bg-accent/50 p-1 -ml-1"
             title="Adobe Creative Cloud Apps"
           >
-            <img src="/ps-logo-icon.svg" alt="Photoshop" class="size-7" />
+            <AdobeAppIcon app="ps" :size="28" />
             <span class="text-sm font-semibold">Photoshop MCP</span>
           </button>
         </PopoverTrigger>
@@ -110,7 +110,7 @@ function formatDate(ts: number): string {
                 class="group relative flex flex-col items-center gap-2 rounded-lg border border-border p-3 transition-all hover:border-primary/50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-border"
                 :class="{ 'border-primary bg-primary/5': app.active }"
               >
-                <img :src="app.icon" :alt="app.name" class="size-8" />
+                <AdobeAppIcon :app="app.id" :size="32" />
                 <span class="text-xs text-center">{{ app.name }}</span>
                 <Badge
                   v-if="!app.active"

@@ -5,7 +5,12 @@ import { readFile, stat } from 'node:fs/promises';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Logger } from '../utils/logger.js';
-import { buildHistory, runChat, type AssistantBuffer } from './agent.js';
+import {
+  buildHistory,
+  runChat,
+  type AssistantBuffer,
+  type RunChatFinishInfo,
+} from './agent.js';
 import {
   loadConfig,
   maskApiKey,
@@ -256,6 +261,7 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
 
     return streamSSE(c, async (stream) => {
       let buffer: AssistantBuffer = { text: '', toolCalls: [] };
+      let lastFinish: RunChatFinishInfo | null = null;
       let assistantPersisted = false;
 
       const persistAssistant = () => {
@@ -264,7 +270,12 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
         appendMessage({
           chatId: chat.id,
           role: 'assistant',
-          content: { text: buffer.text, toolCalls: buffer.toolCalls },
+          content: {
+            text: buffer.text,
+            toolCalls: buffer.toolCalls,
+            ...(lastFinish?.usage ? { usage: lastFinish.usage } : {}),
+            ...(lastFinish?.cost ? { cost: lastFinish.cost } : {}),
+          },
         });
         assistantPersisted = true;
       };
@@ -280,6 +291,9 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
           abortSignal: controller.signal,
           onAssistantBuffer: (b) => {
             buffer = b;
+          },
+          onFinish: (info) => {
+            lastFinish = info;
           },
         });
 

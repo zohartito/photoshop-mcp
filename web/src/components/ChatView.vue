@@ -44,7 +44,7 @@ async function onModelChange(modelId: string): Promise<void> {
 
 <template>
   <div class="flex h-screen flex-col">
-    <StatusBar :chat="activeChat" />
+    <StatusBar :chat="activeChat" :totals="activeChat ? props.store.chatTotals.value : null" />
 
     <div v-if="!activeChat" class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
       <p class="text-sm text-muted-foreground">Select a chat from the sidebar or start a new one.</p>
