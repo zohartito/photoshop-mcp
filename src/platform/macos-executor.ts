@@ -116,11 +116,13 @@ end tell`;
   private parseResult(output: string): unknown {
     const trimmed = output.trim();
 
-    // Try to parse as JSON
+    if (trimmed.startsWith('ERROR:')) {
+      throw new Error(trimmed.substring(6).trim());
+    }
+
     try {
       return JSON.parse(trimmed);
     } catch {
-      // Return as string if not JSON
       return trimmed;
     }
   }

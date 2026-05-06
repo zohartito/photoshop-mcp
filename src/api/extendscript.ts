@@ -289,19 +289,52 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Fill layer with color
+   * Fill the active layer with a solid RGB color.
+   *
+   * ArtLayer has no fillPath() method (that exists on PathItem only).
+   * The correct approach is Selection.fill(): preserve any existing
+   * selection, otherwise select the whole canvas, fill, then deselect.
+   * Background / fully-locked layers cannot be filled, so fail clearly.
    */
   fillLayer: (red: number, green: number, blue: number) => `
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
+    var layer = doc.activeLayer;
+
+    if (layer.allLocked) {
+      throw new Error('Cannot fill a fully locked layer: ' + layer.name);
+    }
+    if (layer.kind === LayerKind.TEXT) {
+      throw new Error('Cannot fill a text layer. Rasterize it first.');
+    }
+
     var color = new SolidColor();
     color.rgb.red = ${red};
     color.rgb.green = ${green};
     color.rgb.blue = ${blue};
-    doc.activeLayer.fillPath(color);
-    return { filled: true };
+
+    var hadSelection = false;
+    try {
+      hadSelection = doc.selection.bounds != null;
+    } catch (e) {
+      hadSelection = false;
+    }
+
+    if (!hadSelection) {
+      doc.selection.selectAll();
+    }
+    doc.selection.fill(color);
+    if (!hadSelection) {
+      doc.selection.deselect();
+    }
+
+    return {
+      filled: true,
+      layerName: layer.name,
+      color: { red: ${red}, green: ${green}, blue: ${blue} }
+    };
   `,
 
   /**
