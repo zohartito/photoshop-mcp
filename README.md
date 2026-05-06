@@ -8,6 +8,59 @@
 
 A Model Context Protocol (MCP) server that enables AI assistants like Claude and Cursor to control Adobe Photoshop programmatically. This allows you to create designs, manipulate images, and automate Photoshop workflows through natural language commands while working in your IDE.
 
+## 🖥️ Standalone UI (no IDE required)
+
+Don't want to wire this into Claude Desktop or Cursor? The same package ships a
+fully local web UI that lets you chat with an AI model and drive Photoshop
+through this MCP server underneath.
+
+```bash
+npx -p @alisaitteke/photoshop-mcp photoshop-mcp-ui
+```
+
+That's it. A local server starts on `127.0.0.1` (random free port) and your
+default browser opens the chat UI automatically.
+
+### Supported providers
+
+Pick any of the following on first launch — bring your own API key:
+
+| Provider | Models | Get a key |
+|---|---|---|
+| **Anthropic** | Claude Sonnet / Opus / Haiku | [console.anthropic.com](https://console.anthropic.com/settings/keys) |
+| **OpenAI** | GPT-5, GPT-4.1, o-series | [platform.openai.com](https://platform.openai.com/api-keys) |
+| **Google** | Gemini 2.5 Pro / Flash / Flash-Lite | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| **OpenRouter** | 100+ models from any provider | [openrouter.ai](https://openrouter.ai/keys) |
+
+### What happens on first launch
+
+1. Pick a provider and paste your API key.
+2. The key is validated against the provider, then stored locally at
+   `~/.photoshop-mcp/data.db` (SQLite, `chmod 600`). It never leaves your
+   machine.
+3. Type natural-language prompts. The UI streams the model's reply, runs
+   Photoshop tool calls in real time, and renders each tool call as an
+   inspectable card (input + result).
+4. Switch provider or model anytime from the model selector — chats, costs and
+   tool history are persisted across sessions.
+
+### CLI flags
+
+```
+photoshop-mcp-ui [--port 5174] [--host 127.0.0.1] [--no-open]
+```
+
+### Notes
+
+- The agent is restricted to Photoshop MCP tools only — built-in shell, file
+  and web tools are disabled.
+- Tech stack: Vue 3 + Tailwind v4 + [shadcn-vue](https://www.shadcn-vue.com/)
+  on the frontend; [Hono](https://hono.dev/) + the [Vercel AI SDK](https://sdk.vercel.ai/)
+  on the backend. The agent loop talks to this same Photoshop MCP server over
+  STDIO — same code path as the IDE integration.
+
+---
+
 ## Example Prompts
 
 Below are example prompts you can use with AI assistants (Claude, Cursor, etc.) when this MCP server is configured:
@@ -208,49 +261,6 @@ Redo 1 step to bring back one operation.
 - ✅ **Actions**: Play recorded actions, execute custom scripts
 - ✅ **Auto-Rasterize**: Automatically converts layers when needed for filters
 - ✅ **Context Tracking**: Returns document/layer state after each operation for AI context awareness
-
-## Standalone UI Mode (no IDE required)
-
-Don't want to wire this into Claude Desktop or Cursor? The same package ships an
-optional, fully local web UI that talks to Claude on your behalf and drives the
-Photoshop MCP server underneath. It's a drop-in alternative — the original MCP
-server (`photoshop-mcp`) keeps working exactly as before.
-
-```bash
-npx @alisaitteke/photoshop-mcp-ui
-```
-
-What happens:
-
-1. A local server starts on `127.0.0.1` (random free port) and your default
-   browser opens the chat UI automatically.
-2. On first launch you paste your **Anthropic API key** (`sk-ant-...`); it is
-   stored at `~/.photoshop-mcp/config.json` with `chmod 600` and never leaves
-   your machine.
-3. Type natural-language prompts; the UI streams Claude's reply, runs Photoshop
-   tool calls in real time, and renders each tool call as an inspectable card
-   (input + result).
-
-CLI flags:
-
-```
-photoshop-mcp-ui [--port 5174] [--host 127.0.0.1] [--no-open]
-```
-
-Tech stack: Vue 3 + Tailwind v4 + [shadcn-vue](https://www.shadcn-vue.com/) on the
-frontend; [Hono](https://hono.dev/) + the official
-[Claude Agent SDK](https://docs.anthropic.com/en/api/agent-sdk/typescript) on the
-backend. Claude's agent loop talks to the existing Photoshop MCP server over
-STDIO — same code path as the IDE integration.
-
-Notes:
-
-- Authentication uses **your own Anthropic API key** (per Anthropic policy,
-  Claude Pro/Max OAuth is not available to third-party apps).
-- The agent is restricted to Photoshop MCP tools only — built-in shell, file,
-  and web tools are disabled.
-
----
 
 ## Installation
 
