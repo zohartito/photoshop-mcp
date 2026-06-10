@@ -48,5 +48,8 @@ app_data
 
 *.tgz
 
+# Local planning docs (not published)
+docs/plans/
+
 # Local maintenance scripts (not published)
 scripts/add-copyright-headers.ts
