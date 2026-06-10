@@ -31,6 +31,7 @@
     "verify:photoshop-prompts": "tsx scripts/verify-photoshop-prompt-coverage.ts",
     "test:mcp-local": "tsx scripts/test-mcp-local.ts",
     "test:mcp-all": "tsx scripts/test-all-mcp-tools.ts",
+    "test:intent-expansion": "tsx scripts/test-intent-expansion-local.ts",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build"
   },
