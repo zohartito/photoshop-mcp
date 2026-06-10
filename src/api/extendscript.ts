@@ -21,6 +21,7 @@ function getContextInfo() {
   };
   
   if (context.hasDocument) {
+    try {
     var doc = app.activeDocument;
     context.document = {
       name: doc.name,
@@ -39,30 +40,39 @@ function getContextInfo() {
       })()
     };
     
-    if (doc.activeLayer) {
-      var layer = doc.activeLayer;
-      context.activeLayer = {
-        name: layer.name,
-        kind: String(layer.kind),
-        opacity: layer.opacity,
-        blendMode: String(layer.blendMode),
-        visible: layer.visible,
-        locked: layer.allLocked,
-        isBackground: layer.isBackgroundLayer
-      };
-      
-      // Add bounds if available
-      try {
-        var bounds = layer.bounds;
-        context.activeLayer.bounds = {
-          left: bounds[0].as('px'),
-          top: bounds[1].as('px'),
-          right: bounds[2].as('px'),
-          bottom: bounds[3].as('px')
+    try {
+      if (doc.activeLayer) {
+        var layer = doc.activeLayer;
+        context.activeLayer = {
+          name: layer.name,
+          kind: String(layer.kind),
+          opacity: layer.opacity,
+          blendMode: String(layer.blendMode),
+          visible: layer.visible,
+          locked: layer.allLocked
         };
-      } catch (e) {
-        // Bounds not available for some layer types
+        try {
+          context.activeLayer.isBackground = layer.isBackgroundLayer;
+        } catch (e) {
+          context.activeLayer.isBackground = false;
+        }
+        try {
+          var bounds = layer.bounds;
+          context.activeLayer.bounds = {
+            left: bounds[0].as('px'),
+            top: bounds[1].as('px'),
+            right: bounds[2].as('px'),
+            bottom: bounds[3].as('px')
+          };
+        } catch (e) {
+          // Bounds not available for some layer types
+        }
       }
+    } catch (e) {
+      context.activeLayer = null;
+    }
+    } catch (e) {
+      context.document = { error: e.message || String(e) };
     }
   }
   
@@ -1548,6 +1558,60 @@ export const ExtendScriptSnippets = {
       context: getContextInfo()
     };
     return result;
+  `,
+
+  /**
+   * Lightweight session state snapshot (read-only).
+   */
+  getState: () => `
+    ${getContextInfo}
+    return getContextInfo();
+  `,
+
+  /**
+   * Export a JPEG preview to the system temp folder. Returns filesystem path for Node to read.
+   */
+  exportPreview: (maxDimension = 1024, jpegQuality = 8) => `
+    ${getContextInfo}
+
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+
+    var doc = app.activeDocument;
+    var w = doc.width.as('px');
+    var h = doc.height.as('px');
+    var maxDim = ${maxDimension};
+    var scale = 1;
+    if (w > maxDim || h > maxDim) {
+      scale = maxDim / Math.max(w, h);
+    }
+
+    var dup = doc.duplicate('__mcp_preview__', true);
+    if (scale < 1) {
+      dup.resizeImage(
+        UnitValue(Math.round(w * scale), 'px'),
+        UnitValue(Math.round(h * scale), 'px'),
+        doc.resolution,
+        ResampleMethod.BICUBIC
+      );
+    }
+
+    var tmpFile = new File(Folder.temp.fsName + '/ps-preview-' + (new Date().getTime()) + '.jpg');
+    var saveOptions = new JPEGSaveOptions();
+    saveOptions.quality = ${jpegQuality};
+    saveOptions.embedColorProfile = true;
+    saveOptions.formatOptions = FormatOptions.STANDARDBASELINE;
+    dup.flatten();
+    dup.saveAs(tmpFile, saveOptions, true);
+    dup.close(SaveOptions.DONOTSAVECHANGES);
+
+    return {
+      path: tmpFile.fsName,
+      width: Math.round(w * scale),
+      height: Math.round(h * scale),
+      mimeType: 'image/jpeg'
+    };
   `,
 };
 

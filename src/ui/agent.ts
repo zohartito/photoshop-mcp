@@ -4,6 +4,8 @@ import { stepCountIs, streamText, type LanguageModelUsage, type ModelMessage } f
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ModelPricing, ProviderAdapter, UsageCost } from './providers/registry.js';
+import { buildPhotoshopInstructions } from '../prompts/instructions.js';
+import { PHOTOSHOP_EXPORT_CHAT_ID_ENV } from '../lib/export-paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -44,6 +46,7 @@ export interface RunChatOptions {
   provider: ProviderAdapter;
   apiKey: string;
   modelId: string;
+  chatId?: string;
   abortSignal: AbortSignal;
   onAssistantBuffer?: (buf: AssistantBuffer) => void;
   onFinish?: (info: RunChatFinishInfo) => void;
@@ -51,16 +54,16 @@ export interface RunChatOptions {
 
 export const PHOTOSHOP_SYSTEM_PROMPT = `
 You are an assistant that controls Adobe Photoshop on the user's machine through
-the "photoshop" MCP server. Use the photoshop_* tools to fulfill the user's
-request: open documents, manage layers, place images, apply filters, write text,
-save files, and so on.
+the photoshop-mcp server. Use photoshop_* tools and photoshop_recipe_* recipes
+to fulfill requests: open documents, manage layers, place images, apply filters,
+write text, save files, and run multi-step workflows.
 
-Guidelines:
-- Start with photoshop_ping when you are unsure whether Photoshop is reachable.
-- Prefer single, well-scoped tool calls instead of long combined operations.
+${buildPhotoshopInstructions()}
+
+Additional UI constraints:
 - After meaningful state changes, briefly describe in plain language what you did.
-- If a tool call fails, surface the error to the user and ask for confirmation
-  before retrying or trying an alternative.
+- If a tool call fails, surface the error envelope to the user and follow
+  suggested_next_tool when present before asking the user to retry.
 - Only Photoshop MCP tools are available. Do not attempt shell, filesystem,
   web, or general coding operations; respond in natural language instead.
 `.trim();
@@ -77,7 +80,11 @@ export async function* runChat(opts: RunChatOptions): AsyncGenerator<RunChatStre
       transport: new Experimental_StdioMCPTransport({
         command: process.execPath,
         args: spawnArgs,
-        env: { ...sanitizedEnv(), LOG_LEVEL: process.env.LOG_LEVEL ?? '2' },
+        env: {
+          ...sanitizedEnv(),
+          LOG_LEVEL: process.env.LOG_LEVEL ?? '2',
+          ...(opts.chatId ? { [PHOTOSHOP_EXPORT_CHAT_ID_ENV]: opts.chatId } : {}),
+        },
       }),
     });
 

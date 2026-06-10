@@ -8,7 +8,12 @@ export function createDocumentTools(connection: PhotoshopConnection): ToolDefini
     {
       tool: {
         name: 'photoshop_create_document',
-        description: 'Create a new Photoshop document with specified dimensions',
+        description:
+          'Create a new empty Photoshop document with specified dimensions and color mode.\n\n' +
+          'Use when: starting a design from scratch or no document is open.\n' +
+          'Do NOT use when: opening an existing file — use photoshop_open_image.\n\n' +
+          'Returns: created document id and name.\n' +
+          'Preconditions: none. Side effects: creates a new document and makes it active.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -53,7 +58,12 @@ export function createDocumentTools(connection: PhotoshopConnection): ToolDefini
     {
       tool: {
         name: 'photoshop_save_document',
-        description: 'Save the active document in specified format',
+        description:
+          'Save the active document to disk in PSD, JPEG, or PNG format.\n\n' +
+          'Use when: user requests export/save with a specific path and format.\n' +
+          'Do NOT use when: web-optimized resize+sharpen pipeline is needed — use photoshop_recipe_prepare_for_web.\n\n' +
+          'Returns: confirmation with saved path and format.\n' +
+          'Preconditions: active document; path required. Side effects: writes file to disk.',
         inputSchema: {
           type: 'object',
           properties: {

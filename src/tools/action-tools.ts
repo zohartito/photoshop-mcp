@@ -29,7 +29,12 @@ export function createActionTools(connection: PhotoshopConnection): ToolDefiniti
     {
       tool: {
         name: 'photoshop_execute_script',
-        description: 'Execute custom ExtendScript code (advanced)',
+        description:
+          'Execute custom ExtendScript (JSX) code inside Photoshop (advanced escape hatch).\n\n' +
+          'Use when: no existing tool covers the operation and you can write safe JSX.\n' +
+          'Do NOT use when: a recipe or atomic tool exists — prefer photoshop_recipe_* or photoshop_* tools.\n\n' +
+          'Returns: script return value serialized as text/JSON.\n' +
+          'Preconditions: valid ExtendScript; active document if script expects one. Side effects: depends on code.',
         inputSchema: {
           type: 'object',
           properties: {

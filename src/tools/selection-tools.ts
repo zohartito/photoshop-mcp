@@ -8,7 +8,12 @@ export function createSelectionTools(connection: PhotoshopConnection): ToolDefin
     {
       tool: {
         name: 'photoshop_select_rectangle',
-        description: 'Create a rectangular selection',
+        description:
+          'Create a rectangular pixel selection from corner coordinates.\n\n' +
+          'Use when: masking, cropping a region, or preparing for layer mask.\n' +
+          'Do NOT use when: subject isolation is needed — use photoshop_recipe_remove_background.\n\n' +
+          'Returns: selection bounds [left, top, right, bottom].\n' +
+          'Preconditions: active document. Side effects: replaces current selection.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -70,7 +75,12 @@ export function createSelectionTools(connection: PhotoshopConnection): ToolDefin
     {
       tool: {
         name: 'photoshop_create_layer_mask',
-        description: 'Create a layer mask from the current selection',
+        description:
+          'Create a layer mask on the active layer from the current selection (reveal selection).\n\n' +
+          'Use when: non-destructive hide/show after a selection exists.\n' +
+          'Do NOT use when: no selection exists — create selection first or use remove_background recipe.\n\n' +
+          'Returns: maskCreated confirmation.\n' +
+          'Preconditions: active document and active selection. Side effects: adds mask to active layer.',
         inputSchema: {
           type: 'object',
           properties: {},

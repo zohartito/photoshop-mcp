@@ -63,6 +63,34 @@ photoshop-mcp-ui [--port 5174] [--host 127.0.0.1] [--no-open]
 
 ---
 
+## AI/Prompt Layer for Photoshop
+
+On top of 55 atomic `photoshop_*` tools, the server ships an opinionated AI/prompt
+layer that helps host LLMs (Cursor, Claude Desktop, etc.) translate vague user
+requests into reliable Photoshop actions:
+
+- **Server `instructions`** — workflow contract advertised on MCP `initialize`
+  (ping once, state-before-action, prefer recipes, error recovery). See
+  [`src/prompts/instructions.ts`](src/prompts/instructions.ts).
+- **MCP `prompts` primitive** — 8 pre-engineered templates (`ps.enhance_portrait`,
+  `ps.remove_background`, `ps.prepare_for_web`, …) via `prompts/list` and
+  `prompts/get`.
+- **Recipe tools** — 7 outcome-oriented `photoshop_recipe_*` tools (remove
+  background, enhance portrait, prepare for web, export social variants, color
+  grade, batch mockup, organize layers). Each wraps steps in a single Photoshop
+  history state (one Undo reverts all).
+- **State & preview** — `photoshop_get_state` (cheap snapshot),
+  `photoshop_get_preview` (base64 JPEG for vision verification),
+  `photoshop_get_capabilities` (version-aware feature flags).
+- **Structured errors** — failures return JSON envelopes with `code` and
+  `suggested_next_tool` for self-correction.
+
+Full reference: [`docs/prompt-layer.md`](docs/prompt-layer.md).
+
+Verify parity: `npm run verify:photoshop-prompts`
+
+---
+
 ## Example Prompts
 
 Below are example prompts you can use with AI assistants (Claude, Cursor, etc.) when this MCP server is configured:

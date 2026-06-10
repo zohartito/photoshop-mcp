@@ -8,7 +8,12 @@ export function createImagePlacementTools(connection: PhotoshopConnection): Tool
     {
       tool: {
         name: 'photoshop_place_image',
-        description: 'Place an image file as a layer in the active document',
+        description:
+          'Place an external image file as a new layer in the active document.\n\n' +
+          'Use when: compositing assets into an open document at a specific offset.\n' +
+          'Do NOT use when: opening a file as a new document — use photoshop_open_image.\n\n' +
+          'Returns: placed layer name, bounds, and context.\n' +
+          'Preconditions: active document; file must exist. Side effects: adds a new layer.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -35,7 +40,12 @@ export function createImagePlacementTools(connection: PhotoshopConnection): Tool
     {
       tool: {
         name: 'photoshop_open_image',
-        description: 'Open an image file as a new document',
+        description:
+          'Open an image file as a new Photoshop document.\n\n' +
+          'Use when: user provides a file path to edit or no document is open yet.\n' +
+          'Do NOT use when: adding to an existing composite — use photoshop_place_image.\n\n' +
+          'Returns: document id, name, width, height.\n' +
+          'Preconditions: file must exist on disk. Side effects: opens document as active.',
         inputSchema: {
           type: 'object',
           properties: {

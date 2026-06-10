@@ -67,4 +67,19 @@ export class PhotoshopDetector {
   getRecommendedAPI(version: string): 'UXP' | 'ExtendScript' {
     return this.supportsUXP(version) ? 'UXP' : 'ExtendScript';
   }
+
+  /** Select Subject v2 ("autoCutout") shipped with PS 23.0 (2022). */
+  supportsSelectSubjectV2(version: string): boolean {
+    const versionMatch = version.match(/(\d+)\.?(\d*)/);
+    if (versionMatch) {
+      const major = parseInt(versionMatch[1], 10);
+      const minor = versionMatch[2] ? parseInt(versionMatch[2], 10) : 0;
+      return major > 23 || (major === 23 && minor >= 0);
+    }
+    const yearMatch = version.match(/20(\d{2})/);
+    if (yearMatch) {
+      return parseInt(`20${yearMatch[1]}`, 10) >= 2022;
+    }
+    return false;
+  }
 }

@@ -290,6 +290,7 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
           provider,
           apiKey,
           modelId: chat.model,
+          chatId: chat.id,
           abortSignal: controller.signal,
           onAssistantBuffer: (b) => {
             buffer = b;

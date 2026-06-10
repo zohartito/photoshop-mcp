@@ -8,7 +8,12 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
     {
       tool: {
         name: 'photoshop_create_layer',
-        description: 'Create a new layer in the active document',
+        description:
+          'Create a new empty layer above the active layer.\n\n' +
+          'Use when: user needs a blank layer for painting, fills, or stacking content.\n' +
+          'Do NOT use when: adding text — use photoshop_create_text_layer.\n\n' +
+          'Returns: created layer name and context.\n' +
+          'Preconditions: active document. Side effects: adds layer to history.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -35,7 +40,12 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
     {
       tool: {
         name: 'photoshop_create_text_layer',
-        description: 'Create a text layer with specified content',
+        description:
+          'Create a text layer with content, position, and font size.\n\n' +
+          'Use when: adding labels, titles, or typography to the design.\n' +
+          'Do NOT use when: editing existing text — use photoshop_update_text_content.\n\n' +
+          'Returns: layer name, text, position, fontSize, context.\n' +
+          'Preconditions: active document. Side effects: adds text layer.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -98,7 +108,12 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
     {
       tool: {
         name: 'photoshop_get_layers',
-        description: 'Get list of all layers in the active document',
+        description:
+          'List all layers in the active document with kind, visibility, and opacity.\n\n' +
+          'Use when: choosing a layer to edit, debugging structure, or after organize_layers.\n' +
+          'Do NOT use when: only session summary is needed — use photoshop_get_state (lighter).\n\n' +
+          'Returns: layerCount, layers array, context.\n' +
+          'Preconditions: active document. Side effects: none.',
         inputSchema: {
           type: 'object',
           properties: {},

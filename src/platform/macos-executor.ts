@@ -4,6 +4,7 @@ import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Logger } from '../utils/logger.js';
+import { parseExtendScriptPayload } from '../utils/extendscript-result.js';
 import { ScriptExecutor } from './script-executor.js';
 
 const execAsync = promisify(exec);
@@ -120,11 +121,7 @@ end tell`;
       throw new Error(trimmed.substring(6).trim());
     }
 
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      return trimmed;
-    }
+    return parseExtendScriptPayload(trimmed);
   }
 
   async isPhotoshopRunning(): Promise<boolean> {
