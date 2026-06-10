@@ -75,13 +75,14 @@ requests into reliable Photoshop actions:
 - **Server `instructions`** — workflow contract advertised on MCP `initialize`
   (ping once, state-before-action, prefer recipes, error recovery). See
   [`src/prompts/instructions.ts`](src/prompts/instructions.ts).
-- **MCP `prompts` primitive** — 8 pre-engineered templates (`ps.enhance_portrait`,
-  `ps.remove_background`, `ps.prepare_for_web`, …) via `prompts/list` and
-  `prompts/get`.
-- **Recipe tools** — 8 outcome-oriented `photoshop_recipe_*` tools (remove
+- **MCP `prompts` primitive** — 16 pre-engineered templates (12 recipe + 4 guide:
+  `ps.enhance_portrait`, `ps.remove_background`, `ps.gradient_fade`, `ps.sky_blend`, …)
+  via `prompts/list` and `prompts/get`.
+- **Recipe tools** — 12 outcome-oriented `photoshop_recipe_*` tools (remove
   background, enhance portrait, prepare for web, export social variants, color
-  grade, frequency separation, batch mockup, organize layers). Each wraps steps
-  in a single Photoshop history state (one Undo reverts all).
+  grade, frequency separation, batch mockup, organize layers, gradient fade,
+  sky blend, dodge & burn, remove distraction). Each wraps steps in a single
+  Photoshop history state (one Undo reverts all).
 - **State & preview** — `photoshop_get_state` (cheap snapshot),
   `photoshop_get_preview` (base64 JPEG for vision verification),
   `photoshop_get_capabilities` (version-aware feature flags).
@@ -101,8 +102,8 @@ Local MCP integration tests run against a live Photoshop instance over stdio
 | Suite | Command | Result |
 |-------|---------|--------|
 | Full tool + recipe sweep | `npm run test:mcp-all` | **94 pass**, **0 fail**, **3 skip** (97 total) |
-| Prompt-layer smoke | `npm run test:mcp-local` | 8/8 prompt templates + core recipes |
-| Prompt ↔ recipe parity | `npm run verify:photoshop-prompts` | 8↔8 strict match |
+| Prompt-layer smoke | `npm run test:mcp-local` | 16 prompt templates + core recipes |
+| Prompt ↔ recipe parity | `npm run verify:photoshop-prompts` | 12↔12 strict match + 4 guides |
 
 **Tool coverage:** 66/66 atomic + recipe `photoshop_*` tools exercised sequentially.
 
@@ -423,7 +424,7 @@ Never guess — read get_state after a failure and propose the next single step.
 - ✅ **ExtendScript API**: Universal compatibility via AppleScript/COM automation
 - ✅ **Auto-Detection**: Automatically finds Photoshop installation on your system
 - ✅ **66+ Tools**: Atomic `photoshop_*` tools plus 8 recipe tools for comprehensive automation
-- ✅ **AI/Prompt Layer**: 8 MCP prompt templates, server instructions, state/preview/capabilities tools
+- ✅ **AI/Prompt Layer**: 16 MCP prompt templates (12 recipe + 4 guide), server instructions, state/preview/capabilities tools
 - ✅ **Document Management**: Create, open, save, close, crop documents
 - ✅ **Layer Operations**: Create, delete, duplicate, merge, transform layers
 - ✅ **Layer Properties**: Opacity, blend modes, visibility, locking

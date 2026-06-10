@@ -7,7 +7,7 @@ import {
 export const frequencySeparationTemplate: PhotoshopPromptTemplate = {
   name: 'ps.frequency_separation',
   description:
-    'Set up a frequency separation stack on the active layer (Low Frequency + High Frequency layers) so the user can smooth tones and retouch texture independently — without applying any actual smoothing.',
+    'Set up a frequency separation stack on the active layer (Low Frequency + High Frequency layers) so the user can smooth tones and retouch texture independently — without applying any actual smoothing. Users often say: frequency separation, split texture and color.',
   arguments: [
     {
       name: 'radius_px',

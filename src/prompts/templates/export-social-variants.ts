@@ -24,7 +24,7 @@ const DEFAULT_PLATFORMS = ['instagram_post', 'instagram_story', 'x_post'];
 export const exportSocialVariantsTemplate: PhotoshopPromptTemplate = {
   name: 'ps.export_social_variants',
   description:
-    "Generate one JPEG per social-media platform from the active document, each at the platform's recommended dimensions, with sensible center-crop fallback.",
+    "Generate one JPEG per social-media platform from the active document, each at the platform's recommended dimensions, with sensible center-crop fallback. Users often say: for Instagram, social export, export variants.",
   arguments: [
     {
       name: 'platforms',

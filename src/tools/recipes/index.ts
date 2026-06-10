@@ -8,6 +8,10 @@ import { bindApplyColorGrade } from './apply-color-grade.js';
 import { bindFrequencySeparation } from './frequency-separation.js';
 import { bindBatchMockupReplace } from './batch-mockup-replace.js';
 import { bindOrganizeLayers } from './organize-layers.js';
+import { bindGradientFade } from './gradient-fade.js';
+import { bindSkyBlend } from './sky-blend.js';
+import { bindDodgeBurn } from './dodge-burn.js';
+import { bindRemoveDistraction } from './remove-distraction.js';
 
 export function createRecipeTools(connection: PhotoshopConnection): ToolDefinition[] {
   return [
@@ -19,6 +23,10 @@ export function createRecipeTools(connection: PhotoshopConnection): ToolDefiniti
     bindFrequencySeparation(connection),
     bindBatchMockupReplace(connection),
     bindOrganizeLayers(connection),
+    bindGradientFade(connection),
+    bindSkyBlend(connection),
+    bindDodgeBurn(connection),
+    bindRemoveDistraction(connection),
   ];
 }
 
@@ -31,4 +39,8 @@ export const PHOTOSHOP_RECIPE_TOOL_NAMES = [
   'photoshop_recipe_frequency_separation',
   'photoshop_recipe_batch_mockup_replace',
   'photoshop_recipe_organize_layers',
+  'photoshop_recipe_gradient_fade',
+  'photoshop_recipe_sky_blend',
+  'photoshop_recipe_dodge_burn',
+  'photoshop_recipe_remove_distraction',
 ] as const;

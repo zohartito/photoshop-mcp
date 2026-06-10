@@ -1,6 +1,6 @@
 # AI / Prompt Layer for Photoshop
 
-The photoshop-mcp server exposes 55 atomic `photoshop_*` tools plus a thin
+The photoshop-mcp server exposes 59 atomic `photoshop_*` tools plus a thin
 AI/prompt layer ported from TTT: server-level instructions, MCP prompt templates,
 recipe tools, state/preview tools, version-aware capabilities, and structured
 error envelopes.
@@ -10,12 +10,15 @@ error envelopes.
 Source: [`src/prompts/instructions.ts`](../src/prompts/instructions.ts)
 
 Advertised on MCP `initialize`. Covers session bootstrap, recipe-over-atomic
-selection, `~/.photoshop-mcp/exports` conventions, and error recovery contract.
+selection, user intent glossary, degrade paths, disambiguation, guide vs recipe
+prompt discovery, `~/.photoshop-mcp/exports` conventions, and error recovery contract.
 
 ## 2. MCP `prompts` primitive
 
-Eight templates in [`src/prompts/templates/`](../src/prompts/templates/), registered via
+Sixteen templates in [`src/prompts/templates/`](../src/prompts/templates/), registered via
 [`src/prompts/registry.ts`](../src/prompts/registry.ts).
+
+### Recipe prompts (12 — 1:1 with `photoshop_recipe_*`)
 
 | Prompt | Recipe tool |
 |--------|-------------|
@@ -27,13 +30,27 @@ Eight templates in [`src/prompts/templates/`](../src/prompts/templates/), regist
 | `ps.frequency_separation` | `photoshop_recipe_frequency_separation` |
 | `ps.batch_mockup_replace` | `photoshop_recipe_batch_mockup_replace` |
 | `ps.organize_layers` | `photoshop_recipe_organize_layers` |
+| `ps.gradient_fade` | `photoshop_recipe_gradient_fade` |
+| `ps.sky_blend` | `photoshop_recipe_sky_blend` |
+| `ps.dodge_burn` | `photoshop_recipe_dodge_burn` |
+| `ps.remove_distraction` | `photoshop_recipe_remove_distraction` |
+
+### Guide prompts (4 — no recipe pair)
+
+| Prompt | Purpose |
+|--------|---------|
+| `ps.gradient_blend` | Fade subject into background via mask gradient (atomic chain) |
+| `ps.color_correct` | Tone / contrast fix chain |
+| `ps.dodge_burn_guide` | 50% gray overlay retouch setup |
+| `ps.composite_blend` | Place asset + mask + blend mode |
 
 Each template uses arg coercion helpers from [`src/prompts/_shared.ts`](../src/prompts/_shared.ts)
-and returns a `GetPromptResult` with `description` + structured Goal/Plan/End state text.
+and returns a `GetPromptResult` with `description` + structured Goal/Plan/End state text
+(guide prompts also include an Intent line).
 
 ## 3. Recipe tools
 
-Eight recipes in [`src/tools/recipes/`](../src/tools/recipes/), sharing
+Twelve recipes in [`src/tools/recipes/`](../src/tools/recipes/), sharing
 [`src/tools/recipes/_shared.ts`](../src/tools/recipes/_shared.ts) (`executeRecipe`,
 `suspendHistory`, uniform `{ ok, summary, ... }` envelope).
 
@@ -54,9 +71,9 @@ when the standalone UI passes `PHOTOSHOP_EXPORT_CHAT_ID` to the MCP child).
 npm run verify:photoshop-prompts
 ```
 
-Strict 8↔8 recipe/prompt parity check (ported from TTT).
+Strict **12↔12** recipe/prompt parity plus separate guide prompt registration check.
 
 ## Backwards compatibility
 
 All 55 original `photoshop_*` tool names and schemas are unchanged. New
-capabilities are additive only.
+capabilities (4 Phase 3 atomics, 4 Phase 4 recipes, 8 new prompt templates) are additive only.

@@ -37,6 +37,8 @@ export function bindApplyColorGrade(connection: PhotoshopConnection): ToolDefini
       description:
         'Apply a named color grading preset as a non-destructive layer group (Hue/Saturation adjustment + brightness/contrast tweak).\n' +
         '\n' +
+        'Users often say: cinematic look, teal and orange, moody grade, color grade.\n' +
+        '\n' +
         'Use when: the user wants a quick stylistic look applied to the active document.\n' +
         'Do NOT use when: the user wants subject-specific color edits (e.g. only the skin) — current recipe applies globally.\n' +
         '\n' +

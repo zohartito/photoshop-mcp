@@ -68,21 +68,31 @@ async function main(): Promise<void> {
   section('List prompts');
   const { prompts } = await client.listPrompts();
   const promptNames = prompts.map((p) => p.name).sort();
-  const expectedPrompts = [
+  const expectedRecipePrompts = [
     'ps.apply_color_grade',
     'ps.batch_mockup_replace',
+    'ps.dodge_burn',
     'ps.enhance_portrait',
     'ps.export_social_variants',
     'ps.frequency_separation',
+    'ps.gradient_fade',
     'ps.organize_layers',
     'ps.prepare_for_web',
     'ps.remove_background',
+    'ps.remove_distraction',
+    'ps.sky_blend',
   ];
-  if (promptNames.length !== 8) fail('prompt count', String(promptNames.length));
-  for (const name of expectedPrompts) {
+  const expectedGuidePrompts = [
+    'ps.color_correct',
+    'ps.composite_blend',
+    'ps.dodge_burn_guide',
+    'ps.gradient_blend',
+  ];
+  if (promptNames.length !== 16) fail('prompt count', String(promptNames.length));
+  for (const name of [...expectedRecipePrompts, ...expectedGuidePrompts]) {
     if (!promptNames.includes(name)) fail('missing prompt', name);
   }
-  ok('8 prompt templates', promptNames.join(', '));
+  ok('16 prompt templates', `${expectedRecipePrompts.length} recipe + ${expectedGuidePrompts.length} guide`);
 
   section('Get prompt (ps.remove_background)');
   const promptResult = await client.getPrompt({
@@ -99,6 +109,19 @@ async function main(): Promise<void> {
   if (!promptText.includes('keep_shadow: true')) fail('prompt content', 'missing keep_shadow coercion');
   ok('ps.remove_background', `${promptText.length} chars`);
 
+  section('Get prompt (ps.sky_blend)');
+  const skyPrompt = await client.getPrompt({
+    name: 'ps.sky_blend',
+    arguments: { sky_image_path: '/tmp/sky.jpg', horizon_pct: '45', feather_pct: '15' },
+  });
+  const skyText = skyPrompt.messages
+    .map((m) => (m.content.type === 'text' ? m.content.text : ''))
+    .join('\n');
+  if (!skyText.includes('photoshop_recipe_sky_blend')) {
+    fail('sky prompt content', 'missing recipe reference');
+  }
+  ok('ps.sky_blend', `${skyText.length} chars`);
+
   section('List tools (new layer)');
   const { tools } = await client.listTools();
   const toolNames = new Set(tools.map((t) => t.name));
@@ -114,6 +137,10 @@ async function main(): Promise<void> {
     'photoshop_recipe_apply_color_grade',
     'photoshop_recipe_batch_mockup_replace',
     'photoshop_recipe_organize_layers',
+    'photoshop_recipe_gradient_fade',
+    'photoshop_recipe_sky_blend',
+    'photoshop_recipe_dodge_burn',
+    'photoshop_recipe_remove_distraction',
   ];
   for (const name of required) {
     if (!toolNames.has(name)) fail('missing tool', name);

@@ -11,7 +11,7 @@ type WebFormat = (typeof FORMAT_OPTIONS)[number];
 export const prepareForWebTemplate: PhotoshopPromptTemplate = {
   name: 'ps.prepare_for_web',
   description:
-    'Convert the active document to sRGB, downscale its longest edge, sharpen for screen, and export at the chosen format and quality. Does not mutate the source document.',
+    'Convert the active document to sRGB, downscale its longest edge, sharpen for screen, and export at the chosen format and quality. Does not mutate the source document. Users often say: for web, web export, optimize for web.',
   arguments: [
     {
       name: 'max_dimension_px',

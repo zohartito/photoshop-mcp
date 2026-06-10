@@ -8,7 +8,7 @@ import {
 export const removeBackgroundTemplate: PhotoshopPromptTemplate = {
   name: 'ps.remove_background',
   description:
-    'Remove the background from the active layer using Select Subject, with an optional feather radius and an option to keep a soft contact shadow.',
+    'Remove the background from the active layer using Select Subject, with an optional feather radius and an option to keep a soft contact shadow. Users often say: remove background, cut out, isolate subject, transparent background, arka planı sil.',
   arguments: [
     {
       name: 'feather_px',

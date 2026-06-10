@@ -1,7 +1,8 @@
 /**
  * Lints recipe ↔ prompt template parity for photoshop-mcp:
  *   - Every photoshop_recipe_* tool must have a matching ps.* prompt template.
- *   - Every ps.* prompt template must have a matching photoshop_recipe_* tool.
+ *   - Every ps.* recipe prompt template must have a matching photoshop_recipe_* tool.
+ *   - Guide prompts (ps.gradient_blend, etc.) are registered separately.
  *
  * Run: npm run verify:photoshop-prompts
  */
@@ -9,7 +10,7 @@ import assert from 'node:assert/strict';
 import { ToolRegistry } from '../src/core/tool-registry.js';
 import { PromptRegistry } from '../src/core/prompt-registry.js';
 import { registerPhotoshopPrompts } from '../src/prompts/registry.js';
-import { PHOTOSHOP_PROMPT_TEMPLATES } from '../src/prompts/registry.js';
+import { PHOTOSHOP_PROMPT_TEMPLATES, PHOTOSHOP_GUIDE_PROMPT_NAMES } from '../src/prompts/registry.js';
 import { buildPhotoshopInstructions } from '../src/prompts/instructions.js';
 import { createRecipeTools } from '../src/tools/recipes/index.js';
 import { PHOTOSHOP_RECIPE_TOOL_NAMES } from '../src/tools/recipes/index.js';
@@ -50,9 +51,19 @@ const RECIPE_TO_PROMPT: Record<string, string> = {
   photoshop_recipe_frequency_separation: 'ps.frequency_separation',
   photoshop_recipe_batch_mockup_replace: 'ps.batch_mockup_replace',
   photoshop_recipe_organize_layers: 'ps.organize_layers',
+  photoshop_recipe_gradient_fade: 'ps.gradient_fade',
+  photoshop_recipe_sky_blend: 'ps.sky_blend',
+  photoshop_recipe_dodge_burn: 'ps.dodge_burn',
+  photoshop_recipe_remove_distraction: 'ps.remove_distraction',
 };
 
 const promptNames = new Set(PHOTOSHOP_PROMPT_TEMPLATES.map((p) => p.name));
+const guidePromptNames = new Set<string>(PHOTOSHOP_GUIDE_PROMPT_NAMES);
+
+assert.equal(PHOTOSHOP_RECIPE_TOOL_NAMES.length, 12);
+assert.equal(Object.keys(RECIPE_TO_PROMPT).length, 12);
+assert.equal(PHOTOSHOP_GUIDE_PROMPT_NAMES.length, 4);
+assert.equal(PHOTOSHOP_PROMPT_TEMPLATES.length, 16);
 
 for (const recipeName of PHOTOSHOP_RECIPE_TOOL_NAMES) {
   const promptName = RECIPE_TO_PROMPT[recipeName];
@@ -69,6 +80,13 @@ for (const recipeName of PHOTOSHOP_RECIPE_TOOL_NAMES) {
 
 const mappedPromptNames = new Set(Object.values(RECIPE_TO_PROMPT));
 for (const template of PHOTOSHOP_PROMPT_TEMPLATES) {
+  if (guidePromptNames.has(template.name)) {
+    assert.ok(
+      promptRegistry.has(template.name),
+      `Guide prompt template ${template.name} is missing from the registry.`
+    );
+    continue;
+  }
   assert.ok(
     mappedPromptNames.has(template.name),
     `Prompt ${template.name} has no matching recipe in RECIPE_TO_PROMPT.`
@@ -77,6 +95,10 @@ for (const template of PHOTOSHOP_PROMPT_TEMPLATES) {
     promptRegistry.has(template.name),
     `Prompt template ${template.name} is missing from the registry.`
   );
+}
+
+for (const guideName of PHOTOSHOP_GUIDE_PROMPT_NAMES) {
+  assert.ok(promptNames.has(guideName), `Guide prompt ${guideName} must be registered.`);
 }
 
 for (const required of [
@@ -95,6 +117,15 @@ for (const marker of [
   'photoshop_get_capabilities',
   'photoshop_recipe_',
   'suggested_next_tool',
+  'User intent glossary',
+  'ps.gradient_blend',
+  'Degrade paths',
+  'photoshop_recipe_gradient_fade',
+  'photoshop_recipe_sky_blend',
+  'photoshop_recipe_remove_distraction',
+  'photoshop_recipe_dodge_burn',
+  'photoshop_adjust_curves',
+  'photoshop_apply_gradient_mask',
 ]) {
   assert.ok(
     instructions.includes(marker),
@@ -103,6 +134,8 @@ for (const marker of [
 }
 
 console.log(
-  `OK: ${PHOTOSHOP_RECIPE_TOOL_NAMES.length} recipes ↔ ${PHOTOSHOP_PROMPT_TEMPLATES.length} prompts in parity, ` +
+  `OK: ${PHOTOSHOP_RECIPE_TOOL_NAMES.length} recipes ↔ ${Object.keys(RECIPE_TO_PROMPT).length} recipe prompts in parity, ` +
+    `${PHOTOSHOP_GUIDE_PROMPT_NAMES.length} guide prompts registered, ` +
+    `${PHOTOSHOP_PROMPT_TEMPLATES.length} total prompts, ` +
     `state/preview/capabilities tools registered, instructions reference the new contract.`
 );

@@ -20,6 +20,8 @@ export function bindEnhancePortrait(connection: PhotoshopConnection): ToolDefini
       description:
         'Set up a non-destructive portrait enhancement: duplicates the active layer, builds a frequency separation pair (low/high) for skin smoothing, and adds an auto-tone curves adjustment on top. Grouped as "Enhance Portrait" and reversible with one undo.\n' +
         '\n' +
+        'Users often say: smooth skin, retouch portrait, fix blemishes, clean up face.\n' +
+        '\n' +
         'Use when: the user asks to "enhance", "retouch", "clean up" or "smooth" a portrait photo and is happy with a baseline that they can further tweak interactively.\n' +
         'Do NOT use when: the user wants destructive, final edits — recommend manual frequency separation work via photoshop_recipe_frequency_separation instead so they can paint by hand.\n' +
         '\n' +

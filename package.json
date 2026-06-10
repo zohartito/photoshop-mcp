@@ -27,6 +27,7 @@
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
+    "spike:photoshop-actions": "tsx scripts/spike-photoshop-actions.ts",
     "verify:photoshop-prompts": "tsx scripts/verify-photoshop-prompt-coverage.ts",
     "test:mcp-local": "tsx scripts/test-mcp-local.ts",
     "test:mcp-all": "tsx scripts/test-all-mcp-tools.ts",

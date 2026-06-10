@@ -17,7 +17,7 @@ const RADIUS_BY_INTENSITY: Record<Intensity, number> = {
 export const enhancePortraitTemplate: PhotoshopPromptTemplate = {
   name: 'ps.enhance_portrait',
   description:
-    'Multi-step retouch plan for a portrait: non-destructive skin smoothing via frequency separation, mild dodge & burn, and auto-tone — wrapped in a single undoable history step.',
+    'Multi-step retouch plan for a portrait: non-destructive skin smoothing via frequency separation, mild dodge & burn, and auto-tone — wrapped in a single undoable history step. Users often say: smooth skin, retouch portrait, fix blemishes.',
   arguments: [
     {
       name: 'intensity',

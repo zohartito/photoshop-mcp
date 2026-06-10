@@ -1,5 +1,10 @@
 import type { ToolResult } from '../../core/tool-registry.js';
 import type { PhotoshopConnection } from '../../platform/connection.js';
+import {
+  MCP_CURVES_ADJUSTMENT_HELPER,
+  MCP_LAYER_MASK_HELPERS,
+  type GradientMaskDirection,
+} from '../../api/extendscript.js';
 import { PhotoshopAPIFactory } from '../../api/photoshop-api.js';
 import { parseExtendScriptPayload } from '../../utils/extendscript-result.js';
 
@@ -24,6 +29,8 @@ export interface RecipeFailure {
 export const RECIPE_ACTION_HELPERS = `
 function __mcp_s2t(s) { return app.stringIDToTypeID(s); }
 function __mcp_c2t(s) { return app.charIDToTypeID(s); }
+function cTID(s) { return __mcp_c2t(s); }
+function sTID(s) { return __mcp_s2t(s); }
 
 function __mcp_ensureRasterActiveLayer() {
   var doc = app.activeDocument;
@@ -133,35 +140,9 @@ function __mcp_makeHueSatAdjustmentLayer(hue, saturation, lightness, colorize) {
   return app.activeDocument.activeLayer;
 }
 
-function __mcp_makeCurvesAdjustmentLayer() {
-  var desc = new ActionDescriptor();
-  var ref = new ActionReference();
-  ref.putClass(__mcp_s2t('adjustmentLayer'));
-  desc.putReference(__mcp_s2t('null'), ref);
-  var using = new ActionDescriptor();
-  var curvesAdjust = new ActionDescriptor();
-  var curvesAdjustments = new ActionList();
-  var curvesPair = new ActionDescriptor();
-  var curvesPoints = new ActionList();
-  var ptBlack = new ActionDescriptor();
-  ptBlack.putDouble(__mcp_c2t('Hrzn'), 12);
-  ptBlack.putDouble(__mcp_c2t('Vrtc'), 0);
-  var ptWhite = new ActionDescriptor();
-  ptWhite.putDouble(__mcp_c2t('Hrzn'), 243);
-  ptWhite.putDouble(__mcp_c2t('Vrtc'), 255);
-  curvesPoints.putObject(__mcp_c2t('Pnt '), ptBlack);
-  curvesPoints.putObject(__mcp_c2t('Pnt '), ptWhite);
-  curvesPair.putList(__mcp_c2t('Crv '), curvesPoints);
-  var channelRef = new ActionReference();
-  channelRef.putEnumerated(__mcp_c2t('Chnl'), __mcp_c2t('Chnl'), __mcp_c2t('Cmps'));
-  curvesPair.putReference(__mcp_c2t('Chnl'), channelRef);
-  curvesAdjustments.putObject(__mcp_c2t('CrvA'), curvesPair);
-  curvesAdjust.putList(__mcp_c2t('Adjs'), curvesAdjustments);
-  using.putObject(__mcp_s2t('type'), __mcp_s2t('curves'), curvesAdjust);
-  desc.putObject(__mcp_s2t('using'), __mcp_s2t('adjustmentLayer'), using);
-  executeAction(__mcp_s2t('make'), desc, DialogModes.NO);
-  return app.activeDocument.activeLayer;
-}
+${MCP_CURVES_ADJUSTMENT_HELPER}
+
+${MCP_LAYER_MASK_HELPERS}
 `;
 
 const EXTENDSCRIPT_JSON_HELPER = `
@@ -308,4 +289,25 @@ export function jsString(value: string): string {
     .replace(/"/g, '\\"')
     .replace(/\n/g, '\\n')
     .replace(/\r/g, '\\r');
+}
+
+export function gradientMaskAxisPercents(
+  direction: GradientMaskDirection,
+  startPct: number,
+  endPct: number
+): { fromH: number; fromV: number; toH: number; toV: number; reverse: boolean } {
+  const gradientEndpoints: Record<
+    GradientMaskDirection,
+    { fromH: number; fromV: number; toH: number; toV: number; reverse: boolean }
+  > = {
+    bottom_to_top: { fromH: 50, fromV: endPct, toH: 50, toV: startPct, reverse: false },
+    top_to_bottom: { fromH: 50, fromV: startPct, toH: 50, toV: endPct, reverse: false },
+    left_to_right: { fromH: startPct, fromV: 50, toH: endPct, toV: 50, reverse: false },
+    right_to_left: { fromH: endPct, fromV: 50, toH: startPct, toV: 50, reverse: false },
+  };
+  return gradientEndpoints[direction];
+}
+
+export function gradientMaskDefaultAngle(direction: GradientMaskDirection): number {
+  return direction === 'left_to_right' || direction === 'right_to_left' ? 0 : 90;
 }

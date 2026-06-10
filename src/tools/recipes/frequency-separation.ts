@@ -11,6 +11,8 @@ export function bindFrequencySeparation(connection: PhotoshopConnection): ToolDe
       description:
         'Build a frequency separation stack (Low + High) on top of the active layer for hands-on retouching. Does not apply any smoothing itself — the user paints into the layers afterwards.\n' +
         '\n' +
+        'Users often say: frequency separation, split texture and color, manual retouch setup.\n' +
+        '\n' +
         'Use when: the user explicitly wants frequency separation setup, typically for portrait or product retouching.\n' +
         'Do NOT use when: the user wants a one-shot result without painting — use photoshop_recipe_enhance_portrait instead.\n' +
         '\n' +

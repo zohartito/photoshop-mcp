@@ -1,14 +1,31 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
-import { ExtendScriptSnippets } from '../api/extendscript.js';
+import { ExtendScriptSnippets, type CurvesPreset } from '../api/extendscript.js';
+import {
+  atomicFailureFromError,
+  atomicSuccess,
+  parseSnippetResult,
+  runSnippet,
+} from './atomic-shared.js';
+
+const CURVES_PRESETS: CurvesPreset[] = ['auto_tone', 'neutral'];
+
+function parseCurvesPreset(value: unknown): CurvesPreset {
+  if (typeof value === 'string' && CURVES_PRESETS.includes(value as CurvesPreset)) {
+    return value as CurvesPreset;
+  }
+  return 'auto_tone';
+}
 
 export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefinition[] {
   return [
     {
       tool: {
         name: 'photoshop_adjust_brightness_contrast',
-        description: 'Adjust brightness and contrast of the active layer',
+        description:
+          'Adjust brightness and contrast of the active layer.\n\n' +
+          'Users often say: fix exposure, add contrast, brighten, darken.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -64,7 +81,9 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
     {
       tool: {
         name: 'photoshop_auto_levels',
-        description: 'Apply auto levels adjustment to the active layer',
+        description:
+          'Apply auto levels adjustment to the active layer.\n\n' +
+          'Users often say: fix flat image, auto tone, make it pop (mild).',
         inputSchema: {
           type: 'object',
           properties: {},
@@ -82,6 +101,30 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
         },
       },
       handler: async () => autoContrast(connection),
+    },
+    {
+      tool: {
+        name: 'photoshop_adjust_curves',
+        description:
+          'Create a Curves adjustment layer on the active document.\n\n' +
+          'Users often say: make it pop, S-curve, fix flat image, auto tone, improve contrast.\n\n' +
+          'Use when: global tonal correction via a non-destructive Curves adjustment layer.\n' +
+          'Do NOT use when: stylistic cinematic grade — use photoshop_recipe_apply_color_grade.\n\n' +
+          'Returns: JSON { ok, summary, details: { layer_name, preset } }.\n' +
+          'Preconditions: active document. Side effects: adds Curves adjustment layer.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            preset: {
+              type: 'string',
+              enum: CURVES_PRESETS,
+              description: 'auto_tone (S-curve) or neutral (identity curve)',
+              default: 'auto_tone',
+            },
+          },
+        },
+      },
+      handler: async (args) => adjustCurves(connection, args),
     },
     {
       tool: {
@@ -205,6 +248,31 @@ async function autoLevels(connection: PhotoshopConnection): Promise<ToolResult> 
       ],
       isError: true,
     };
+  }
+}
+
+async function adjustCurves(
+  connection: PhotoshopConnection,
+  args: Record<string, unknown>
+): Promise<ToolResult> {
+  const preset = parseCurvesPreset(args.preset);
+
+  try {
+    const raw = await runSnippet(connection, ExtendScriptSnippets.adjustCurves(preset));
+    const parsed = parseSnippetResult(raw);
+    if (!parsed) {
+      return atomicFailureFromError(new Error(`Snippet returned unparseable payload: ${String(raw)}`));
+    }
+
+    const layerName =
+      typeof parsed.layer_name === 'string' ? parsed.layer_name : 'Curves adjustment layer';
+    return atomicSuccess(`Curves adjustment layer created (${preset})`, {
+      layer_name: layerName,
+      preset,
+      ...parsed,
+    });
+  } catch (error) {
+    return atomicFailureFromError(error);
   }
 }
 

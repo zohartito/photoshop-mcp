@@ -26,7 +26,7 @@ const PRESET_BLURB: Record<Preset, string> = {
 export const applyColorGradeTemplate: PhotoshopPromptTemplate = {
   name: 'ps.apply_color_grade',
   description:
-    'Apply a named color grading preset (curves + hue/saturation + selective color) as a single non-destructive recipe.',
+    'Apply a named color grading preset (curves + hue/saturation + selective color) as a single non-destructive recipe. Users often say: cinematic, teal orange, moody grade, color grade.',
   arguments: [
     {
       name: 'preset',

@@ -210,12 +210,17 @@ async function main(): Promise<void> {
     code: `app.activeDocument.activeLayer = app.activeDocument.artLayers.getByName("MCP_Paint_Renamed"); return { active: app.activeDocument.activeLayer.name };`,
   });
   await t.run('photoshop_select_rectangle', { left: 50, top: 50, right: 300, bottom: 300 });
+  await t.run('photoshop_content_aware_fill');
   await t.run('photoshop_select_all');
   await t.run('photoshop_invert_selection');
   await t.run('photoshop_create_layer_mask');
   await t.run('photoshop_apply_layer_mask');
   await t.run('photoshop_select_rectangle', { left: 60, top: 60, right: 280, bottom: 280 });
   await t.run('photoshop_create_layer_mask');
+  await t.run('photoshop_apply_gradient_mask', { direction: 'bottom_to_top' });
+  await t.run('photoshop_select_subject', undefined, {
+    skip: 'requires recognizable subject in active layer',
+  });
   await t.run('photoshop_delete_layer_mask');
   await t.run('photoshop_deselect');
 
@@ -227,6 +232,7 @@ async function main(): Promise<void> {
   await t.run('photoshop_adjust_hue_saturation', { hue: 5, saturation: 5, lightness: 0 });
   await t.run('photoshop_auto_levels');
   await t.run('photoshop_auto_contrast');
+  await t.run('photoshop_adjust_curves', { preset: 'auto_tone' });
   await t.run('photoshop_desaturate');
   await t.run('photoshop_invert');
 
@@ -291,6 +297,15 @@ async function main(): Promise<void> {
   await t.run('photoshop_recipe_batch_mockup_replace', undefined, {
     skip: 'requires Smart Object mockup PSD — not part of automated canvas setup',
   });
+  await t.run('photoshop_recipe_gradient_fade', { direction: 'bottom_to_top' });
+  await t.run('photoshop_undo', { steps: 1 });
+  await t.run('photoshop_recipe_dodge_burn', { blend_mode: 'overlay' });
+  await t.run('photoshop_undo', { steps: 1 });
+  await t.run('photoshop_select_rectangle', { left: 80, top: 80, right: 200, bottom: 200 });
+  await t.run('photoshop_recipe_remove_distraction', { feather_px: 1 });
+  await t.run('photoshop_undo', { steps: 1 });
+  await t.run('photoshop_recipe_sky_blend', { sky_image_path: testPng, horizon_pct: 45 });
+  await t.run('photoshop_undo', { steps: 1 });
 
   console.log('\n=== Phase 15: State, preview, save ===');
   await t.run('photoshop_get_preview', { max_dimension_px: 512, quality: 7 });
@@ -323,7 +338,7 @@ async function main(): Promise<void> {
   console.log('\n=== Phase 17: Cleanup ===');
   await t.run('photoshop_close_document', { save: false });
 
-  console.log('\n=== Phase 18: Prompt templates (all 8) ===');
+  console.log('\n=== Phase 18: Prompt templates (12 recipes) ===');
   const prompts = [
     ['ps.remove_background', { feather_px: '1', keep_shadow: 'false' }],
     ['ps.enhance_portrait', { intensity: 'medium', skin_smoothing: 'true' }],
@@ -333,6 +348,10 @@ async function main(): Promise<void> {
     ['ps.frequency_separation', { radius_px: '6' }],
     ['ps.batch_mockup_replace', { smart_object_layer_name: 'Screen', assets_dir: assetsDir }],
     ['ps.organize_layers', { auto_group: 'true', preserve: 'true' }],
+    ['ps.gradient_fade', { direction: 'bottom_to_top' }],
+    ['ps.sky_blend', { sky_image_path: '/tmp/photoshop-mcp-test.png', horizon_pct: '45' }],
+    ['ps.dodge_burn', { blend_mode: 'overlay' }],
+    ['ps.remove_distraction', { feather_px: '1' }],
   ] as const;
 
   for (const [name, args] of prompts) {

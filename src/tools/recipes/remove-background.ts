@@ -12,6 +12,8 @@ export function bindRemoveBackground(connection: PhotoshopConnection): ToolDefin
       description:
         'One-shot background removal: runs Select Subject on the active layer, inverts the selection, attaches a layer mask, and applies an optional feather. Wrapped in a single undoable history step.\n' +
         '\n' +
+        'Users often say: cut out, isolate subject, remove background, transparent background, arka planı sil.\n' +
+        '\n' +
         'Use when: the user wants the subject isolated from the background non-destructively. The source pixels are preserved behind the mask.\n' +
         'Do NOT use when: the subject is extremely fine-edged (hair against a busy background) — propose a manual Refine Edge pass afterwards.\n' +
         '\n' +

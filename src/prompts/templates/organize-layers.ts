@@ -17,7 +17,7 @@ const NAMING_BLURB: Record<NamingScheme, string> = {
 export const organizeLayersTemplate: PhotoshopPromptTemplate = {
   name: 'ps.organize_layers',
   description:
-    'Clean up a messy PSD: rename layers using a consistent scheme and optionally auto-group them by kind or spatial proximity.',
+    'Clean up a messy PSD: rename layers using a consistent scheme and optionally auto-group them by kind or spatial proximity. Users often say: organize layers, rename mess, tidy layers.',
   arguments: [
     {
       name: 'naming_scheme',
