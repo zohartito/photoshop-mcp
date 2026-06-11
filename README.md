@@ -388,24 +388,24 @@ Never guess — read get_state after a failure and propose the next single step.
 
 ## Features
 
-- ✅ **Works on both Windows and macOS**
-- ✅ **Supports Photoshop 2012-2025+**
-- ✅ **ExtendScript API**: Universal compatibility via AppleScript/COM automation
-- ✅ **Auto-Detection**: Automatically finds Photoshop installation on your system
-- ✅ **78 Tools**: 66 atomic `photoshop_*` + 12 recipe `photoshop_recipe_*`
-- ✅ **AI/Prompt Layer**: 16 MCP prompt templates (12 recipe + 4 guide), server instructions, state/preview/capabilities tools
-- ✅ **Document Management**: Create, open, save, close, crop documents
-- ✅ **Layer Operations**: Create, delete, duplicate, merge, transform layers
-- ✅ **Layer Properties**: Opacity, blend modes, visibility, locking
-- ✅ **Text Formatting**: Font, size, color, alignment controls
-- ✅ **Image Placement**: Place images, open files, fit to document
-- ✅ **Filters**: Gaussian Blur, Sharpen, Noise, Motion Blur
-- ✅ **Color Adjustments**: Brightness/Contrast, Hue/Saturation, Curves, Auto Levels/Contrast
-- ✅ **Selections & Masks**: Rectangular selections, select subject, content-aware fill, gradient mask, layer masks
-- ✅ **History Control**: Undo/Redo operations, view history states
-- ✅ **Actions**: Play recorded actions, execute custom scripts
-- ✅ **Auto-Rasterize**: Automatically converts layers when needed for filters
-- ✅ **Context Tracking**: Returns document/layer state after each operation for AI context awareness
+- **Works on both Windows and macOS**
+- **Supports Photoshop 2012-2025+**
+- **ExtendScript API**: Universal compatibility via AppleScript/COM automation
+- **Auto-Detection**: Automatically finds Photoshop installation on your system
+- **78 Tools**: 66 atomic `photoshop_*` + 12 recipe `photoshop_recipe_*`
+- **AI/Prompt Layer**: 16 MCP prompt templates (12 recipe + 4 guide), server instructions, state/preview/capabilities tools
+- **Document Management**: Create, open, save, close, crop documents
+- **Layer Operations**: Create, delete, duplicate, merge, transform layers
+- **Layer Properties**: Opacity, blend modes, visibility, locking
+- **Text Formatting**: Font, size, color, alignment controls
+- **Image Placement**: Place images, open files, fit to document
+- **Filters**: Gaussian Blur, Sharpen, Noise, Motion Blur
+- **Color Adjustments**: Brightness/Contrast, Hue/Saturation, Curves, Auto Levels/Contrast
+- **Selections & Masks**: Rectangular selections, select subject, content-aware fill, gradient mask, layer masks
+- **History Control**: Undo/Redo operations, view history states
+- **Actions**: Play recorded actions, execute custom scripts
+- **Auto-Rasterize**: Automatically converts layers when needed for filters
+- **Context Tracking**: Returns document/layer state after each operation for AI context awareness
 
 ## Installation
 
