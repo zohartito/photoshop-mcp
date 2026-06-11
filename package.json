@@ -21,7 +21,7 @@
     "dev:ui:web": "npm --prefix web run dev",
     "build": "npm run build:server && npm run build:web",
     "build:server": "tsc",
-    "build:web": "npm --prefix web ci --no-audit --no-fund && npm --prefix web run build",
+    "build:web": "npm --prefix web install --no-audit --no-fund && npm --prefix web run build",
     "start": "node dist/index.js",
     "start:ui": "node dist/ui/cli.js",
     "lint": "eslint src --ext .ts",
