@@ -54,7 +54,7 @@ This starts the server on port 5174 (with hot reload) and the web dev server con
 | `scripts/` | Integration and verification test scripts |
 | `docs/` | Additional documentation |
 
-See the [Architecture section in README.md](README.md#architecture) for a detailed breakdown.
+See [`docs/architecture.md`](docs/architecture.md) for a detailed breakdown.
 
 ## Making changes
 
