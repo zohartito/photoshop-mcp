@@ -12,10 +12,15 @@ import {
   type RunChatFinishInfo,
 } from './agent.js';
 import {
+  getAuthMethod,
+  getProviderConfig,
+  isProviderConfigAuthenticated,
   loadConfig,
   maskApiKey,
+  probeProviderAuthentication,
   saveConfig,
   setProviderConfig,
+  type AuthMethod,
   type ProviderId,
 } from './config.js';
 import { getProvider, listProviders } from './providers/registry.js';
@@ -84,14 +89,19 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
 
   // ---- Status -------------------------------------------------------------
 
-  app.get('/api/status', (c) => {
+  app.get('/api/status', async (c) => {
     const config = loadConfig();
     const active = config.providers[config.activeProvider];
+    const authMethod = getAuthMethod(config.activeProvider);
+    const isAuthenticated = await probeProviderAuthentication(config.activeProvider);
     return c.json({
       activeProvider: config.activeProvider,
       activeModel: config.activeModel,
+      authMethod,
+      isAuthenticated,
       hasApiKey: Boolean(active?.apiKey),
       apiKeyMasked: maskApiKey(active?.apiKey),
+      accountLabel: active?.cliAccountLabel ?? null,
     });
   });
 
@@ -109,21 +119,30 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
 
   // ---- Providers ----------------------------------------------------------
 
-  app.get('/api/providers', (c) => {
+  app.get('/api/providers', async (c) => {
     const config = loadConfig();
-    const out = listProviders().map((p) => {
-      const cfg = config.providers[p.id];
-      return {
-        id: p.id,
-        label: p.label,
-        apiKeyHint: p.apiKeyHint,
-        apiKeyHelpUrl: p.apiKeyHelpUrl,
-        hasApiKey: Boolean(cfg?.apiKey),
-        apiKeyMasked: maskApiKey(cfg?.apiKey),
-        models: p.listModels(),
-        defaultModel: p.defaultModel(),
-      };
-    });
+    const out = await Promise.all(
+      listProviders().map(async (p) => {
+        const cfg = config.providers[p.id];
+        const authMethod = cfg?.authMethod ?? 'api_key';
+        const isAuthenticated = await probeProviderAuthentication(p.id);
+        return {
+          id: p.id,
+          label: p.label,
+          apiKeyHint: p.apiKeyHint,
+          apiKeyHelpUrl: p.apiKeyHelpUrl,
+          supportedAuthMethods: p.supportedAuthMethods,
+          authMethod,
+          isAuthenticated,
+          hasApiKey: Boolean(cfg?.apiKey),
+          apiKeyMasked: maskApiKey(cfg?.apiKey),
+          accountLabel: cfg?.cliAccountLabel ?? null,
+          cliPath: cfg?.cliPath ?? null,
+          models: p.listModels(),
+          defaultModel: p.defaultModel(),
+        };
+      })
+    );
     return c.json(out);
   });
 
@@ -148,12 +167,44 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
       return c.json({ error: 'invalid_format' }, 400);
     }
     setProviderConfig(provider.id, { apiKey: body.apiKey });
-    // If no active provider was set yet, bootstrap with this one.
     const cfg = loadConfig();
-    if (!cfg.providers[cfg.activeProvider]?.apiKey) {
+    if (!isProviderConfigAuthenticated(cfg.activeProvider)) {
       saveConfig({ activeProvider: provider.id, activeModel: provider.defaultModel() });
     }
     return c.json({ ok: true, apiKeyMasked: maskApiKey(body.apiKey) });
+  });
+
+  app.post('/api/providers/:id/auth-method', async (c) => {
+    const provider = getProvider(c.req.param('id'));
+    if (!provider) return c.json({ error: 'unknown_provider' }, 404);
+    const body = await c.req.json().catch(() => ({})) as { authMethod?: AuthMethod };
+    if (!body.authMethod || !provider.supportedAuthMethods.includes(body.authMethod)) {
+      return c.json({ error: 'invalid_auth_method' }, 400);
+    }
+    setProviderConfig(provider.id, { authMethod: body.authMethod });
+    return c.json({ ok: true, authMethod: body.authMethod });
+  });
+
+  app.post('/api/providers/:id/validate-cli', async (c) => {
+    const provider = getProvider(c.req.param('id'));
+    if (!provider) return c.json({ ok: false, error: 'unknown_provider' }, 404);
+    if (!provider.validateCliAccount) {
+      return c.json({ ok: false, error: 'cli_account_not_supported' }, 400);
+    }
+    const cfg = getProviderConfig(provider.id);
+    const result = await provider.validateCliAccount({ cliPath: cfg?.cliPath });
+    if (result.ok && result.accountLabel) {
+      setProviderConfig(provider.id, { cliAccountLabel: result.accountLabel });
+    }
+    return c.json(result);
+  });
+
+  app.post('/api/providers/:id/cli-path', async (c) => {
+    const provider = getProvider(c.req.param('id'));
+    if (!provider) return c.json({ error: 'unknown_provider' }, 404);
+    const body = await c.req.json().catch(() => ({})) as { cliPath?: string };
+    setProviderConfig(provider.id, { cliPath: body.cliPath?.trim() || undefined });
+    return c.json({ ok: true });
   });
 
   app.delete('/api/providers/:id/key', (c) => {
@@ -239,8 +290,22 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
     if (!provider) return c.json({ error: 'unknown_provider' }, 400);
 
     const config = loadConfig();
-    const apiKey = config.providers[chat.provider as ProviderId]?.apiKey;
-    if (!apiKey) return c.json({ error: 'no_api_key' }, 400);
+    const providerCfg = config.providers[chat.provider as ProviderId];
+    const authMethod = providerCfg?.authMethod ?? 'api_key';
+
+    if (authMethod === 'api_key') {
+      if (!providerCfg?.apiKey) return c.json({ error: 'no_api_key' }, 400);
+    } else if (provider.validateCliAccount) {
+      const check = await provider.validateCliAccount({ cliPath: providerCfg?.cliPath });
+      if (!check.ok) {
+        return c.json({ error: 'cli_not_authenticated', detail: check.error }, 400);
+      }
+      if (check.accountLabel) {
+        setProviderConfig(provider.id, { cliAccountLabel: check.accountLabel });
+      }
+    } else {
+      return c.json({ error: 'cli_account_not_supported' }, 400);
+    }
 
     // Persist the user message first; auto-title the chat if it's still default.
     appendMessage({
@@ -288,7 +353,9 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
           prompt: body.prompt!,
           history,
           provider,
-          apiKey,
+          authMethod,
+          apiKey: providerCfg?.apiKey,
+          cliPath: providerCfg?.cliPath,
           modelId: chat.model,
           chatId: chat.id,
           abortSignal: controller.signal,

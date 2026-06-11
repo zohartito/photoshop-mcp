@@ -1,4 +1,5 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { resolveCliBinary, runCommand } from './cli-utils.js';
 import type { ProviderAdapter, ProviderModel } from './types.js';
 
 // Public list pricing (USD per 1M tokens). Cache-write reflects the 5-minute
@@ -41,6 +42,8 @@ export const anthropicAdapter: ProviderAdapter = {
   label: 'Anthropic',
   apiKeyHint: 'sk-ant-...',
   apiKeyHelpUrl: 'https://console.anthropic.com/settings/keys',
+  supportedAuthMethods: ['api_key', 'cli_account'],
+  cliBinaryName: 'claude',
   validateApiKeyFormat(key) {
     return key.startsWith('sk-ant-');
   },
@@ -56,6 +59,29 @@ export const anthropicAdapter: ProviderAdapter = {
       return { ok: true };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
+    }
+  },
+  async validateCliAccount({ cliPath } = {}) {
+    const binary = await resolveCliBinary('claude', cliPath);
+    if (!binary) {
+      return {
+        ok: false,
+        error: 'cli_not_found',
+      };
+    }
+    const result = await runCommand(binary, ['auth', 'status'], { timeoutMs: 15_000 });
+    if (result.exitCode !== 0) {
+      return { ok: false, error: 'not_authenticated' };
+    }
+    try {
+      const parsed = JSON.parse(result.stdout) as {
+        email?: string;
+        account?: { email?: string };
+      };
+      const accountLabel = parsed.email ?? parsed.account?.email;
+      return accountLabel ? { ok: true, accountLabel } : { ok: true };
+    } catch {
+      return { ok: true };
     }
   },
   listModels() {

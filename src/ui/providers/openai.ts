@@ -40,6 +40,7 @@ export const openaiAdapter: ProviderAdapter = {
   label: 'OpenAI',
   apiKeyHint: 'sk-...',
   apiKeyHelpUrl: 'https://platform.openai.com/api-keys',
+  supportedAuthMethods: ['api_key'],
   validateApiKeyFormat(key) {
     return key.startsWith('sk-') && key.length > 20;
   },

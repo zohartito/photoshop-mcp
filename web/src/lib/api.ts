@@ -23,12 +23,16 @@ export async function api<T = unknown>(
 }
 
 export type ProviderId = 'anthropic' | 'openai' | 'openrouter' | 'google';
+export type AuthMethod = 'api_key' | 'cli_account';
 
 export interface Status {
   activeProvider: ProviderId;
   activeModel: string;
+  authMethod: AuthMethod;
+  isAuthenticated: boolean;
   hasApiKey: boolean;
   apiKeyMasked: string | null;
+  accountLabel: string | null;
 }
 
 export interface ProviderModel {
@@ -41,8 +45,13 @@ export interface ProviderInfo {
   label: string;
   apiKeyHint: string;
   apiKeyHelpUrl: string;
+  supportedAuthMethods: AuthMethod[];
+  authMethod: AuthMethod;
+  isAuthenticated: boolean;
   hasApiKey: boolean;
   apiKeyMasked: string | null;
+  accountLabel: string | null;
+  cliPath: string | null;
   models: ProviderModel[];
   defaultModel: string;
 }
@@ -135,6 +144,24 @@ export const apiSaveKey = (id: ProviderId, apiKey: string) =>
 
 export const apiDeleteKey = (id: ProviderId) =>
   api<{ ok: true }>(`/api/providers/${id}/key`, { method: 'DELETE' });
+
+export const apiSetAuthMethod = (id: ProviderId, authMethod: AuthMethod) =>
+  api<{ ok: true; authMethod: AuthMethod }>(`/api/providers/${id}/auth-method`, {
+    method: 'POST',
+    body: JSON.stringify({ authMethod }),
+  });
+
+export const apiValidateCli = (id: ProviderId) =>
+  api<{ ok: boolean; error?: string; accountLabel?: string }>(
+    `/api/providers/${id}/validate-cli`,
+    { method: 'POST', body: '{}' }
+  );
+
+export const apiSetCliPath = (id: ProviderId, cliPath: string) =>
+  api<{ ok: true }>(`/api/providers/${id}/cli-path`, {
+    method: 'POST',
+    body: JSON.stringify({ cliPath }),
+  });
 
 // ---- Chats ------------------------------------------------------------
 

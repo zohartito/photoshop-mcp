@@ -2,6 +2,8 @@ import type { LanguageModel } from 'ai';
 
 export type ProviderId = 'anthropic' | 'openai' | 'openrouter' | 'google';
 
+export type AuthMethod = 'api_key' | 'cli_account';
+
 export interface ModelPricing {
   inputUsdPerMTok: number;
   outputUsdPerMTok: number;
@@ -28,13 +30,22 @@ export interface ApiKeyValidation {
   error?: string;
 }
 
+export interface CliAccountValidation {
+  ok: boolean;
+  error?: string;
+  accountLabel?: string;
+}
+
 export interface ProviderAdapter {
   id: ProviderId;
   label: string;
   apiKeyHint: string;
   apiKeyHelpUrl: string;
+  supportedAuthMethods: AuthMethod[];
+  cliBinaryName?: string;
   validateApiKeyFormat(key: string): boolean;
   validateApiKey(key: string): Promise<ApiKeyValidation>;
+  validateCliAccount?(opts: { cliPath?: string }): Promise<CliAccountValidation>;
   listModels(): ProviderModel[];
   defaultModel(): string;
   getLanguageModel(opts: { apiKey: string; modelId: string }): LanguageModel;

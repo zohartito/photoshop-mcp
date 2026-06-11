@@ -1,4 +1,5 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { resolveCliBinary, runCommand } from './cli-utils.js';
 import type { ProviderAdapter, ProviderModel } from './types.js';
 
 // Curated to Gemini models that support tool calling on the Google AI Studio
@@ -42,6 +43,8 @@ export const googleAdapter: ProviderAdapter = {
   label: 'Google AI Studio',
   apiKeyHint: 'AIza...',
   apiKeyHelpUrl: 'https://aistudio.google.com/apikey',
+  supportedAuthMethods: ['api_key', 'cli_account'],
+  cliBinaryName: 'gemini',
   validateApiKeyFormat(key) {
     return key.startsWith('AIza') && key.length >= 35;
   },
@@ -58,6 +61,25 @@ export const googleAdapter: ProviderAdapter = {
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
+  },
+  async validateCliAccount({ cliPath } = {}) {
+    const binary = await resolveCliBinary('gemini', cliPath);
+    if (!binary) {
+      return { ok: false, error: 'cli_not_found' };
+    }
+    const result = await runCommand(
+      binary,
+      ['-p', 'ping', '--output-format', 'json', '--approval-mode', 'yolo'],
+      { timeoutMs: 60_000, env: { GEMINI_CLI_TRUST_WORKSPACE: 'true' } }
+    );
+    if (result.exitCode === 41) {
+      return { ok: false, error: 'not_authenticated' };
+    }
+    if (result.exitCode !== 0) {
+      const detail = result.stderr.trim() || result.stdout.trim();
+      return { ok: false, error: detail || 'cli_probe_failed' };
+    }
+    return { ok: true };
   },
   listModels() {
     return MODELS.map((m) => ({ ...m }));

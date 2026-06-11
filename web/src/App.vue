@@ -23,7 +23,7 @@ const chat = useChatStore();
 const route = useRoute();
 const router = useRouter();
 
-const hasAnyKey = computed(() => providers.value.some((p) => p.hasApiKey));
+const hasAnyAuth = computed(() => providers.value.some((p) => p.isAuthenticated));
 
 function routeChatId(): string | null {
   const id = route.params.id;
@@ -50,7 +50,7 @@ async function syncFromRoute(): Promise<void> {
 async function refresh(): Promise<void> {
   try {
     [status.value, providers.value] = await Promise.all([apiStatus(), apiListProviders()]);
-    if (hasAnyKey.value) {
+    if (hasAnyAuth.value) {
       await chat.loadChats();
       await syncFromRoute();
     }
@@ -64,7 +64,7 @@ async function refresh(): Promise<void> {
 watch(
   () => route.params.id,
   () => {
-    if (hasAnyKey.value) void syncFromRoute();
+    if (hasAnyAuth.value) void syncFromRoute();
   }
 );
 
@@ -105,7 +105,7 @@ onMounted(refresh);
       {{ fatalError }}
     </div>
   </div>
-  <Onboarding v-else-if="!hasAnyKey" @saved="refresh" />
+  <Onboarding v-else-if="!hasAnyAuth" @saved="refresh" />
   <div v-else class="flex h-screen">
     <Sidebar
       :chats="chat.chats.value"

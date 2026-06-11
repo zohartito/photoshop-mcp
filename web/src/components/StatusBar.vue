@@ -12,6 +12,7 @@ import type { ChatTotals } from '@/stores/chat';
 const props = defineProps<{
   chat: ChatSummary | null;
   totals: ChatTotals | null;
+  subscriptionMode?: boolean;
 }>();
 
 const tokenFormatter = new Intl.NumberFormat('en-US');
@@ -57,7 +58,14 @@ const costLabel = computed(() => {
       {{ chat?.title ?? 'New chat' }}
     </div>
 
-    <TooltipProvider v-if="chat && hasData">
+    <span
+      v-if="chat && subscriptionMode"
+      class="rounded-md border border-border bg-muted/40 px-2 py-1 text-xs font-medium text-muted-foreground"
+    >
+      Included in subscription
+    </span>
+
+    <TooltipProvider v-else-if="chat && hasData">
       <Tooltip>
         <TooltipTrigger
           class="rounded-md border border-border bg-muted/40 px-2 py-1 text-xs font-medium tabular-nums text-muted-foreground hover:bg-muted"

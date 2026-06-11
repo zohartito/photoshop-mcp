@@ -1,6 +1,6 @@
 {
   "name": "@alisaitteke/photoshop-mcp",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "MCP server for Adobe Photoshop automation - control Photoshop from AI assistants",
   "main": "dist/index.js",
   "type": "module",
@@ -21,7 +21,7 @@
     "dev:ui:web": "npm --prefix web run dev",
     "build": "npm run build:server && npm run build:web",
     "build:server": "tsc",
-    "build:web": "npm --prefix web ci --no-audit --no-fund && npm --prefix web run build",
+    "build:web": "npm --prefix web install --no-audit --no-fund && npm --prefix web run build",
     "start": "node dist/index.js",
     "start:ui": "node dist/ui/cli.js",
     "lint": "eslint src --ext .ts",
@@ -66,6 +66,7 @@
     "@ai-sdk/google": "^3.0.67",
     "@ai-sdk/mcp": "^1.0.40",
     "@ai-sdk/openai": "^3.0.61",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.173",
     "@hono/node-server": "^1.13.7",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "@openrouter/ai-sdk-provider": "^2.9.0",
@@ -73,7 +74,8 @@
     "better-sqlite3": "^12.9.0",
     "get-port": "^7.1.0",
     "hono": "^4.6.14",
-    "open": "^10.1.0"
+    "open": "^10.1.0",
+    "zod": "^4.4.3"
   },
   "mcpName": "io.github.alisaitteke/photoshop-mcp",
   "devDependencies": {
