@@ -4,6 +4,7 @@ import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Logger } from '../utils/logger.js';
+import { prefixExtendScriptBom } from '../utils/extendscript-file.js';
 import { parseExtendScriptPayload } from '../utils/extendscript-result.js';
 import { ScriptExecutor } from './script-executor.js';
 
@@ -74,7 +75,7 @@ export class MacOSExecutor implements ScriptExecutor {
     const tempAppleScriptPath = join(tmpdir(), `photoshop-applescript-${Date.now()}.scpt`);
 
     try {
-      await writeFile(tempScriptPath, script, 'utf8');
+      await writeFile(tempScriptPath, prefixExtendScriptBom(script), 'utf8');
 
       // Create AppleScript that tells Photoshop to execute the JSX
       const appleScript = this.createAppleScriptWrapper(tempScriptPath);
@@ -166,7 +167,7 @@ end tell`;
     const tempAppleScriptPath = join(tmpdir(), `photoshop-applescript-alt-${Date.now()}.scpt`);
 
     try {
-      await writeFile(tempScriptPath, script, 'utf8');
+      await writeFile(tempScriptPath, prefixExtendScriptBom(script), 'utf8');
 
       const appleScript = `tell application "${this.appName}"
 \tdo shell script "cat '${tempScriptPath}'"

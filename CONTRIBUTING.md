@@ -92,6 +92,7 @@ Run these before every PR.
 
 ```bash
 npm run test:mcp-local    # prompt-layer smoke tests
+npm run spike:issue-2     # issue #2 targeted regression
 npm run test:mcp-all      # full sequential tool sweep
 ```
 

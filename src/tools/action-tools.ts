@@ -34,6 +34,9 @@ export function createActionTools(connection: PhotoshopConnection): ToolDefiniti
           'Use when: no existing tool covers the operation and you can write safe JSX.\n' +
           'Do NOT use when: a recipe or atomic tool exists — prefer photoshop_recipe_* or photoshop_* tools.\n\n' +
           'Returns: script return value serialized as text/JSON.\n' +
+          'IMPORTANT: Your code runs inside a wrapping IIFE. Use an explicit `return` to pass data back — ' +
+          'a bare trailing expression returns undefined. Example: `return { ok: true };` ' +
+          'Objects are serialized with toSource() and parsed automatically on macOS and Windows.\n' +
           'Preconditions: valid ExtendScript; active document if script expects one. Side effects: depends on code.',
         inputSchema: {
           type: 'object',

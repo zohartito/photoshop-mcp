@@ -106,8 +106,29 @@ class ExtendScriptPhotoshopAPI implements PhotoshopAPI {
 (function() {
   var __originalRulerUnits = null;
   var __originalTypeUnits = null;
+  var __origDialogs = null;
+  var __origAlert = null;
+  var __origConfirm = null;
+  var __origPrompt = null;
   try { __originalRulerUnits = app.preferences.rulerUnits; } catch (e) {}
   try { __originalTypeUnits = app.preferences.typeUnits; } catch (e) {}
+  try { __origDialogs = app.displayDialogs; } catch (e) {}
+  try { app.displayDialogs = DialogModes.NO; } catch (e) {}
+  if (typeof alert !== 'undefined') {
+    __origAlert = alert;
+    alert = function(msg) { $.writeln('[MCP] ' + msg); };
+  }
+  if (typeof confirm !== 'undefined') {
+    __origConfirm = confirm;
+    confirm = function() { $.writeln('[MCP] confirm suppressed'); return true; };
+  }
+  if (typeof prompt !== 'undefined') {
+    __origPrompt = prompt;
+    prompt = function(msg, def) {
+      $.writeln('[MCP] prompt suppressed: ' + msg);
+      return def || '';
+    };
+  }
 
   try {
     try { app.preferences.rulerUnits = Units.PIXELS; } catch (e) {}
@@ -125,6 +146,10 @@ class ExtendScriptPhotoshopAPI implements PhotoshopAPI {
   } finally {
     try { if (__originalRulerUnits !== null) app.preferences.rulerUnits = __originalRulerUnits; } catch (e) {}
     try { if (__originalTypeUnits !== null) app.preferences.typeUnits = __originalTypeUnits; } catch (e) {}
+    try { if (__origDialogs !== null) app.displayDialogs = __origDialogs; } catch (e) {}
+    if (__origAlert !== null) { alert = __origAlert; }
+    if (__origConfirm !== null) { confirm = __origConfirm; }
+    if (__origPrompt !== null) { prompt = __origPrompt; }
   }
 })();
     `.trim();

@@ -23,10 +23,12 @@ interface ToolRunResult {
   ms: number;
 }
 
-function textFrom(result: {
-  content?: Array<{ type: string; text?: string }>;
-}): string {
-  return (result.content ?? [])
+function textFrom(result: unknown): string {
+  const content = ((result as { content?: unknown }).content ?? []) as Array<{
+    type: string;
+    text?: string;
+  }>;
+  return content
     .filter((c) => c.type === 'text' && c.text)
     .map((c) => c.text!)
     .join('\n');
@@ -35,6 +37,17 @@ function textFrom(result: {
 function short(text: string, max = 140): string {
   const oneLine = text.replace(/\s+/g, ' ').trim();
   return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max)}…`;
+}
+
+function parseJsonFromToolText(body: string): unknown {
+  const jsonStart = body.indexOf('{');
+  const jsonArrayStart = body.indexOf('[');
+  const start =
+    jsonStart >= 0 && (jsonArrayStart < 0 || jsonStart <= jsonArrayStart)
+      ? jsonStart
+      : jsonArrayStart;
+  if (start < 0) throw new Error('No JSON payload in tool response');
+  return JSON.parse(body.slice(start));
 }
 
 class ToolTestRunner {
@@ -47,7 +60,7 @@ class ToolTestRunner {
   async run(
     name: string,
     args: Record<string, unknown> = {},
-    opts: { required?: boolean; skip?: string } = {}
+    opts: { required?: boolean; skip?: string; expectError?: boolean } = {}
   ): Promise<boolean> {
     if (opts.skip) {
       this.record(name, 'skip', opts.skip, 0);
@@ -60,6 +73,18 @@ class ToolTestRunner {
       const result = await this.client.callTool({ name, arguments: args });
       const ms = Date.now() - started;
       const body = textFrom(result);
+
+      if (opts.expectError) {
+        if (result.isError) {
+          this.record(name, 'pass', short(body), ms);
+          console.log(`  OK   ${name} (expected error, ${ms}ms) — ${short(body)}`);
+          return true;
+        }
+        this.record(name, 'fail', 'expected tool error', ms);
+        console.log(`  FAIL ${name} (${ms}ms) — expected error but tool succeeded`);
+        if (opts.required) throw new Error(`Expected error but tool succeeded: ${name}`);
+        return false;
+      }
 
       if (result.isError) {
         this.record(name, 'fail', short(body), ms);
@@ -161,7 +186,41 @@ async function main(): Promise<void> {
 
   console.log('\n=== Phase 1: Document ===');
   await t.run('photoshop_create_document', { width: 800, height: 600 }, { required: true });
-  await t.run('photoshop_get_document_info', {}, { required: true });
+
+  {
+    const docInfoResult = await client.callTool({ name: 'photoshop_get_document_info', arguments: {} });
+    const docInfoBody = textFrom(docInfoResult);
+    if (docInfoResult.isError) {
+      t.recordPrompt('assert:document_info_fields', 'fail', short(docInfoBody), 0);
+      console.log(`  FAIL assert:document_info_fields — ${short(docInfoBody)}`);
+    } else {
+      try {
+        const payload = parseJsonFromToolText(docInfoBody) as {
+          document?: { width?: number; height?: number; error?: string };
+        };
+        const ok =
+          payload.document?.width === 800 &&
+          payload.document?.height === 600 &&
+          !payload.document?.error;
+        t.recordPrompt(
+          'assert:document_info_fields',
+          ok ? 'pass' : 'fail',
+          ok
+            ? `width=${payload.document?.width}, height=${payload.document?.height}`
+            : JSON.stringify(payload.document),
+          0
+        );
+        console.log(
+          `  ${ok ? 'OK' : 'FAIL'}  assert:document_info_fields — ${ok ? 'width/height populated, no document.error' : short(JSON.stringify(payload.document))}`
+        );
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        t.recordPrompt('assert:document_info_fields', 'fail', msg, 0);
+        console.log(`  FAIL assert:document_info_fields — ${msg}`);
+      }
+    }
+  }
+
   await t.run('photoshop_get_state', {}, { required: true });
 
   console.log('\n=== Phase 2: Layers ===');
@@ -174,6 +233,8 @@ async function main(): Promise<void> {
     fontSize: 36,
   });
   await t.run('photoshop_get_layers', {}, { required: true });
+  await t.run('photoshop_select_layer_by_name', { name: 'MCP_Paint' }, { required: true });
+  await t.run('photoshop_select_layer_by_name', { name: '__MCP_MISSING_LAYER__' }, { expectError: true });
 
   console.log('\n=== Phase 3: Layer properties ===');
   await t.run('photoshop_execute_script', {
@@ -225,28 +286,39 @@ async function main(): Promise<void> {
   await t.run('photoshop_deselect');
 
   console.log('\n=== Phase 7: Adjustments ===');
+  await t.run('photoshop_select_layer_by_name', { name: 'MCP_Paint_Renamed copy' });
   await t.run('photoshop_execute_script', {
-    code: `var doc=app.activeDocument; var L=doc.artLayers.getByName("MCP_Paint_Renamed copy"); doc.activeLayer=L; L.blendMode=BlendMode.NORMAL; return { selected: L.name };`,
+    code: `var L=app.activeDocument.activeLayer; L.blendMode=BlendMode.NORMAL; return { selected: L.name, blendMode: String(L.blendMode) };`,
   });
   await t.run('photoshop_adjust_brightness_contrast', { brightness: 5, contrast: 5 });
   await t.run('photoshop_adjust_hue_saturation', { hue: 5, saturation: 5, lightness: 0 });
   await t.run('photoshop_auto_levels');
   await t.run('photoshop_auto_contrast');
   await t.run('photoshop_adjust_curves', { preset: 'auto_tone' });
+  await t.run('photoshop_select_layer_by_name', { name: 'MCP_Paint_Renamed copy' });
   await t.run('photoshop_desaturate');
   await t.run('photoshop_invert');
 
   console.log('\n=== Phase 8: Filters ===');
+  await t.run('photoshop_select_layer_by_name', { name: 'MCP_Paint_Renamed copy' });
   await t.run('photoshop_apply_gaussian_blur', { radius: 1.5 });
   await t.run('photoshop_apply_sharpen', { amount: 50, radius: 1, threshold: 0 });
   await t.run('photoshop_apply_noise', { amount: 2, distribution: 'UNIFORM', monochromatic: true });
   await t.run('photoshop_apply_motion_blur', { angle: 0, radius: 5 });
 
   console.log('\n=== Phase 9: Text ===');
+  await t.run('photoshop_list_fonts', { query: 'Arial', limit: 50 });
   await t.run('photoshop_execute_script', {
     code: `for (var i = 0; i < app.activeDocument.artLayers.length; i++) { var L = app.activeDocument.artLayers[i]; if (L.kind == LayerKind.TEXT) { app.activeDocument.activeLayer = L; break; } } return { active: app.activeDocument.activeLayer.name };`,
   });
   await t.run('photoshop_set_text_font', { fontName: 'Arial', fontSize: 32 });
+  await t.run('photoshop_create_text_layer', {
+    text: 'MCP Arial',
+    x: 160,
+    y: 160,
+    fontSize: 20,
+    fontName: 'Arial',
+  });
   await t.run('photoshop_set_text_color', { red: 10, green: 10, blue: 200 });
   await t.run('photoshop_set_text_alignment', { alignment: 'CENTER' });
   await t.run('photoshop_update_text_content', { text: 'MCP Updated' });
@@ -299,8 +371,14 @@ async function main(): Promise<void> {
   });
   await t.run('photoshop_recipe_gradient_fade', { direction: 'bottom_to_top' });
   await t.run('photoshop_undo', { steps: 1 });
+  await t.run('photoshop_execute_script', {
+    code: `var doc=app.activeDocument; var target=null; function findRaster(c){for(var i=0;i<c.layers.length;i++){var L=c.layers[i]; if(L.typename==='LayerSet'){var n=findRaster(L); if(n)return n;} else if(String(L.kind)==='LayerKind.NORMAL'&&!L.isBackgroundLayer){return L;}} return null;} target=findRaster(doc); if(!target) throw new Error('No raster layer'); doc.activeLayer=target; return {active:target.name,kind:String(target.kind)};`,
+  });
   await t.run('photoshop_recipe_dodge_burn', { blend_mode: 'overlay' });
   await t.run('photoshop_undo', { steps: 1 });
+  await t.run('photoshop_execute_script', {
+    code: `var doc=app.activeDocument; var target=null; function findRaster(c){for(var i=0;i<c.layers.length;i++){var L=c.layers[i]; if(L.typename==='LayerSet'){var n=findRaster(L); if(n)return n;} else if(String(L.kind)==='LayerKind.NORMAL'&&!L.isBackgroundLayer){return L;}} return null;} target=findRaster(doc); if(!target) throw new Error('No raster layer'); doc.activeLayer=target; return {active:target.name,kind:String(target.kind)};`,
+  });
   await t.run('photoshop_select_rectangle', { left: 80, top: 80, right: 200, bottom: 200 });
   await t.run('photoshop_recipe_remove_distraction', { feather_px: 1 });
   await t.run('photoshop_undo', { steps: 1 });
@@ -376,7 +454,7 @@ async function main(): Promise<void> {
   await transport.close();
 
   const failed = t.getResults().filter((r) => r.outcome === 'fail').length;
-  const requiredTools = 78;
+  const requiredTools = 79;
   const passedTools = t.getResults().filter((r) => r.outcome === 'pass' && r.name.startsWith('photoshop_')).length;
   console.log(`\nTool coverage: ${passedTools}/${requiredTools} atomic+recipe tools passed.`);
   process.exit(failed > 0 ? 1 : 0);

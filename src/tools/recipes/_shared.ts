@@ -283,13 +283,7 @@ export function clampInt(value: unknown, min: number, max: number, fallback: num
   return Math.max(min, Math.min(max, Math.round(value)));
 }
 
-export function jsString(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n')
-    .replace(/\r/g, '\\r');
-}
+export { jsString } from '../../utils/js-string.js';
 
 export function gradientMaskAxisPercents(
   direction: GradientMaskDirection,

@@ -3,12 +3,33 @@
  * ExtendScript is the legacy scripting API for Photoshop
  */
 
+import { jsString } from '../utils/js-string.js';
+
 /**
  * Helper functions for character/string ID conversion
  */
 const helperFunctions = `
 function cTID(s) { return app.charIDToTypeID(s); }
 function sTID(s) { return app.stringIDToTypeID(s); }
+`;
+
+/**
+ * Resolve a display or PostScript font name to the PostScript name required by TextItem.font.
+ * @see https://theiviaxx.github.io/photoshop-docs/Photoshop/TextItem/font.html
+ * @see https://theiviaxx.github.io/photoshop-docs/Photoshop/TextFont.html
+ */
+const resolveFontPostScriptName = `
+function resolveFontPostScriptName(name) {
+  for (var i = 0; i < app.fonts.length; i++) {
+    var f = app.fonts[i];
+    try {
+      if (f.postScriptName === name || f.name === name) {
+        return f.postScriptName;
+      }
+    } catch (e) {}
+  }
+  return null;
+}
 `;
 
 /**
@@ -21,58 +42,59 @@ function getContextInfo() {
   };
   
   if (context.hasDocument) {
+    var doc = null;
     try {
-    var doc = app.activeDocument;
-    context.document = {
-      name: doc.name,
-      width: doc.width.as('px'),
-      height: doc.height.as('px'),
-      resolution: doc.resolution,
-      colorMode: String(doc.mode),
-      layerCount: doc.layers.length,
-      hasSelection: (function () {
-        try {
-          return !!(doc.selection && doc.selection.bounds);
-        } catch (e) {
-          // ExtendScript throws "No such element" when there is no active selection
-          return false;
-        }
-      })()
-    };
-    
-    try {
-      if (doc.activeLayer) {
-        var layer = doc.activeLayer;
-        context.activeLayer = {
-          name: layer.name,
-          kind: String(layer.kind),
-          opacity: layer.opacity,
-          blendMode: String(layer.blendMode),
-          visible: layer.visible,
-          locked: layer.allLocked
-        };
-        try {
-          context.activeLayer.isBackground = layer.isBackgroundLayer;
-        } catch (e) {
-          context.activeLayer.isBackground = false;
-        }
-        try {
-          var bounds = layer.bounds;
-          context.activeLayer.bounds = {
-            left: bounds[0].as('px'),
-            top: bounds[1].as('px'),
-            right: bounds[2].as('px'),
-            bottom: bounds[3].as('px')
-          };
-        } catch (e) {
-          // Bounds not available for some layer types
-        }
-      }
+      doc = app.activeDocument;
     } catch (e) {
-      context.activeLayer = null;
+      doc = null;
     }
-    } catch (e) {
-      context.document = { error: e.message || String(e) };
+
+    if (doc) {
+      context.document = {};
+      try { context.document.name = doc.name; } catch (e) {}
+      try { context.document.width = doc.width.as('px'); } catch (e) {}
+      try { context.document.height = doc.height.as('px'); } catch (e) {}
+      try { context.document.resolution = doc.resolution; } catch (e) {}
+      try { context.document.colorMode = String(doc.mode); } catch (e) {}
+      try { context.document.layerCount = doc.layers.length; } catch (e) {}
+      try {
+        context.document.hasSelection = !!(doc.selection && doc.selection.bounds);
+      } catch (e) {
+        // ExtendScript throws "No such element" when there is no active selection
+        context.document.hasSelection = false;
+      }
+
+      try {
+        if (doc.activeLayer) {
+          var layer = doc.activeLayer;
+          context.activeLayer = {
+            name: layer.name,
+            kind: String(layer.kind),
+            opacity: layer.opacity,
+            blendMode: String(layer.blendMode),
+            visible: layer.visible,
+            locked: layer.allLocked
+          };
+          try {
+            context.activeLayer.isBackground = layer.isBackgroundLayer;
+          } catch (e) {
+            context.activeLayer.isBackground = false;
+          }
+          try {
+            var bounds = layer.bounds;
+            context.activeLayer.bounds = {
+              left: bounds[0].as('px'),
+              top: bounds[1].as('px'),
+              right: bounds[2].as('px'),
+              bottom: bounds[3].as('px')
+            };
+          } catch (e) {
+            // Bounds not available for some layer types
+          }
+        }
+      } catch (e) {
+        context.activeLayer = null;
+      }
     }
   }
   
@@ -280,8 +302,9 @@ export const ExtendScriptSnippets = {
   /**
    * Create a text layer
    */
-  createTextLayer: (text: string, x = 100, y = 100, fontSize = 24) => `
+  createTextLayer: (text: string, x = 100, y = 100, fontSize = 24, fontName?: string) => `
     ${getContextInfo}
+    ${resolveFontPostScriptName}
     
     if (app.documents.length === 0) {
       throw new Error('No active document');
@@ -289,16 +312,24 @@ export const ExtendScriptSnippets = {
     var doc = app.activeDocument;
     var textLayer = doc.artLayers.add();
     textLayer.kind = LayerKind.TEXT;
-    textLayer.textItem.contents = "${text.replace(/"/g, '\\"')}";
+    textLayer.textItem.contents = "${jsString(text)}";
     textLayer.textItem.position = [${x}, ${y}];
     textLayer.textItem.size = ${fontSize};
+    ${fontName ? `
+    var __psFont = resolveFontPostScriptName("${jsString(fontName)}");
+    if (!__psFont) {
+      throw new Error('font_not_found: ${jsString(fontName)}');
+    }
+    textLayer.textItem.font = __psFont;
+    ` : ''}
     
     var result = {
       created: true,
       layerName: textLayer.name,
-      text: "${text.replace(/"/g, '\\"')}",
+      text: "${jsString(text)}",
       position: { x: ${x}, y: ${y} },
       fontSize: ${fontSize},
+      ${fontName ? `font: textLayer.textItem.font,` : ''}
       context: getContextInfo()
     };
     return result;
@@ -315,9 +346,9 @@ export const ExtendScriptSnippets = {
       throw new Error('No active document');
     }
     
-    var imageFile = new File("${filePath.replace(/\\/g, '\\\\')}");
+    var imageFile = new File("${jsString(filePath)}");
     if (!imageFile.exists) {
-      throw new Error('Image file not found: ${filePath}');
+      throw new Error('Image file not found: ${jsString(filePath)}');
     }
     
     // Place image using ActionDescriptor
@@ -332,18 +363,23 @@ export const ExtendScriptSnippets = {
     
     executeAction(cTID('Plc '), desc, DialogModes.NO);
     
-    var layer = app.activeDocument.activeLayer;
-    var result = { 
+    var result = {
       placed: true,
-      layerName: layer.name,
-      filePath: "${filePath}",
+      filePath: "${jsString(filePath)}",
       position: { x: ${x}, y: ${y} },
-      layerBounds: {
-        width: layer.bounds[2].as('px') - layer.bounds[0].as('px'),
-        height: layer.bounds[3].as('px') - layer.bounds[1].as('px')
-      },
       context: getContextInfo()
     };
+    try {
+      var layer = app.activeDocument.activeLayer;
+      result.layerName = layer.name;
+      var bounds = layer.bounds;
+      result.layerBounds = {
+        width: bounds[2].as('px') - bounds[0].as('px'),
+        height: bounds[3].as('px') - bounds[1].as('px')
+      };
+    } catch (e) {
+      // Place succeeded; layer metadata is best-effort
+    }
     return result;
   `,
 
@@ -351,9 +387,9 @@ export const ExtendScriptSnippets = {
    * Open an image file as a new document
    */
   openImage: (filePath: string) => `
-    var imageFile = new File("${filePath.replace(/\\/g, '\\\\')}");
+    var imageFile = new File("${jsString(filePath)}");
     if (!imageFile.exists) {
-      throw new Error('Image file not found: ${filePath}');
+      throw new Error('Image file not found: ${jsString(filePath)}');
     }
     
     var doc = app.open(imageFile);
@@ -434,7 +470,7 @@ export const ExtendScriptSnippets = {
     }
     var doc = app.activeDocument;
     var layer = doc.artLayers.add();
-    ${name ? `layer.name = "${name.replace(/"/g, '\\"')}";` : ''}
+    ${name ? `layer.name = "${jsString(name)}";` : ''}
     
     var result = { 
       created: true,
@@ -539,16 +575,28 @@ export const ExtendScriptSnippets = {
     }
     var doc = app.activeDocument;
     var layers = [];
-    for (var i = 0; i < doc.layers.length; i++) {
-      var layer = doc.layers[i];
-      layers.push({
-        name: layer.name,
-        kind: String(layer.kind),
-        visible: layer.visible,
-        opacity: layer.opacity,
-        blendMode: String(layer.blendMode)
-      });
+    function collectLayers(container) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var layer = container.layers[i];
+        try {
+          layers.push({
+            name: layer.name,
+            kind: String(layer.kind),
+            visible: layer.visible,
+            opacity: layer.opacity,
+            blendMode: String(layer.blendMode)
+          });
+        } catch (e) {
+          var layerName = 'layer_' + layers.length;
+          try { layerName = layer.name; } catch (e2) {}
+          layers.push({ name: layerName, error: e.message || String(e) });
+        }
+        if (layer.typename === 'LayerSet') {
+          collectLayers(layer);
+        }
+      }
     }
+    collectLayers(doc);
     
     var result = {
       layerCount: layers.length,
@@ -559,20 +607,51 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Select layer by name
+   * Select layer by name (recursive search including layer groups)
    */
-  selectLayer: (name: string) => `
+  selectLayerByName: (name: string) => `
+    ${getContextInfo}
+    
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    for (var i = 0; i < doc.layers.length; i++) {
-      if (doc.layers[i].name === "${name.replace(/"/g, '\\"')}") {
-        doc.activeLayer = doc.layers[i];
-        return { selected: true, name: doc.layers[i].name };
+    var targetName = "${jsString(name)}";
+    var target = null;
+    function findLayer(container, name) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var l = container.layers[i];
+        if (l.name === name) return l;
       }
+      for (var j = 0; j < container.layerSets.length; j++) {
+        var nested = findLayer(container.layerSets[j], name);
+        if (nested) return nested;
+      }
+      return null;
     }
-    throw new Error('Layer not found: ${name.replace(/"/g, '\\"')}');
+    target = findLayer(doc, targetName);
+    if (!target) {
+      throw new Error('Layer not found: ' + targetName);
+    }
+    doc.activeLayer = target;
+    var result = {
+      selected: true,
+      layerName: target.name,
+      kind: String(target.kind),
+      context: getContextInfo()
+    };
+    try {
+      var b = target.bounds;
+      result.bounds = {
+        left: b[0].as('px'),
+        top: b[1].as('px'),
+        right: b[2].as('px'),
+        bottom: b[3].as('px'),
+        width: b[2].as('px') - b[0].as('px'),
+        height: b[3].as('px') - b[1].as('px')
+      };
+    } catch (e) {}
+    return result;
   `,
 
   /**
@@ -802,7 +881,7 @@ export const ExtendScriptSnippets = {
     var layer = doc.activeLayer;
     
     var oldName = layer.name;
-    layer.name = "${newName.replace(/"/g, '\\"')}";
+    layer.name = "${jsString(newName)}";
     
     return { 
       oldName: oldName,
@@ -821,7 +900,7 @@ export const ExtendScriptSnippets = {
     var layer = doc.activeLayer;
     
     var duplicated = layer.duplicate();
-    ${newName ? `duplicated.name = "${newName.replace(/"/g, '\\"')}";` : ''}
+    ${newName ? `duplicated.name = "${jsString(newName)}";` : ''}
     
     return { 
       originalName: layer.name,
@@ -1224,6 +1303,7 @@ export const ExtendScriptSnippets = {
    * Set text layer font
    */
   setTextFont: (fontName: string, fontSize?: number) => `
+    ${resolveFontPostScriptName}
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
@@ -1233,12 +1313,58 @@ export const ExtendScriptSnippets = {
       throw new Error('Active layer is not a text layer');
     }
     
-    layer.textItem.font = "${fontName.replace(/"/g, '\\"')}";
+    var __psFont = resolveFontPostScriptName("${jsString(fontName)}");
+    if (!__psFont) {
+      throw new Error('font_not_found: ${jsString(fontName)}');
+    }
+    layer.textItem.font = __psFont;
     ${fontSize ? `layer.textItem.size = ${fontSize};` : ''}
     
     return { 
       font: layer.textItem.font,
       size: layer.textItem.size
+    };
+  `,
+
+  /**
+   * List installed fonts (PostScript names required for TextItem.font).
+   */
+  listFonts: (query?: string, limit = 200) => `
+    var query = ${query !== undefined ? `"${jsString(query)}"` : 'null'};
+    var limit = ${limit};
+    var fonts = [];
+    var total = app.fonts.length;
+    var truncated = false;
+    for (var i = 0; i < total; i++) {
+      var f = app.fonts[i];
+      try {
+        var entry = {
+          name: f.name,
+          postScriptName: f.postScriptName,
+          family: f.family,
+          style: f.style
+        };
+        if (query) {
+          var q = query.toLowerCase();
+          if (
+            entry.name.toLowerCase().indexOf(q) < 0 &&
+            entry.postScriptName.toLowerCase().indexOf(q) < 0 &&
+            entry.family.toLowerCase().indexOf(q) < 0
+          ) {
+            continue;
+          }
+        }
+        fonts.push(entry);
+        if (fonts.length >= limit) {
+          truncated = i < total - 1;
+          break;
+        }
+      } catch (e) {}
+    }
+    return {
+      fonts: fonts,
+      total: total,
+      truncated: truncated
     };
   `,
 
@@ -1299,7 +1425,7 @@ export const ExtendScriptSnippets = {
       throw new Error('Active layer is not a text layer');
     }
     
-    layer.textItem.contents = "${newText.replace(/"/g, '\\"')}";
+    layer.textItem.contents = "${jsString(newText)}";
     
     return { 
       text: layer.textItem.contents
@@ -1598,7 +1724,7 @@ export const ExtendScriptSnippets = {
    * Play an action from Actions palette
    */
   playAction: (actionName: string, actionSetName: string) => `
-    app.doAction("${actionName.replace(/"/g, '\\"')}", "${actionSetName.replace(/"/g, '\\"')}");
+    app.doAction("${jsString(actionName)}", "${jsString(actionSetName)}");
     
     return { 
       action: '${actionName}',
@@ -1800,7 +1926,7 @@ export const ExtendScriptSnippets = {
     // Find target layer
     var targetLayer = null;
     for (var i = 0; i < doc.layers.length; i++) {
-      if (doc.layers[i].name === "${targetLayerName.replace(/"/g, '\\"')}") {
+      if (doc.layers[i].name === "${jsString(targetLayerName)}") {
         targetLayer = doc.layers[i];
         break;
       }
