@@ -100,16 +100,16 @@ Local MCP integration tests run against a live Photoshop instance over stdio
 (same path as Cursor / Claude Desktop). Last verified on **Photoshop 26.5.0**
 (macOS).
 
-*Recorded on PS 26.5.0 before the intent-expansion tools landed; counts predate
-the 4 new atomics + 4 new recipes — re-run `npm run test:mcp-all` to refresh.*
+*Recorded on PS 26.5.0 (macOS) after issue #2 fixes and Phase 2 test harness — re-run `npm run test:mcp-all` to refresh.*
 
 | Suite | Command | Result |
 |-------|---------|--------|
-| Full tool + recipe sweep | `npm run test:mcp-all` | **94 pass**, **0 fail**, **3 skip** (97 total) |
+| Issue #2 regression | `npm run spike:issue-2` | 10 targeted checks (document metadata, layers, place, alert, CJK names) |
+| Full tool + recipe sweep | `npm run test:mcp-all` | **117 pass**, **0 fail**, **4 skip** (121 total) |
 | Prompt-layer smoke | `npm run test:mcp-local` | 16 prompt templates + core recipes |
 | Prompt ↔ recipe parity | `npm run verify:photoshop-prompts` | 12↔12 strict match + 4 guides |
 
-**Tool coverage:** 78 total tools (66 atomic `photoshop_*` + 12 recipe
+**Tool coverage:** 79 total tools (67 atomic `photoshop_*` + 12 recipe
 `photoshop_recipe_*`) — re-run `npm run test:mcp-all` for a fresh pass count.
 
 **Intentional skips** (environment-dependent, not regressions):
@@ -117,6 +117,7 @@ the 4 new atomics + 4 new recipes — re-run `npm run test:mcp-all` to refresh.*
 | Tool | Reason |
 |------|--------|
 | `photoshop_play_action` | Requires a real Actions palette entry on the machine |
+| `photoshop_select_subject` | Requires a recognizable subject in the active layer |
 | `photoshop_recipe_remove_background` | Synthetic test canvas has no recognizable subject for Select Subject |
 | `photoshop_recipe_batch_mockup_replace` | Requires a Smart Object mockup PSD |
 
@@ -1516,6 +1517,7 @@ npm run format
 
 ```bash
 npm run build:server
+npm run spike:issue-2     # issue #2 targeted regression (10 checks)
 npm run test:mcp-local    # prompt-layer smoke
 npm run test:mcp-all      # full sequential tool sweep
 npm run verify:photoshop-prompts

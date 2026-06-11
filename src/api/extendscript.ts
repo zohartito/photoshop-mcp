@@ -3,6 +3,8 @@
  * ExtendScript is the legacy scripting API for Photoshop
  */
 
+import { jsString } from '../utils/js-string.js';
+
 /**
  * Helper functions for character/string ID conversion
  */
@@ -21,58 +23,59 @@ function getContextInfo() {
   };
   
   if (context.hasDocument) {
+    var doc = null;
     try {
-    var doc = app.activeDocument;
-    context.document = {
-      name: doc.name,
-      width: doc.width.as('px'),
-      height: doc.height.as('px'),
-      resolution: doc.resolution,
-      colorMode: String(doc.mode),
-      layerCount: doc.layers.length,
-      hasSelection: (function () {
-        try {
-          return !!(doc.selection && doc.selection.bounds);
-        } catch (e) {
-          // ExtendScript throws "No such element" when there is no active selection
-          return false;
-        }
-      })()
-    };
-    
-    try {
-      if (doc.activeLayer) {
-        var layer = doc.activeLayer;
-        context.activeLayer = {
-          name: layer.name,
-          kind: String(layer.kind),
-          opacity: layer.opacity,
-          blendMode: String(layer.blendMode),
-          visible: layer.visible,
-          locked: layer.allLocked
-        };
-        try {
-          context.activeLayer.isBackground = layer.isBackgroundLayer;
-        } catch (e) {
-          context.activeLayer.isBackground = false;
-        }
-        try {
-          var bounds = layer.bounds;
-          context.activeLayer.bounds = {
-            left: bounds[0].as('px'),
-            top: bounds[1].as('px'),
-            right: bounds[2].as('px'),
-            bottom: bounds[3].as('px')
-          };
-        } catch (e) {
-          // Bounds not available for some layer types
-        }
-      }
+      doc = app.activeDocument;
     } catch (e) {
-      context.activeLayer = null;
+      doc = null;
     }
-    } catch (e) {
-      context.document = { error: e.message || String(e) };
+
+    if (doc) {
+      context.document = {};
+      try { context.document.name = doc.name; } catch (e) {}
+      try { context.document.width = doc.width.as('px'); } catch (e) {}
+      try { context.document.height = doc.height.as('px'); } catch (e) {}
+      try { context.document.resolution = doc.resolution; } catch (e) {}
+      try { context.document.colorMode = String(doc.mode); } catch (e) {}
+      try { context.document.layerCount = doc.layers.length; } catch (e) {}
+      try {
+        context.document.hasSelection = !!(doc.selection && doc.selection.bounds);
+      } catch (e) {
+        // ExtendScript throws "No such element" when there is no active selection
+        context.document.hasSelection = false;
+      }
+
+      try {
+        if (doc.activeLayer) {
+          var layer = doc.activeLayer;
+          context.activeLayer = {
+            name: layer.name,
+            kind: String(layer.kind),
+            opacity: layer.opacity,
+            blendMode: String(layer.blendMode),
+            visible: layer.visible,
+            locked: layer.allLocked
+          };
+          try {
+            context.activeLayer.isBackground = layer.isBackgroundLayer;
+          } catch (e) {
+            context.activeLayer.isBackground = false;
+          }
+          try {
+            var bounds = layer.bounds;
+            context.activeLayer.bounds = {
+              left: bounds[0].as('px'),
+              top: bounds[1].as('px'),
+              right: bounds[2].as('px'),
+              bottom: bounds[3].as('px')
+            };
+          } catch (e) {
+            // Bounds not available for some layer types
+          }
+        }
+      } catch (e) {
+        context.activeLayer = null;
+      }
     }
   }
   
@@ -332,18 +335,23 @@ export const ExtendScriptSnippets = {
     
     executeAction(cTID('Plc '), desc, DialogModes.NO);
     
-    var layer = app.activeDocument.activeLayer;
-    var result = { 
+    var result = {
       placed: true,
-      layerName: layer.name,
       filePath: "${filePath}",
       position: { x: ${x}, y: ${y} },
-      layerBounds: {
-        width: layer.bounds[2].as('px') - layer.bounds[0].as('px'),
-        height: layer.bounds[3].as('px') - layer.bounds[1].as('px')
-      },
       context: getContextInfo()
     };
+    try {
+      var layer = app.activeDocument.activeLayer;
+      result.layerName = layer.name;
+      var bounds = layer.bounds;
+      result.layerBounds = {
+        width: bounds[2].as('px') - bounds[0].as('px'),
+        height: bounds[3].as('px') - bounds[1].as('px')
+      };
+    } catch (e) {
+      // Place succeeded; layer metadata is best-effort
+    }
     return result;
   `,
 
@@ -539,16 +547,28 @@ export const ExtendScriptSnippets = {
     }
     var doc = app.activeDocument;
     var layers = [];
-    for (var i = 0; i < doc.layers.length; i++) {
-      var layer = doc.layers[i];
-      layers.push({
-        name: layer.name,
-        kind: String(layer.kind),
-        visible: layer.visible,
-        opacity: layer.opacity,
-        blendMode: String(layer.blendMode)
-      });
+    function collectLayers(container) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var layer = container.layers[i];
+        try {
+          layers.push({
+            name: layer.name,
+            kind: String(layer.kind),
+            visible: layer.visible,
+            opacity: layer.opacity,
+            blendMode: String(layer.blendMode)
+          });
+        } catch (e) {
+          var layerName = 'layer_' + layers.length;
+          try { layerName = layer.name; } catch (e2) {}
+          layers.push({ name: layerName, error: e.message || String(e) });
+        }
+        if (layer.typename === 'LayerSet') {
+          collectLayers(layer);
+        }
+      }
     }
+    collectLayers(doc);
     
     var result = {
       layerCount: layers.length,
@@ -559,20 +579,51 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Select layer by name
+   * Select layer by name (recursive search including layer groups)
    */
-  selectLayer: (name: string) => `
+  selectLayerByName: (name: string) => `
+    ${getContextInfo}
+    
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    for (var i = 0; i < doc.layers.length; i++) {
-      if (doc.layers[i].name === "${name.replace(/"/g, '\\"')}") {
-        doc.activeLayer = doc.layers[i];
-        return { selected: true, name: doc.layers[i].name };
+    var targetName = "${jsString(name)}";
+    var target = null;
+    function findLayer(container, name) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var l = container.layers[i];
+        if (l.name === name) return l;
       }
+      for (var j = 0; j < container.layerSets.length; j++) {
+        var nested = findLayer(container.layerSets[j], name);
+        if (nested) return nested;
+      }
+      return null;
     }
-    throw new Error('Layer not found: ${name.replace(/"/g, '\\"')}');
+    target = findLayer(doc, targetName);
+    if (!target) {
+      throw new Error('Layer not found: ' + targetName);
+    }
+    doc.activeLayer = target;
+    var result = {
+      selected: true,
+      layerName: target.name,
+      kind: String(target.kind),
+      context: getContextInfo()
+    };
+    try {
+      var b = target.bounds;
+      result.bounds = {
+        left: b[0].as('px'),
+        top: b[1].as('px'),
+        right: b[2].as('px'),
+        bottom: b[3].as('px'),
+        width: b[2].as('px') - b[0].as('px'),
+        height: b[3].as('px') - b[1].as('px')
+      };
+    } catch (e) {}
+    return result;
   `,
 
   /**

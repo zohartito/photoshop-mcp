@@ -3,6 +3,8 @@ import { promisify } from 'util';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { prefixExtendScriptBom } from '../utils/extendscript-file.js';
+import { parseExtendScriptPayload } from '../utils/extendscript-result.js';
 import { Logger } from '../utils/logger.js';
 import { ScriptExecutor } from './script-executor.js';
 
@@ -67,7 +69,7 @@ export class WindowsExecutor implements ScriptExecutor {
     const tempScriptPath = join(tmpdir(), `photoshop-script-${Date.now()}.jsx`);
     
     try {
-      await writeFile(tempScriptPath, script, 'utf8');
+      await writeFile(tempScriptPath, prefixExtendScriptBom(script), 'utf8');
 
       // Use VBScript to execute the JSX script via COM
       const vbsScript = this.createVBSWrapper(tempScriptPath);
@@ -108,7 +110,7 @@ End If
 
 ' Execute the JSX script
 Dim result
-result = photoshopApp.DoJavaScript("$.evalFile('" & Replace("${jsxPath}", "\\", "\\\\") & "');")
+result = photoshopApp.DoJavaScript("return $.evalFile('" & Replace("${jsxPath}", "\\", "\\\\") & "');")
 
 If Err.Number <> 0 Then
     WScript.Echo "ERROR: " & Err.Description
@@ -127,13 +129,7 @@ End If
       throw new Error(trimmed.substring(6).trim());
     }
 
-    // Try to parse as JSON
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      // Return as string if not JSON
-      return trimmed;
-    }
+    return parseExtendScriptPayload(trimmed);
   }
 
   async isPhotoshopRunning(): Promise<boolean> {

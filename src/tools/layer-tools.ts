@@ -121,6 +121,29 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
       },
       handler: async () => getLayers(connection),
     },
+    {
+      tool: {
+        name: 'photoshop_select_layer_by_name',
+        description:
+          'Select the active layer by exact name, including layers inside groups.\n\n' +
+          'Use when: a transform or property tool must target a named layer (photoshop_scale_layer, etc.).\n' +
+          'Do NOT use when: the layer is already active — check photoshop_get_state first.\n\n' +
+          'Returns: selected, layerName, kind, bounds (best-effort), context.\n' +
+          'First depth-first name match wins when duplicate names exist in different groups.\n' +
+          'Preconditions: active document. Side effects: changes active layer.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Exact layer name (case-sensitive)',
+            },
+          },
+          required: ['name'],
+        },
+      },
+      handler: async (args) => selectLayerByName(connection, args),
+    },
   ];
 }
 
@@ -282,6 +305,40 @@ async function getLayers(connection: PhotoshopConnection): Promise<ToolResult> {
         {
           type: 'text' as const,
           text: `Error getting layers: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+async function selectLayerByName(
+  connection: PhotoshopConnection,
+  args: Record<string, unknown>
+): Promise<ToolResult> {
+  const name = args.name as string;
+
+  try {
+    const apiFactory = new PhotoshopAPIFactory(connection);
+    const api = await apiFactory.createAPI();
+
+    const script = ExtendScriptSnippets.selectLayerByName(name);
+    const result = await api.executeScript(script);
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Layer selected:\n${JSON.stringify(result, null, 2)}`,
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Error selecting layer: ${error instanceof Error ? error.message : String(error)}`,
         },
       ],
       isError: true,
