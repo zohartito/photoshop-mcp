@@ -51,6 +51,7 @@ export const openrouterAdapter: ProviderAdapter = {
   label: 'OpenRouter',
   apiKeyHint: 'sk-or-v1-...',
   apiKeyHelpUrl: 'https://openrouter.ai/keys',
+  supportedAuthMethods: ['api_key'],
   validateApiKeyFormat(key) {
     return key.startsWith('sk-or-');
   },

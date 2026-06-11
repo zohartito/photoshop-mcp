@@ -30,7 +30,7 @@ const model = computed(() =>
 );
 
 function onModelClick(prov: ProviderInfo, mdl: ProviderModel): void {
-  if (!prov.hasApiKey) {
+  if (!prov.isAuthenticated) {
     open.value = false;
     emit('open-settings');
     return;
@@ -81,11 +81,11 @@ function onModelClick(prov: ProviderInfo, mdl: ProviderModel): void {
                   {{ prov.label }}
                 </span>
                 <span
-                  v-if="!prov.hasApiKey"
+                  v-if="!prov.isAuthenticated"
                   class="inline-flex items-center gap-1 text-[10px] text-muted-foreground/80"
                 >
                   <Lock class="size-3" />
-                  Add API key
+                  {{ prov.authMethod === 'cli_account' ? 'Connect account' : 'Add API key' }}
                 </span>
               </div>
               <div class="py-1">
@@ -95,7 +95,7 @@ function onModelClick(prov: ProviderInfo, mdl: ProviderModel): void {
                   type="button"
                   class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm"
                   :class="[
-                    prov.hasApiKey
+                    prov.isAuthenticated
                       ? 'hover:bg-accent'
                       : 'opacity-50 hover:bg-muted/30',
                     prov.id === currentProvider && mdl.id === currentModel
@@ -105,7 +105,7 @@ function onModelClick(prov: ProviderInfo, mdl: ProviderModel): void {
                   @click="onModelClick(prov, mdl)"
                 >
                   <Check
-                    v-if="prov.hasApiKey"
+                    v-if="prov.isAuthenticated"
                     class="size-4 shrink-0"
                     :class="
                       prov.id === currentProvider && mdl.id === currentModel

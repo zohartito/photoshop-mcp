@@ -27,6 +27,16 @@ const activeChat = computed(() => {
   return props.store.chats.value.find((c) => c.id === id) ?? null;
 });
 
+const activeProviderInfo = computed(() => {
+  const chat = activeChat.value;
+  if (!chat) return null;
+  return props.providers.find((p) => p.id === chat.provider) ?? null;
+});
+
+const subscriptionMode = computed(
+  () => activeProviderInfo.value?.authMethod === 'cli_account'
+);
+
 async function onProviderChange(providerId: ProviderId): Promise<void> {
   const chat = activeChat.value;
   if (!chat) return;
@@ -44,7 +54,11 @@ async function onModelChange(modelId: string): Promise<void> {
 
 <template>
   <div class="flex h-screen flex-col">
-    <StatusBar :chat="activeChat" :totals="activeChat ? props.store.chatTotals.value : null" />
+    <StatusBar
+      :chat="activeChat"
+      :totals="activeChat ? props.store.chatTotals.value : null"
+      :subscription-mode="subscriptionMode"
+    />
 
     <div v-if="!activeChat" class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
       <p class="text-sm text-muted-foreground">Select a chat from the sidebar or start a new one.</p>
