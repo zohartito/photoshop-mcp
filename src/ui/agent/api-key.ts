@@ -8,6 +8,7 @@ import { buildSpawnArgs, sanitizedEnv } from './mcp-transport.js';
 import { PHOTOSHOP_EXPORT_CHAT_ID_ENV } from '../../lib/export-paths.js';
 import {
   computeCost,
+  isToolOutputOk,
   stringifyToolOutput,
   type AssistantBuffer,
   type RunChatFinishInfo,
@@ -103,13 +104,14 @@ export async function* runChatViaApiKey(
         case 'tool-result': {
           const tc = buffer.toolCalls.find((c) => c.id === part.toolCallId);
           const text = stringifyToolOutput(part.output);
+          const ok = isToolOutputOk(part.output);
           if (tc) {
-            tc.result = { ok: true, content: text };
-            tc.status = 'success';
+            tc.result = { ok, content: text };
+            tc.status = ok ? 'success' : 'error';
           }
           yield {
             type: 'tool-result',
-            payload: { id: part.toolCallId, ok: true, content: text },
+            payload: { id: part.toolCallId, ok, content: text },
           };
           yield { type: 'activity', payload: { phase: 'thinking' } };
           opts.onAssistantBuffer?.(buffer);

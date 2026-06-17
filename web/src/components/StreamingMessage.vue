@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { ChevronDown, ChevronRight } from 'lucide-vue-next';
 import PlanCard from './PlanCard.vue';
 import ToolCallStrip, { type ToolStripItem } from './ToolCallStrip.vue';
+import { effectiveToolOrbStatus } from '@/lib/tool-result-status';
 import type { ChatMessage, ToolCall } from '@/stores/chat';
 
 const props = defineProps<{
@@ -50,7 +51,7 @@ const standaloneStripItems = computed((): ToolStripItem[] =>
   props.standaloneToolCalls.map((tc) => ({
     id: tc.id,
     name: tc.name,
-    status: tc.status === 'success' ? 'done' : tc.status,
+    status: effectiveToolOrbStatus(tc),
     input: tc.input,
     result: tc.result,
     clickable: true,

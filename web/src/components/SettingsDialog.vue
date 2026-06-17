@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
-import { Check, ExternalLink, Loader2, Trash2, X } from 'lucide-vue-next';
+import { onMounted, ref, watch } from 'vue';
+import { Check, ExternalLink, Loader2, Moon, Sun, Trash2, X } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useTheme } from '@/composables/useTheme';
 import ProviderIcon from './ProviderIcon.vue';
 import {
   apiDeleteKey,
@@ -17,10 +19,19 @@ import {
   type ProviderInfo,
 } from '@/lib/api';
 
+const props = defineProps<{
+  chatCount: number;
+  clearingHistory?: boolean;
+  clearHistoryError?: string | null;
+}>();
+
 const emit = defineEmits<{
   close: [];
   saved: [];
+  'clear-history': [];
 }>();
+
+const { theme, setTheme } = useTheme();
 
 const providers = ref<ProviderInfo[]>([]);
 const loading = ref(true);
@@ -28,6 +39,8 @@ const drafts = ref<Record<string, string>>({});
 const cliPathDrafts = ref<Record<string, string>>({});
 const busy = ref<Record<string, boolean>>({});
 const errors = ref<Record<string, string | null>>({});
+const confirmClearHistory = ref(false);
+const generalError = ref<string | null>(null);
 
 const CLI_INSTALL: Partial<Record<ProviderInfo['id'], { install: string; login: string }>> = {
   anthropic: {
@@ -133,6 +146,28 @@ function cliPathPlaceholder(provider: ProviderInfo): string {
     ? `/usr/local/bin/${provider.cliBinaryName}`
     : 'Optional custom path';
 }
+
+function requestClearHistory(): void {
+  if (props.chatCount === 0 || props.clearingHistory) return;
+  generalError.value = null;
+  confirmClearHistory.value = true;
+}
+
+function cancelClearHistory(): void {
+  confirmClearHistory.value = false;
+}
+
+function confirmClearHistoryAction(): void {
+  confirmClearHistory.value = false;
+  emit('clear-history');
+}
+
+watch(
+  () => props.clearHistoryError,
+  (message) => {
+    if (message) generalError.value = message;
+  }
+);
 </script>
 
 <template>
@@ -148,132 +183,214 @@ function cliPathPlaceholder(provider: ProviderInfo): string {
         </Button>
       </div>
 
-      <div class="space-y-4">
-        <h3 class="text-sm font-medium">Providers</h3>
-        <div
-          v-if="loading"
-          class="flex items-center justify-center gap-2 rounded-lg border border-border py-10 text-sm text-muted-foreground"
-        >
-          <Loader2 class="size-4 animate-spin" />
-          Loading providers…
-        </div>
-        <template v-else>
-          <div
-            v-for="p in providers"
-            :key="p.id"
-            class="rounded-lg border border-border p-3"
-          >
-          <div class="mb-2 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <ProviderIcon :provider="p.id" :size="18" />
-              <span class="text-sm font-semibold">{{ p.label }}</span>
-              <span
-                v-if="p.isAuthenticated"
-                class="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400"
-              >
-                <Check class="size-3" />
-                {{
-                  p.authMethod === 'cli_account'
-                    ? p.accountLabel || 'Account connected'
-                    : p.apiKeyMasked
-                }}
-              </span>
-            </div>
-            <a
-              v-if="p.authMethod === 'api_key'"
-              :href="p.apiKeyHelpUrl"
-              target="_blank"
-              rel="noreferrer"
-              class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-            >
-              Get key
-              <ExternalLink class="size-3" />
-            </a>
-          </div>
+      <Tabs default-value="general">
+        <TabsList class="mb-4 grid w-full grid-cols-2">
+          <TabsTrigger value="general">General</TabsTrigger>
+          <TabsTrigger value="providers">Providers</TabsTrigger>
+        </TabsList>
 
-          <div v-if="supportsCliAccount(p)" class="mb-3 space-y-2">
-            <Label class="text-xs text-muted-foreground">Authentication</Label>
+        <TabsContent value="general" class="space-y-6">
+          <div class="space-y-2">
+            <Label>Theme</Label>
             <div class="flex gap-2">
               <Button
                 size="sm"
-                :variant="p.authMethod === 'api_key' ? 'default' : 'outline'"
-                :disabled="busy[p.id]"
-                @click="setAuthMethod(p, 'api_key')"
+                :variant="theme === 'light' ? 'default' : 'outline'"
+                @click="setTheme('light')"
               >
-                API key
+                <Sun class="size-4" />
+                Light
               </Button>
               <Button
                 size="sm"
-                :variant="p.authMethod === 'cli_account' ? 'default' : 'outline'"
-                :disabled="busy[p.id]"
-                @click="setAuthMethod(p, 'cli_account')"
+                :variant="theme === 'dark' ? 'default' : 'outline'"
+                @click="setTheme('dark')"
               >
-                Uses your account
+                <Moon class="size-4" />
+                Dark
               </Button>
             </div>
           </div>
 
-          <template v-if="p.authMethod === 'api_key'">
-            <div class="flex items-center gap-2">
-              <Input
-                v-model="drafts[p.id]"
-                type="password"
-                :placeholder="p.hasApiKey ? 'Replace key…' : p.apiKeyHint"
-                :disabled="busy[p.id]"
-              />
+          <div class="space-y-2">
+            <Label>Chat history</Label>
+            <p class="text-xs text-muted-foreground">
+              Permanently delete all conversations.
+            </p>
+            <template v-if="confirmClearHistory">
+              <p class="text-sm">
+                Delete {{ chatCount }} chat{{ chatCount === 1 ? '' : 's' }}? This cannot be undone.
+              </p>
+              <div class="flex gap-2">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  :disabled="clearingHistory"
+                  @click="confirmClearHistoryAction"
+                >
+                  <Loader2 v-if="clearingHistory" class="size-4 animate-spin" />
+                  {{ clearingHistory ? 'Deleting…' : 'Confirm delete' }}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  :disabled="clearingHistory"
+                  @click="cancelClearHistory"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </template>
+            <template v-else>
               <Button
+                variant="outline"
                 size="sm"
-                :disabled="busy[p.id] || !drafts[p.id]"
-                @click="saveKey(p)"
+                class="text-destructive hover:text-destructive"
+                :disabled="chatCount === 0 || clearingHistory"
+                @click="requestClearHistory"
               >
-                <Loader2 v-if="busy[p.id]" class="size-4 animate-spin" />
-                {{ busy[p.id] ? '…' : 'Save' }}
+                <Trash2 class="size-4" />
+                Clear all chats
               </Button>
-              <Button
-                v-if="p.hasApiKey"
-                size="icon"
-                variant="ghost"
-                :disabled="busy[p.id]"
-                @click="removeKey(p)"
-              >
-                <Trash2 class="size-4 text-muted-foreground" />
-              </Button>
-            </div>
-          </template>
+              <p v-if="chatCount === 0" class="text-xs text-muted-foreground">
+                No chats to delete.
+              </p>
+            </template>
+            <p v-if="generalError" class="text-xs text-destructive">
+              {{ generalError }}
+            </p>
+          </div>
+        </TabsContent>
 
+        <TabsContent value="providers" class="space-y-4">
+          <div
+            v-if="loading"
+            class="flex items-center justify-center gap-2 rounded-lg border border-border py-10 text-sm text-muted-foreground"
+          >
+            <Loader2 class="size-4 animate-spin" />
+            Loading providers…
+          </div>
           <template v-else>
-            <div class="space-y-2">
-              <div v-if="CLI_INSTALL[p.id]" class="rounded-md bg-muted/40 p-2 text-[11px] text-muted-foreground">
-                <p>
-                  Install:
-                  <code class="text-foreground">{{ CLI_INSTALL[p.id]!.install }}</code>
-                </p>
-                <p class="mt-1">
-                  Login:
-                  <code class="text-foreground">{{ CLI_INSTALL[p.id]!.login }}</code>
-                </p>
+            <div
+              v-for="p in providers"
+              :key="p.id"
+              class="rounded-lg border border-border p-3"
+            >
+              <div class="mb-2 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <ProviderIcon :provider="p.id" :size="18" />
+                  <span class="text-sm font-semibold">{{ p.label }}</span>
+                  <span
+                    v-if="p.isAuthenticated"
+                    class="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400"
+                  >
+                    <Check class="size-3" />
+                    {{
+                      p.authMethod === 'cli_account'
+                        ? p.accountLabel || 'Account connected'
+                        : p.apiKeyMasked
+                    }}
+                  </span>
+                </div>
+                <a
+                  v-if="p.authMethod === 'api_key'"
+                  :href="p.apiKeyHelpUrl"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  Get key
+                  <ExternalLink class="size-3" />
+                </a>
               </div>
-              <div class="space-y-1">
-                <Label class="text-xs text-muted-foreground">CLI path (optional)</Label>
-                <Input
-                  v-model="cliPathDrafts[p.id]"
-                  :placeholder="cliPathPlaceholder(p)"
-                  :disabled="busy[p.id]"
-                />
+
+              <div v-if="supportsCliAccount(p)" class="mb-3 space-y-2">
+                <Label class="text-xs text-muted-foreground">Authentication</Label>
+                <div class="flex gap-2">
+                  <Button
+                    size="sm"
+                    :variant="p.authMethod === 'api_key' ? 'default' : 'outline'"
+                    :disabled="busy[p.id]"
+                    @click="setAuthMethod(p, 'api_key')"
+                  >
+                    API key
+                  </Button>
+                  <Button
+                    size="sm"
+                    :variant="p.authMethod === 'cli_account' ? 'default' : 'outline'"
+                    :disabled="busy[p.id]"
+                    @click="setAuthMethod(p, 'cli_account')"
+                  >
+                    Uses your account
+                  </Button>
+                </div>
               </div>
-              <Button size="sm" :disabled="busy[p.id]" @click="validateCli(p)">
-                <Loader2 v-if="busy[p.id]" class="size-4 animate-spin" />
-                {{ busy[p.id] ? 'Checking…' : 'Check connection' }}
-              </Button>
+
+              <template v-if="p.authMethod === 'api_key'">
+                <div class="flex items-center gap-2">
+                  <Input
+                    v-model="drafts[p.id]"
+                    type="password"
+                    :placeholder="p.hasApiKey ? 'Replace key…' : p.apiKeyHint"
+                    :disabled="busy[p.id]"
+                  />
+                  <Button
+                    size="sm"
+                    :disabled="busy[p.id] || !drafts[p.id]"
+                    @click="saveKey(p)"
+                  >
+                    <Loader2 v-if="busy[p.id]" class="size-4 animate-spin" />
+                    {{ busy[p.id] ? '…' : 'Save' }}
+                  </Button>
+                  <Button
+                    v-if="p.hasApiKey"
+                    size="icon"
+                    variant="ghost"
+                    :disabled="busy[p.id]"
+                    @click="removeKey(p)"
+                  >
+                    <Trash2 class="size-4 text-muted-foreground" />
+                  </Button>
+                </div>
+              </template>
+
+              <template v-else>
+                <div class="space-y-2">
+                  <div
+                    v-if="CLI_INSTALL[p.id]"
+                    class="rounded-md bg-muted/40 p-2 text-[11px] text-muted-foreground"
+                  >
+                    <p>
+                      Install:
+                      <code class="text-foreground">{{ CLI_INSTALL[p.id]!.install }}</code>
+                    </p>
+                    <p class="mt-1">
+                      Login:
+                      <code class="text-foreground">{{ CLI_INSTALL[p.id]!.login }}</code>
+                    </p>
+                  </div>
+                  <div class="space-y-1">
+                    <Label class="text-xs text-muted-foreground">CLI path (optional)</Label>
+                    <Input
+                      v-model="cliPathDrafts[p.id]"
+                      :placeholder="cliPathPlaceholder(p)"
+                      :disabled="busy[p.id]"
+                    />
+                  </div>
+                  <Button size="sm" :disabled="busy[p.id]" @click="validateCli(p)">
+                    <Loader2 v-if="busy[p.id]" class="size-4 animate-spin" />
+                    {{ busy[p.id] ? 'Checking…' : 'Check connection' }}
+                  </Button>
+                </div>
+              </template>
+
+              <p v-if="errors[p.id]" class="mt-2 text-xs text-destructive">
+                {{ errors[p.id] }}
+              </p>
             </div>
           </template>
-
-          <p v-if="errors[p.id]" class="mt-2 text-xs text-destructive">
-            {{ errors[p.id] }}
-          </p>
-        </div>
-        </template>
-      </div>
+        </TabsContent>
+      </Tabs>
 
       <div class="mt-6 flex justify-end">
         <Button @click="emit('close')">Done</Button>

@@ -9,7 +9,10 @@ import type { AuthMethod } from '../providers/types.js';
 import { buildSpawnArgs, sanitizedEnv } from './mcp-transport.js';
 import {
   computeCost,
+  isToolOutputOk,
+  parseToolEnvelope,
   stringifyToolOutput,
+  toolFailureMessage,
   type AssistantBuffer,
   type PlanStepStatus,
   type PlanView,
@@ -218,16 +221,23 @@ export async function* runChatViaActionPlan(
         });
         results[step.id] = output;
         const text = stringifyToolOutput(output);
+        const ok = isToolOutputOk(output);
         const tc = buffer.toolCalls.find((c) => c.id === toolCallId);
         if (tc) {
-          tc.result = { ok: true, content: text };
-          tc.status = 'success';
+          tc.result = { ok, content: text };
+          tc.status = ok ? 'success' : 'error';
         }
-        yield { type: 'tool-result', payload: { id: toolCallId, ok: true, content: text } };
-        setStepStatus(planView, step.id, 'done');
-        yield { type: 'plan-step', payload: { id: step.id, status: 'done' as PlanStepStatus } };
+        yield { type: 'tool-result', payload: { id: toolCallId, ok, content: text } };
         opts.onAssistantBuffer?.(buffer);
-        i++;
+        if (ok) {
+          setStepStatus(planView, step.id, 'done');
+          yield { type: 'plan-step', payload: { id: step.id, status: 'done' as PlanStepStatus } };
+          opts.onAssistantBuffer?.(buffer);
+          i++;
+        } else {
+          const repaired = yield* tryRepair(toolFailureMessage(output, text), step);
+          if (!repaired) break;
+        }
       } catch (err) {
         const text = (err as Error)?.message ?? String(err);
         const tc = buffer.toolCalls.find((c) => c.id === toolCallId);
@@ -299,18 +309,29 @@ export async function* runChatViaActionPlan(
           lastOutput = output;
           results[followStepId] = output;
           const text = stringifyToolOutput(output);
+          const ok = isToolOutputOk(output);
           const tc = buffer.toolCalls.find((c) => c.id === toolCallId);
           if (tc) {
-            tc.result = { ok: true, content: text };
-            tc.status = 'success';
+            tc.result = { ok, content: text };
+            tc.status = ok ? 'success' : 'error';
           }
-          yield { type: 'tool-result', payload: { id: toolCallId, ok: true, content: text } };
-          setStepStatus(planView, followStepId, 'done');
-          yield {
-            type: 'plan-step',
-            payload: { id: followStepId, status: 'done' as PlanStepStatus },
-          };
-          opts.onAssistantBuffer?.(buffer);
+          yield { type: 'tool-result', payload: { id: toolCallId, ok, content: text } };
+          if (ok) {
+            setStepStatus(planView, followStepId, 'done');
+            yield {
+              type: 'plan-step',
+              payload: { id: followStepId, status: 'done' as PlanStepStatus },
+            };
+            opts.onAssistantBuffer?.(buffer);
+          } else {
+            setStepStatus(planView, followStepId, 'error');
+            yield {
+              type: 'plan-step',
+              payload: { id: followStepId, status: 'error' as PlanStepStatus },
+            };
+            opts.onAssistantBuffer?.(buffer);
+            break;
+          }
         } catch (err) {
           const text = (err as Error)?.message ?? String(err);
           const tc = buffer.toolCalls.find((c) => c.id === toolCallId);
@@ -600,7 +621,7 @@ function safeJson(value: unknown): string {
 function extractSuggestedFollowUp(
   result: unknown
 ): { tool: string; args: Record<string, unknown> } | null {
-  const parsed = parseToolResultObject(result);
+  const parsed = parseToolEnvelope(result);
   if (!parsed) return null;
 
   const tool =
@@ -615,32 +636,4 @@ function extractSuggestedFollowUp(
       : {};
 
   return { tool, args };
-}
-
-function parseToolResultObject(result: unknown): Record<string, unknown> | null {
-  if (result && typeof result === 'object' && !Array.isArray(result)) {
-    if ('content' in result) {
-      const text = stringifyToolOutput(result);
-      try {
-        const fromText = JSON.parse(text) as unknown;
-        if (fromText && typeof fromText === 'object' && !Array.isArray(fromText)) {
-          return fromText as Record<string, unknown>;
-        }
-      } catch {
-        return null;
-      }
-    }
-    return result as Record<string, unknown>;
-  }
-  if (typeof result === 'string') {
-    try {
-      const parsed = JSON.parse(result) as unknown;
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as Record<string, unknown>;
-      }
-    } catch {
-      return null;
-    }
-  }
-  return null;
 }

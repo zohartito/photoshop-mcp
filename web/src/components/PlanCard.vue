@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { ListChecks } from 'lucide-vue-next';
 import ToolCallStrip, { type ToolStripItem } from './ToolCallStrip.vue';
+import { effectiveToolOrbStatus } from '@/lib/tool-result-status';
 import type { PlanView } from '@/lib/api';
 import type { ToolCall } from '@/stores/chat';
 
@@ -21,7 +22,7 @@ const stripItems = computed((): ToolStripItem[] =>
     return {
       id: step.id,
       name,
-      status: step.status,
+      status: toolCall ? effectiveToolOrbStatus(toolCall, step.status) : step.status,
       input: toolCall?.input,
       result: toolCall?.result,
       rationale: step.rationale,

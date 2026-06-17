@@ -20,6 +20,8 @@ const loading = ref(true);
 const loadingMessage = ref('Starting…');
 const fatalError = ref<string | null>(null);
 const settingsOpen = ref(false);
+const clearingHistory = ref(false);
+const clearHistoryError = ref<string | null>(null);
 
 const chat = useChatStore();
 const route = useRoute();
@@ -100,6 +102,20 @@ async function handleSettingsSaved(): Promise<void> {
   await refresh();
 }
 
+async function handleClearHistory(): Promise<void> {
+  if (chat.chats.value.length === 0) return;
+  clearingHistory.value = true;
+  clearHistoryError.value = null;
+  try {
+    await chat.clearAllChats();
+    await router.replace({ name: 'home' });
+  } catch (err) {
+    clearHistoryError.value = (err as Error).message;
+  } finally {
+    clearingHistory.value = false;
+  }
+}
+
 onMounted(refresh);
 </script>
 
@@ -133,8 +149,12 @@ onMounted(refresh);
     />
     <SettingsDialog
       v-if="settingsOpen"
+      :chat-count="chat.chats.value.length"
+      :clearing-history="clearingHistory"
+      :clear-history-error="clearHistoryError"
       @close="settingsOpen = false"
       @saved="handleSettingsSaved"
+      @clear-history="handleClearHistory"
     />
   </div>
 </template>

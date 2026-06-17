@@ -8,6 +8,7 @@ import { resolveCliBinary } from '../providers/cli-utils.js';
 import { buildMcpServerConfig } from './mcp-transport.js';
 import {
   buildPromptWithHistory,
+  isToolOutputOk,
   type AssistantBuffer,
   type RunChatFinishInfo,
   type RunChatStreamEvent,
@@ -187,7 +188,7 @@ function mapGeminiEvent(
         typeof event.output === 'string'
           ? event.output
           : JSON.stringify(event.output ?? '');
-      const ok = event.ok !== false;
+      const ok = isToolOutputOk(event.output) && event.ok !== false;
       const tc = buffer.toolCalls.find((c) => c.id === id);
       if (tc) {
         tc.result = { ok, content };

@@ -3,7 +3,8 @@ import { onMounted, onUnmounted } from 'vue';
 import { Loader2, X } from 'lucide-vue-next';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { displayToolName, safeJson } from '@/lib/tool-display';
+import JsonHighlight from '@/components/JsonHighlight.vue';
+import { displayToolName } from '@/lib/tool-display';
 import type { ToolOrbStatus } from './ToolCallOrb.vue';
 
 const props = defineProps<{
@@ -83,9 +84,7 @@ function statusLabel(): string {
             <div class="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               Input
             </div>
-            <pre class="overflow-x-auto rounded-md bg-muted/40 p-2 text-[11px] leading-snug">{{
-              safeJson(input)
-            }}</pre>
+            <JsonHighlight :value="input" />
           </div>
           <div v-if="result">
             <div class="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">

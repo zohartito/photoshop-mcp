@@ -4,6 +4,7 @@ import type { ProviderAdapter } from '../providers/registry.js';
 import { buildMcpServerConfig } from './mcp-transport.js';
 import {
   buildPromptWithHistory,
+  isToolOutputOk,
   stringifyToolOutput,
   type AssistantBuffer,
   type RunChatFinishInfo,
@@ -129,7 +130,7 @@ export async function* runChatViaClaudeAccount(
 
         const text = stringifyToolOutput(message.tool_use_result);
         const tc = buffer.toolCalls.find((c) => c.id === toolUseId);
-        const ok = !isToolErrorResult(message.tool_use_result);
+        const ok = isToolOutputOk(message.tool_use_result);
         if (tc) {
           tc.result = { ok, content: text };
           tc.status = ok ? 'success' : 'error';
@@ -200,9 +201,3 @@ function extractToolUseId(message: { message: { content: unknown } }): string | 
   return null;
 }
 
-function isToolErrorResult(result: unknown): boolean {
-  if (typeof result !== 'object' || result === null) return false;
-  if ('is_error' in result && result.is_error === true) return true;
-  if ('error' in result && result.error) return true;
-  return false;
-}

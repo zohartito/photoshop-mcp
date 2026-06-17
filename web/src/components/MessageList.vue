@@ -57,13 +57,12 @@ function standaloneToolCalls(m: ChatMessage) {
     <div class="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6 pb-52">
       <div
         v-if="messages.length === 0"
-        class="rounded-xl border border-dashed border-border bg-card/40 p-8 text-center"
+        class="flex items-start gap-2.5 rounded-lg border border-dashed border-border/60 bg-card/30 px-3 py-2.5"
       >
-        <Sparkles class="mx-auto mb-3 size-6 text-muted-foreground" />
-        <h2 class="text-base font-semibold">Tell the assistant what to do in Photoshop</h2>
-        <p class="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-          Try: "Create a new 1920×1080 document, fill the background with light blue,
-          add the text 'Hello' in the center, and save it as hello.psd on my Desktop."
+        <Sparkles class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <p class="min-w-0 text-xs leading-relaxed text-muted-foreground">
+          <span class="font-medium text-foreground">Describe a Photoshop task</span>
+          — e.g. "Create a 1920×1080 doc, add 'Hello' text, save as hello.psd on Desktop."
         </p>
       </div>
 

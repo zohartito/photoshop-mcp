@@ -81,6 +81,66 @@ export function stringifyToolOutput(output: unknown): string {
   }
 }
 
+/** Parse structured tool envelopes from raw MCP / SDK output. */
+export function parseToolEnvelope(output: unknown): Record<string, unknown> | null {
+  if (output && typeof output === 'object' && !Array.isArray(output)) {
+    if ('content' in output) {
+      const text = stringifyToolOutput(output);
+      try {
+        const fromText = JSON.parse(text) as unknown;
+        if (fromText && typeof fromText === 'object' && !Array.isArray(fromText)) {
+          return fromText as Record<string, unknown>;
+        }
+      } catch {
+        return null;
+      }
+    }
+    return output as Record<string, unknown>;
+  }
+  if (typeof output === 'string') {
+    try {
+      const parsed = JSON.parse(output) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Whether a tool output represents success (not an error envelope or MCP error flag). */
+export function isToolOutputOk(output: unknown): boolean {
+  if (output == null) return true;
+
+  if (typeof output === 'object' && output !== null) {
+    const obj = output as Record<string, unknown>;
+    if (obj.is_error === true || obj.isError === true) return false;
+    if ('error' in obj && obj.error) return false;
+    if (obj.ok === false) return false;
+
+    const envelope = parseToolEnvelope(output);
+    if (envelope?.ok === false) return false;
+  }
+
+  if (typeof output === 'string') {
+    const envelope = parseToolEnvelope(output);
+    if (envelope?.ok === false) return false;
+  }
+
+  return true;
+}
+
+/** Prefer envelope `message` for repair / error display. */
+export function toolFailureMessage(output: unknown, fallback: string): string {
+  const envelope = parseToolEnvelope(output);
+  if (envelope && envelope.ok === false && typeof envelope.message === 'string') {
+    return envelope.message;
+  }
+  return fallback;
+}
+
 export function computeCost(usage: LanguageModelUsage, pricing: ModelPricing): UsageCost {
   const cacheRead = usage.inputTokenDetails?.cacheReadTokens ?? 0;
   const cacheWrite = usage.inputTokenDetails?.cacheWriteTokens ?? 0;

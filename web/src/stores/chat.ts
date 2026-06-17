@@ -174,6 +174,16 @@ export function useChatStore() {
     }
   }
 
+  async function clearAllChats(): Promise<void> {
+    const ids = chats.value.map((c) => c.id);
+    if (ids.length === 0) return;
+    await Promise.all(ids.map(apiDeleteChat));
+    chats.value = [];
+    activeChatId.value = null;
+    messages.splice(0, messages.length);
+    error.value = null;
+  }
+
   async function rename(id: string, title: string): Promise<void> {
     await apiRenameChat(id, title);
     const idx = chats.value.findIndex((c) => c.id === id);
@@ -375,6 +385,7 @@ export function useChatStore() {
     selectChat,
     newChat,
     removeChat,
+    clearAllChats,
     rename,
     send,
     abort,
