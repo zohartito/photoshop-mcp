@@ -1,6 +1,6 @@
 import { getServerAnalyticsContext } from './context.js';
 import { getLaunchMethod } from './launch-method.js';
-import { getSystemLocale, resolveLocaleRegion } from './locale.js';
+import { buildAnonymousRuntimeEnv, getTotalRamGb } from './runtime-env.js';
 
 const BLOCKED_PROPERTY_KEYS = new Set([
   'api_key',
@@ -32,6 +32,7 @@ const ALLOWED_PROPERTY_KEYS = new Set([
   'ok',
   'error_code',
   'photoshop_detected',
+  'photoshop_connected',
   'action_plan_enabled',
   'event_source',
   'port',
@@ -51,7 +52,44 @@ const ALLOWED_PROPERTY_KEYS = new Set([
   'browser_locale_region',
   'system_locale',
   'system_locale_region',
+  'system_locale_language',
+  'system_timezone',
+  'os_type',
+  'os_release',
+  'cpu_count',
+  'memory_gb',
+  'total_ram_gb',
+  'photoshop_version',
+  'node_major',
+  'is_electron',
+  'photoshop_path_configured',
+  'custom_data_dir_configured',
+  'tool_name',
+  'duration_ms',
+  'usage_surface',
+  'shutdown_reason',
+  'tools_registered_count',
+  'prompt_name',
+  'tools_called_count',
+  'tools_error_count',
+  'unique_tools_count',
+  'tool_usage_summary',
+  'error_codes_summary',
+  'batch_flush_reason',
 ]);
+
+const POSTHOG_RESERVED_PROPERTY_KEYS = new Set([
+  '$current_url',
+  '$pathname',
+  '$screen_name',
+]);
+
+function isAllowedAnalyticsPropertyKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  if (BLOCKED_PROPERTY_KEYS.has(normalized)) return false;
+  if (ALLOWED_PROPERTY_KEYS.has(normalized)) return true;
+  return POSTHOG_RESERVED_PROPERTY_KEYS.has(key);
+}
 
 export function sanitizeAnalyticsProperties(
   properties: Record<string, unknown> | undefined
@@ -60,12 +98,11 @@ export function sanitizeAnalyticsProperties(
 
   const out: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(properties)) {
-    const normalized = key.toLowerCase();
-    if (BLOCKED_PROPERTY_KEYS.has(normalized)) continue;
-    if (!ALLOWED_PROPERTY_KEYS.has(normalized)) continue;
+    if (!isAllowedAnalyticsPropertyKey(key)) continue;
     if (value === null || value === undefined) continue;
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      out[normalized] = value;
+      const outKey = POSTHOG_RESERVED_PROPERTY_KEYS.has(key) ? key : key.toLowerCase();
+      out[outKey] = value;
     }
   }
   return out;
@@ -74,16 +111,20 @@ export function sanitizeAnalyticsProperties(
 export function buildRuntimeProperties(
   properties: Record<string, unknown> | undefined
 ): Record<string, string | number | boolean> {
-  const systemLocale = getSystemLocale();
-  const systemLocaleRegion = resolveLocaleRegion(systemLocale);
   return {
-    os: process.platform,
-    arch: process.arch,
-    node_version: process.version,
+    ...buildAnonymousRuntimeEnv(),
     launch_method: getLaunchMethod(),
-    system_locale: systemLocale,
-    ...(systemLocaleRegion ? { system_locale_region: systemLocaleRegion } : {}),
     ...getServerAnalyticsContext(),
     ...sanitizeAnalyticsProperties(properties),
   };
+}
+
+/** Person-profile fields merged on PostHog identify() — includes install-level hardware signals. */
+export function buildPersonIdentifyProperties(
+  properties?: Record<string, unknown>
+): Record<string, string | number | boolean> {
+  return buildRuntimeProperties({
+    total_ram_gb: getTotalRamGb(),
+    ...properties,
+  });
 }

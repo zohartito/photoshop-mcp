@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import getPort from 'get-port';
 import open from 'open';
-import { capture, ensureAnalyticsIdentity, shutdownAnalytics } from '../analytics/index.js';
+import { capture, ensureAnalyticsIdentity, identifyAnalyticsPerson, shutdownAnalytics } from '../analytics/index.js';
 import { Logger } from '../utils/logger.js';
 import { startUIServer } from './server.js';
 
@@ -79,6 +79,11 @@ async function main(): Promise<void> {
   const flags = parseFlags(process.argv.slice(2));
 
   ensureAnalyticsIdentity();
+  identifyAnalyticsPerson({
+    usage_surface: 'server',
+    app_version: PKG_VERSION,
+    event_source: 'server',
+  });
 
   const port = flags.port ?? (await getPort({ port: [5174, 5175, 5176, 5180] }));
 

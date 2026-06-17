@@ -20,7 +20,10 @@ export interface AnalyticsRuntimeConfig {
   betaTelemetryPromptAnswered: boolean;
 }
 
+export type UsageSurface = 'mcp' | 'server' | 'ui';
+
 export interface AnalyticsProvider {
   capture(event: AnalyticsEvent): void;
+  identify(properties?: Record<string, unknown>): void;
   shutdown(): Promise<void>;
 }

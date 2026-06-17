@@ -1,4 +1,5 @@
 import { Logger } from '../utils/logger.js';
+import { capture } from '../analytics/index.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 
 export interface SessionConfig {
@@ -30,7 +31,8 @@ export class Session {
     this.logger.info('Initializing session...');
 
     if (this.config.autoConnect) {
-      await this.connect();
+      const connected = await this.connect();
+      this.captureConnectionEvent(connected);
     }
   }
 
@@ -73,6 +75,7 @@ export class Session {
     }
 
     this.logger.error('Failed to reconnect after all attempts');
+    this.captureConnectionEvent(false);
     return false;
   }
 
@@ -95,6 +98,15 @@ export class Session {
 
   updateActivity(): void {
     this.lastActivity = new Date();
+  }
+
+  private captureConnectionEvent(connected: boolean): void {
+    capture('mcp_photoshop_connection', {
+      ok: connected,
+      photoshop_connected: connected,
+      ...(connected ? {} : { error_code: 'photoshop_unreachable' }),
+      event_source: 'mcp',
+    });
   }
 
   private delay(ms: number): Promise<void> {

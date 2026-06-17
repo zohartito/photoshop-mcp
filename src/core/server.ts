@@ -7,6 +7,7 @@ import {
   GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { Logger } from '../utils/logger.js';
+import { capture, recordMcpToolCall } from '../analytics/index.js';
 import { ToolRegistry, ToolDefinition } from './tool-registry.js';
 import { PromptRegistry } from './prompt-registry.js';
 import { Session } from './session.js';
@@ -65,7 +66,7 @@ export class PhotoshopMCPServer {
   private registerToolDefinition(definition: ToolDefinition): void {
     this.toolRegistry.register(definition.tool.name, {
       tool: definition.tool,
-      handler: wrapToolHandler(definition.handler),
+      handler: wrapToolHandler(definition.tool.name, definition.handler),
     });
   }
 
@@ -141,16 +142,34 @@ export class PhotoshopMCPServer {
       const name = request.params.name;
       const args = (request.params.arguments as Record<string, string>) || {};
       this.logger.debug(`Prompt requested: ${name}`);
+      capture('mcp_prompt_requested', {
+        prompt_name: name,
+        event_source: 'mcp',
+      });
       return await this.promptRegistry.get(name, args);
     });
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      this.logger.debug(`Tool called: ${request.params.name}`);
+      const toolName = request.params.name;
+      const started = Date.now();
+      this.logger.debug(`Tool called: ${toolName}`);
 
-      const args = (request.params.arguments as Record<string, unknown>) || {};
-      const result = await this.toolRegistry.execute(request.params.name, args);
-      this.session.updateActivity();
-      return result;
+      try {
+        const args = (request.params.arguments as Record<string, unknown>) || {};
+        const result = await this.toolRegistry.execute(toolName, args);
+        this.session.updateActivity();
+        return result;
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('Tool not found:')) {
+          recordMcpToolCall({
+            toolName,
+            ok: false,
+            errorCode: 'tool_not_found',
+            durationMs: Date.now() - started,
+          });
+        }
+        throw error;
+      }
     });
   }
 
@@ -184,6 +203,22 @@ export class PhotoshopMCPServer {
 
   isPhotoshopConnected(): boolean {
     return this.session.getConnectionStatus();
+  }
+
+  getToolCount(): number {
+    return this.toolRegistry.count();
+  }
+
+  async getPhotoshopVersion(): Promise<string | undefined> {
+    if (!this.session.getConnectionStatus()) return undefined;
+
+    try {
+      const version = await this.session.getConnection().getVersion();
+      if (!version || version === 'Unknown') return undefined;
+      return version;
+    } catch {
+      return undefined;
+    }
   }
 
   async start() {

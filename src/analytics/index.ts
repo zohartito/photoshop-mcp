@@ -12,13 +12,21 @@ import {
   isAnalyticsEnabled,
   setBetaTelemetryChoice,
 } from './identity.js';
+import {
+  endMcpAnalyticsSession,
+  recordMcpToolCall,
+  startMcpAnalyticsSession,
+} from './mcp-session.js';
+import { captureMcpPageleave, captureMcpPageview } from './pageview.js';
 import { getAnalytics, resetAnalyticsProvider, shutdownAnalyticsClient } from './provider.js';
 import type {
   AnalyticsEvent,
   AnalyticsProvider,
   AnalyticsRuntimeConfig,
   BetaTelemetryState,
+  UsageSurface,
 } from './types.js';
+export type { McpShutdownReason } from './mcp-session.js';
 
 /** Persist the install ID and register one anonymous PostHog person per process. */
 export function ensureAnalyticsIdentity(): void {
@@ -36,6 +44,13 @@ export function capture(
     name,
     properties: buildRuntimeProperties(properties),
   });
+}
+
+export function identifyAnalyticsPerson(
+  properties?: Record<string, unknown>
+): void {
+  if (!isAnalyticsEnabled() || !hasPostHogKey()) return;
+  getAnalytics().identify(properties);
 }
 
 export async function shutdownAnalytics(): Promise<void> {
@@ -58,9 +73,20 @@ export function getAnalyticsRuntimeConfig(): AnalyticsRuntimeConfig {
 
 export {
   captureBetaChatTurn,
+  captureMcpPageleave,
+  captureMcpPageview,
+  endMcpAnalyticsSession,
   getAnalytics,
   getBetaTelemetryState,
+  recordMcpToolCall,
   resetAnalyticsProvider,
   setBetaTelemetryChoice,
+  startMcpAnalyticsSession,
 };
-export type { AnalyticsEvent, AnalyticsProvider, AnalyticsRuntimeConfig, BetaTelemetryState };
+export type {
+  AnalyticsEvent,
+  AnalyticsProvider,
+  AnalyticsRuntimeConfig,
+  BetaTelemetryState,
+  UsageSurface,
+};

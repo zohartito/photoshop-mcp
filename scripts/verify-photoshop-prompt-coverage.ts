@@ -29,14 +29,14 @@ registerPhotoshopPrompts(promptRegistry);
 for (const def of createRecipeTools(connection)) {
   toolRegistry.register(def.tool.name, {
     tool: def.tool,
-    handler: wrapToolHandler(def.handler),
+    handler: wrapToolHandler(def.tool.name, def.handler),
   });
 }
 
 for (const def of createStateTools(connection)) {
   toolRegistry.register(def.tool.name, {
     tool: def.tool,
-    handler: wrapToolHandler(def.handler),
+    handler: wrapToolHandler(def.tool.name, def.handler),
   });
 }
 

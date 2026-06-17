@@ -1,7 +1,7 @@
 import { PostHog } from 'posthog-node';
 import { Logger } from '../utils/logger.js';
 import { resolvePostHogApiHost, resolvePostHogKey } from './config.js';
-import { buildRuntimeProperties } from './events.js';
+import { buildPersonIdentifyProperties } from './events.js';
 import { getOrCreateDistinctId } from './identity.js';
 import type { AnalyticsEvent, AnalyticsProvider } from './types.js';
 
@@ -23,10 +23,14 @@ export class PostHogNodeProvider implements AnalyticsProvider {
   }
 
   private identifyPerson(): void {
+    this.identify({ event_source: 'server' });
+  }
+
+  identify(properties?: Record<string, unknown>): void {
     try {
       this.client.identify({
         distinctId: this.distinctId,
-        properties: buildRuntimeProperties({ event_source: 'server' }),
+        properties: buildPersonIdentifyProperties(properties),
         disableGeoip: false,
       });
     } catch (err) {

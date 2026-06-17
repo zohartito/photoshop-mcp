@@ -1,4 +1,5 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { recordMcpToolCall } from '../analytics/mcp-session.js';
 import type { ToolHandler } from '../core/tool-registry.js';
 
 export type PhotoshopErrorCode =
@@ -94,16 +95,51 @@ export function buildEnvelopeFromError(error: unknown): CallToolResult {
   return envelopeToToolResult(classifyError(message));
 }
 
-export function wrapToolHandler(handler: ToolHandler): ToolHandler {
+function extractErrorCodeFromResult(result: CallToolResult): string {
+  const text = result.content
+    .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+    .map((c) => c.text)
+    .join('\n');
+
+  if (!text) return 'unknown';
+
+  try {
+    const parsed = JSON.parse(text) as { ok?: boolean; code?: string };
+    if (parsed.ok === false && parsed.code) return parsed.code;
+  } catch {
+    // not JSON — fall through
+  }
+
+  return 'unknown';
+}
+
+export function wrapToolHandler(toolName: string, handler: ToolHandler): ToolHandler {
   return async (args) => {
+    const started = Date.now();
     try {
-      const result = await handler(args);
+      let result = await handler(args);
       if (result.isError) {
-        return enrichErrorResult(result);
+        result = enrichErrorResult(result);
       }
+
+      const ok = !result.isError;
+      recordMcpToolCall({
+        toolName,
+        ok,
+        errorCode: ok ? undefined : extractErrorCodeFromResult(result),
+        durationMs: Date.now() - started,
+      });
+
       return result;
     } catch (error) {
-      return buildEnvelopeFromError(error);
+      const result = buildEnvelopeFromError(error);
+      recordMcpToolCall({
+        toolName,
+        ok: false,
+        errorCode: extractErrorCodeFromResult(result),
+        durationMs: Date.now() - started,
+      });
+      return result;
     }
   };
 }

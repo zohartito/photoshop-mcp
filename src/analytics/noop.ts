@@ -5,6 +5,10 @@ export class NoopAnalyticsProvider implements AnalyticsProvider {
     // intentionally empty
   }
 
+  identify(_properties?: Record<string, unknown>): void {
+    // intentionally empty
+  }
+
   async shutdown(): Promise<void> {
     // intentionally empty
   }

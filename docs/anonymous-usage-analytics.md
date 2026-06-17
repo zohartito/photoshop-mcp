@@ -8,11 +8,17 @@ MCP server and standalone UI are used and to improve the product. Analytics are
 
 ## What we collect
 
-- App version, operating system, and Node.js version
-- Startup signals (MCP server or UI server started, Photoshop detected or not)
-- Setup funnel events (provider chosen, auth method, validation success/failure
-  codes — not credentials)
-- Generic UI events (app loaded, onboarding completed)
+- App version, operating system (platform, type, release), CPU count, memory tier
+  (bucketed GB), Node.js version, launch method, system locale/timezone, and whether
+  optional env overrides are configured (flags only — never paths or values)
+- **MCP-only usage** (no UI required): session lifecycle, virtual page views,
+  Photoshop connection status, **batched** tool usage summaries (tool names and
+  counts per agent turn — never arguments or results), and prompt template names
+  when requested
+- **UI server** startup and setup funnel events (provider chosen, auth method,
+  validation success/failure codes — not credentials)
+- **Browser UI** events (app loaded, onboarding completed, page views on route
+  changes)
 
 Events use a random anonymous identifier stored locally at
 `~/.photoshop-mcp/` (SQLite `kv` table and/or `analytics-store.json`). That ID
@@ -20,13 +26,43 @@ is registered with PostHog via `identify()` so MCP, UI server, and browser
 events merge under one anonymous person per install (`person_profiles:
 identified_only` — no email, name, or other PII).
 
+The person profile also stores **total installed RAM (GB)** and the **detected
+Photoshop version** when available, so cohort reports can segment by hardware
+and Photoshop release without repeating those fields on every event.
+
+Country/region signals come from PostHog GeoIP on outbound requests (when enabled)
+and from `system_locale_region` / `browser_locale_region` as a secondary hint.
+
+## MCP events
+
+When you run `photoshop-mcp` directly (e.g. via Cursor MCP config), these events
+are sent:
+
+| Event | When | Key properties |
+| --- | --- | --- |
+| `$pageview` | MCP session start | Virtual URL `photoshop-mcp://mcp`, `usage_surface: mcp` |
+| `mcp_session_started` | MCP session start | `app_version`, `photoshop_detected`, `tools_registered_count` |
+| `mcp_session_startup_failed` | Startup error | `ok: false`, `error_code` |
+| `mcp_photoshop_connection` | Initial connect or failed reconnect | `ok`, `photoshop_connected`, `error_code?` |
+| `mcp_tool_batch` | After 30s idle or session end | `tools_called_count`, `tools_error_count`, `unique_tools_count`, `tool_usage_summary`, `error_codes_summary?`, `batch_flush_reason` |
+| `mcp_prompt_requested` | Prompt template fetch | `prompt_name` |
+| `$pageleave` | Graceful shutdown (SIGINT/SIGTERM/stdio close) | `duration_ms`, `shutdown_reason` |
+| `mcp_session_ended` | Graceful shutdown | `duration_ms`, `shutdown_reason` |
+
+Tool usage is **not** sent per call. Calls are aggregated in memory and flushed as
+`mcp_tool_batch` when the MCP client goes idle for 30 seconds (proxy for end of an
+agent turn) or when the session ends.
+
+MCP-only installs appear in PostHog Web Analytics via the virtual `$pageview` at
+`photoshop-mcp://mcp`, even when the standalone UI is never opened.
+
 ## What we do **not** collect (unless you opt into beta team sharing)
 
 - API keys or OAuth tokens
 - Chat messages, prompts, or model responses **by default**
 - Photoshop document or layer names, file paths, or image content
 - CLI account labels, email addresses, or other account identifiers
-- Tool call arguments or results
+- Tool call **arguments** or **results** (MCP logs tool **names** only)
 
 ## Beta team content sharing (opt-in)
 
@@ -52,6 +88,25 @@ managed reverse proxy at `https://a.alisait.com`; the PostHog project UI is
 hosted in the EU (`https://eu.posthog.com`). See the
 [PostHog privacy policy](https://posthog.com/privacy) for how PostHog handles
 data on their side.
+
+### GeoIP and the reverse proxy
+
+PostHog enriches server-side events with `$geoip_country_code` from the client IP
+when GeoIP is enabled (`disableGeoip: false` in `posthog-node`). The reverse proxy
+at `https://a.alisait.com` **must forward the end-user IP** (e.g. via
+`X-Forwarded-For` / `X-Real-IP`) to PostHog ingest. If all MCP users appear in one
+country, fix proxy headers before investigating application code.
+
+## PostHog dashboard recipes (maintainers)
+
+| Insight | Configuration |
+| --- | --- |
+| MCP active users | `$pageview` where `$current_url = photoshop-mcp://mcp` |
+| Country breakdown | Breakdown by `$geoip_country_code` on `mcp_tool_batch` or `$pageview` |
+| Tool error rate | `mcp_tool_batch` where `tools_error_count > 0`, breakdown by `error_codes_summary` |
+| Photoshop reachability | `mcp_photoshop_connection` where `ok = false` |
+| Session duration | Average `duration_ms` on `mcp_session_ended` |
+| MCP vs UI usage | Person property `usage_surface` or filter `event_source = mcp` |
 
 ## How to opt out
 
