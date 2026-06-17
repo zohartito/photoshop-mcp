@@ -98,66 +98,71 @@ async function onModelChange(modelId: string): Promise<void> {
     </div>
 
     <template v-else>
-      <MessageList
-        :messages="props.store.messages"
-        :busy="props.store.sending.value"
-        :providers="props.providers"
-      />
+      <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <MessageList
+          :messages="props.store.messages"
+          :busy="props.store.sending.value"
+          :providers="props.providers"
+        />
 
-      <div
-        v-if="props.store.error.value"
-        class="border-t border-destructive/40 bg-destructive/10 px-4 py-2 text-center text-xs text-destructive"
-      >
-        {{ props.store.error.value }}
-      </div>
-
-      <Composer
-        :busy="props.store.sending.value"
-        @send="(p) => props.store.send(p)"
-        @abort="props.store.abort"
-      >
-        <template #actions>
-          <div class="flex items-center gap-1">
-            <ModelSelector
-              :providers="props.providers"
-              :current-provider="activeChat.provider"
-              :current-model="activeChat.model"
-              :disabled="props.store.sending.value"
-              @update:provider="onProviderChange"
-              @update:model="onModelChange"
-              @open-settings="emit('open-settings')"
-            />
-            <Button
-              variant="ghost"
-              size="sm"
-              :disabled="props.store.sending.value || !actionPlanAvailable"
-              :title="
-                !actionPlanAvailable
-                  ? 'Action Plan needs an API key for the planning call. Add one in Settings.'
-                  : subscriptionMode
-                    ? 'Uses your stored API key to plan all steps in one call, then executes them directly.'
-                    : 'Beta: plan all Photoshop steps in one call, then execute them in a single pass.'
-              "
-              class="h-7 gap-1.5 px-2 text-xs"
-              :class="
-                planBeta
-                  ? 'text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              "
-              @click="toggleActionPlanBeta"
-            >
-              <FlaskConical class="size-3.5" :class="planBeta ? 'text-amber-500' : ''" />
-              Action Plan
-              <span
-                class="rounded px-1 text-[9px] font-semibold uppercase"
-                :class="planBeta ? 'bg-amber-500/15 text-amber-600' : 'bg-muted text-muted-foreground'"
-              >
-                {{ planBeta ? 'On' : 'Beta' }}
-              </span>
-            </Button>
+        <div class="pointer-events-none absolute inset-x-0 bottom-0 z-10">
+          <div
+            v-if="props.store.error.value"
+            class="pointer-events-auto border-t border-destructive/40 bg-destructive/10 px-4 py-2 text-center text-xs text-destructive backdrop-blur-sm"
+          >
+            {{ props.store.error.value }}
           </div>
-        </template>
-      </Composer>
+
+          <Composer
+            class="pointer-events-auto"
+            :busy="props.store.sending.value"
+            @send="(p) => props.store.send(p)"
+            @abort="props.store.abort"
+          >
+            <template #actions>
+              <div class="flex items-center gap-1">
+                <ModelSelector
+                  :providers="props.providers"
+                  :current-provider="activeChat.provider"
+                  :current-model="activeChat.model"
+                  :disabled="props.store.sending.value"
+                  @update:provider="onProviderChange"
+                  @update:model="onModelChange"
+                  @open-settings="emit('open-settings')"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  :disabled="props.store.sending.value || !actionPlanAvailable"
+                  :title="
+                    !actionPlanAvailable
+                      ? 'Action Plan needs an API key for the planning call. Add one in Settings.'
+                      : subscriptionMode
+                        ? 'Uses your stored API key to plan all steps in one call, then executes them directly.'
+                        : 'Beta: plan all Photoshop steps in one call, then execute them in a single pass.'
+                  "
+                  class="h-7 gap-1.5 px-2 text-xs hover:bg-white/5"
+                  :class="
+                    planBeta
+                      ? 'text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  "
+                  @click="toggleActionPlanBeta"
+                >
+                  <FlaskConical class="size-3.5" :class="planBeta ? 'text-amber-500' : ''" />
+                  Action Plan
+                  <span
+                    class="rounded px-1 text-[9px] font-semibold uppercase"
+                    :class="planBeta ? 'bg-amber-500/15 text-amber-600' : 'bg-white/10 text-muted-foreground'"
+                  >
+                    {{ planBeta ? 'On' : 'Beta' }}
+                  </span>
+                </Button>
+              </div>
+            </template>
+          </Composer>
+        </div>
+      </div>
     </template>
 
     <Footer />
