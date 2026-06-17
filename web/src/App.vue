@@ -2,17 +2,20 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppLoader from './components/AppLoader.vue';
+import BetaTeamModal from './components/BetaTeamModal.vue';
 import Onboarding from './components/Onboarding.vue';
 import ChatView from './components/ChatView.vue';
 import Sidebar from './components/Sidebar.vue';
 import SettingsDialog from './components/SettingsDialog.vue';
 import { useChatStore } from './stores/chat';
 import {
+  apiGetAnalyticsConfig,
   apiListProviders,
   apiStatus,
   type ProviderInfo,
   type Status,
 } from './lib/api';
+import { capture, syncAnalyticsContext } from './lib/analytics';
 
 const status = ref<Status | null>(null);
 const providers = ref<ProviderInfo[]>([]);
@@ -22,6 +25,7 @@ const fatalError = ref<string | null>(null);
 const settingsOpen = ref(false);
 const clearingHistory = ref(false);
 const clearHistoryError = ref<string | null>(null);
+const betaPromptPending = ref(false);
 
 const chat = useChatStore();
 const route = useRoute();
@@ -54,15 +58,22 @@ async function syncFromRoute(): Promise<void> {
 async function refresh(): Promise<void> {
   try {
     loadingMessage.value = 'Checking connection…';
-    const [nextStatus, nextProviders] = await Promise.all([apiStatus(), apiListProviders()]);
+    const [nextStatus, nextProviders, analyticsConfig] = await Promise.all([
+      apiStatus(),
+      apiListProviders(),
+      apiGetAnalyticsConfig(),
+    ]);
     status.value = nextStatus;
     providers.value = nextProviders;
+    betaPromptPending.value = !analyticsConfig.betaTelemetryPromptAnswered;
     if (hasAnyAuth.value) {
       loadingMessage.value = 'Loading chats…';
       await chat.loadChats();
       loadingMessage.value = 'Preparing workspace…';
       await syncFromRoute();
     }
+    await syncAnalyticsContext();
+    capture('app_loaded', { has_auth: hasAnyAuth.value });
   } catch (err) {
     fatalError.value = (err as Error).message;
   } finally {
@@ -76,6 +87,10 @@ watch(
     if (hasAnyAuth.value) void syncFromRoute();
   }
 );
+
+function handleBetaAnswered(): void {
+  betaPromptPending.value = false;
+}
 
 async function handleNewChat(): Promise<void> {
   if (!status.value) return;
@@ -126,6 +141,7 @@ onMounted(refresh);
       {{ fatalError }}
     </div>
   </div>
+  <BetaTeamModal v-else-if="betaPromptPending" @answered="handleBetaAnswered" />
   <Onboarding v-else-if="!hasAnyAuth" @saved="refresh" />
   <div v-else class="flex h-screen">
     <Sidebar

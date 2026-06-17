@@ -5,10 +5,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useTheme } from '@/composables/useTheme';
+import { useTheme, type Theme } from '@/composables/useTheme';
 import ProviderIcon from './ProviderIcon.vue';
 import {
   apiDeleteKey,
+  apiGetAnalyticsConfig,
   apiListProviders,
   apiSaveKey,
   apiSetAuthMethod,
@@ -18,6 +19,8 @@ import {
   type AuthMethod,
   type ProviderInfo,
 } from '@/lib/api';
+import { refreshAnalyticsState, setAnalyticsOptOut, syncAnalyticsContext } from '@/lib/analytics';
+import { apiSetBetaTelemetry } from '@/lib/api';
 
 const props = defineProps<{
   chatCount: number;
@@ -41,6 +44,10 @@ const busy = ref<Record<string, boolean>>({});
 const errors = ref<Record<string, string | null>>({});
 const confirmClearHistory = ref(false);
 const generalError = ref<string | null>(null);
+const analyticsEnabled = ref(false);
+const analyticsBusy = ref(false);
+const betaTelemetryEnabled = ref(false);
+const betaTelemetryBusy = ref(false);
 
 const CLI_INSTALL: Partial<Record<ProviderInfo['id'], { install: string; login: string }>> = {
   anthropic: {
@@ -60,6 +67,9 @@ async function refresh(): Promise<void> {
     for (const p of providers.value) {
       if (p.cliPath) cliPathDrafts.value[p.id] = p.cliPath;
     }
+    analyticsEnabled.value = await refreshAnalyticsState();
+    const config = await apiGetAnalyticsConfig();
+    betaTelemetryEnabled.value = config.betaTelemetryOptIn;
   } finally {
     loading.value = false;
   }
@@ -157,6 +167,45 @@ function cancelClearHistory(): void {
   confirmClearHistory.value = false;
 }
 
+async function setAnalyticsEnabled(enabled: boolean): Promise<void> {
+  if (analyticsEnabled.value === enabled || analyticsBusy.value) return;
+  analyticsBusy.value = true;
+  generalError.value = null;
+  try {
+    await setAnalyticsOptOut(!enabled);
+    analyticsEnabled.value = enabled;
+    if (!enabled) {
+      betaTelemetryEnabled.value = false;
+    }
+  } catch (err) {
+    generalError.value = (err as Error).message;
+  } finally {
+    analyticsBusy.value = false;
+  }
+}
+
+async function setBetaTelemetryEnabled(enabled: boolean): Promise<void> {
+  if (!analyticsEnabled.value || betaTelemetryEnabled.value === enabled || betaTelemetryBusy.value) {
+    return;
+  }
+  betaTelemetryBusy.value = true;
+  generalError.value = null;
+  try {
+    await apiSetBetaTelemetry(enabled);
+    betaTelemetryEnabled.value = enabled;
+    await syncAnalyticsContext();
+  } catch (err) {
+    generalError.value = (err as Error).message;
+  } finally {
+    betaTelemetryBusy.value = false;
+  }
+}
+
+function onSetTheme(next: Theme): void {
+  setTheme(next);
+  void syncAnalyticsContext();
+}
+
 function confirmClearHistoryAction(): void {
   confirmClearHistory.value = false;
   emit('clear-history');
@@ -196,7 +245,7 @@ watch(
               <Button
                 size="sm"
                 :variant="theme === 'light' ? 'default' : 'outline'"
-                @click="setTheme('light')"
+                @click="onSetTheme('light')"
               >
                 <Sun class="size-4" />
                 Light
@@ -204,10 +253,63 @@ watch(
               <Button
                 size="sm"
                 :variant="theme === 'dark' ? 'default' : 'outline'"
-                @click="setTheme('dark')"
+                @click="onSetTheme('dark')"
               >
                 <Moon class="size-4" />
                 Dark
+              </Button>
+            </div>
+          </div>
+
+          <div class="space-y-2">
+            <Label>Privacy mode</Label>
+            <p class="text-xs text-muted-foreground">
+              When on, anonymous usage analytics are disabled. No API keys, chat
+              content, or account identifiers are collected.
+            </p>
+            <div class="flex gap-2">
+              <Button
+                size="sm"
+                :variant="!analyticsEnabled ? 'default' : 'outline'"
+                :disabled="analyticsBusy"
+                @click="setAnalyticsEnabled(false)"
+              >
+                On
+              </Button>
+              <Button
+                size="sm"
+                :variant="analyticsEnabled ? 'default' : 'outline'"
+                :disabled="analyticsBusy"
+                @click="setAnalyticsEnabled(true)"
+              >
+                Off
+              </Button>
+            </div>
+          </div>
+
+          <div v-if="analyticsEnabled" class="space-y-2">
+            <Label>Beta team content sharing</Label>
+            <p class="text-xs text-muted-foreground">
+              When enabled, prompts, AI responses, reasoning, and tool names are
+              shared to help improve the product. Tool arguments, results, and
+              file paths are never included.
+            </p>
+            <div class="flex gap-2">
+              <Button
+                size="sm"
+                :variant="betaTelemetryEnabled ? 'default' : 'outline'"
+                :disabled="betaTelemetryBusy"
+                @click="setBetaTelemetryEnabled(true)"
+              >
+                On
+              </Button>
+              <Button
+                size="sm"
+                :variant="!betaTelemetryEnabled ? 'default' : 'outline'"
+                :disabled="betaTelemetryBusy"
+                @click="setBetaTelemetryEnabled(false)"
+              >
+                Off
               </Button>
             </div>
           </div>

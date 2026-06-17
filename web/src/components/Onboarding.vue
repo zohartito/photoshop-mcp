@@ -25,6 +25,7 @@ import {
   type ProviderId,
   type ProviderInfo,
 } from '@/lib/api';
+import { capture } from '@/lib/analytics';
 
 const emit = defineEmits<{ saved: [] }>();
 
@@ -63,12 +64,17 @@ async function selectProvider(id: ProviderId): Promise<void> {
   const provider = providers.value.find((p) => p.id === id);
   authMethod.value = provider?.authMethod ?? 'api_key';
   error.value = null;
+  capture('setup_provider_selected', { provider_id: id });
 }
 
 async function selectAuthMethod(method: AuthMethod): Promise<void> {
   authMethod.value = method;
   error.value = null;
   if (selected.value) {
+    capture('setup_auth_method_selected', {
+      provider_id: selected.value.id,
+      auth_method: method,
+    });
     await apiSetAuthMethod(selected.value.id, method);
   }
 }
@@ -94,6 +100,10 @@ async function submit(): Promise<void> {
       }
     }
     await apiSetActive({ activeProvider: provider.id, activeModel: provider.defaultModel });
+    capture('setup_completed', {
+      provider_id: provider.id,
+      auth_method: authMethod.value,
+    });
     emit('saved');
   } catch (err) {
     error.value = (err as Error).message;
