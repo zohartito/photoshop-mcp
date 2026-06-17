@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import AppLoader from './components/AppLoader.vue';
 import Onboarding from './components/Onboarding.vue';
 import ChatView from './components/ChatView.vue';
 import Sidebar from './components/Sidebar.vue';
@@ -16,8 +17,11 @@ import {
 const status = ref<Status | null>(null);
 const providers = ref<ProviderInfo[]>([]);
 const loading = ref(true);
+const loadingMessage = ref('Starting…');
 const fatalError = ref<string | null>(null);
 const settingsOpen = ref(false);
+const clearingHistory = ref(false);
+const clearHistoryError = ref<string | null>(null);
 
 const chat = useChatStore();
 const route = useRoute();
@@ -49,9 +53,14 @@ async function syncFromRoute(): Promise<void> {
 
 async function refresh(): Promise<void> {
   try {
-    [status.value, providers.value] = await Promise.all([apiStatus(), apiListProviders()]);
+    loadingMessage.value = 'Checking connection…';
+    const [nextStatus, nextProviders] = await Promise.all([apiStatus(), apiListProviders()]);
+    status.value = nextStatus;
+    providers.value = nextProviders;
     if (hasAnyAuth.value) {
+      loadingMessage.value = 'Loading chats…';
       await chat.loadChats();
+      loadingMessage.value = 'Preparing workspace…';
       await syncFromRoute();
     }
   } catch (err) {
@@ -93,13 +102,25 @@ async function handleSettingsSaved(): Promise<void> {
   await refresh();
 }
 
+async function handleClearHistory(): Promise<void> {
+  if (chat.chats.value.length === 0) return;
+  clearingHistory.value = true;
+  clearHistoryError.value = null;
+  try {
+    await chat.clearAllChats();
+    await router.replace({ name: 'home' });
+  } catch (err) {
+    clearHistoryError.value = (err as Error).message;
+  } finally {
+    clearingHistory.value = false;
+  }
+}
+
 onMounted(refresh);
 </script>
 
 <template>
-  <div v-if="loading" class="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
-    Loading…
-  </div>
+  <AppLoader v-if="loading" :message="loadingMessage" />
   <div v-else-if="fatalError" class="flex min-h-screen items-center justify-center p-6">
     <div class="max-w-md rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
       {{ fatalError }}
@@ -121,13 +142,19 @@ onMounted(refresh);
       :providers="providers"
       :store="chat"
       :settings-open="settingsOpen"
+      :action-plan-beta="status?.actionPlanBeta ?? false"
+      :has-api-key="status?.hasApiKey ?? false"
       @new-chat="handleNewChat"
       @open-settings="settingsOpen = true"
     />
     <SettingsDialog
       v-if="settingsOpen"
+      :chat-count="chat.chats.value.length"
+      :clearing-history="clearingHistory"
+      :clear-history-error="clearHistoryError"
       @close="settingsOpen = false"
       @saved="handleSettingsSaved"
+      @clear-history="handleClearHistory"
     />
   </div>
 </template>

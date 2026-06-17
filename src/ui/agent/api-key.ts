@@ -8,10 +8,12 @@ import { buildSpawnArgs, sanitizedEnv } from './mcp-transport.js';
 import { PHOTOSHOP_EXPORT_CHAT_ID_ENV } from '../../lib/export-paths.js';
 import {
   computeCost,
+  isToolOutputOk,
   stringifyToolOutput,
   type AssistantBuffer,
   type RunChatFinishInfo,
   type RunChatStreamEvent,
+  type StreamActivityPayload,
 } from './shared.js';
 
 export interface RunChatViaApiKeyOptions {
@@ -69,6 +71,17 @@ export async function* runChatViaApiKey(
           opts.onAssistantBuffer?.(buffer);
           break;
         }
+        case 'reasoning-delta': {
+          buffer.reasoning = (buffer.reasoning ?? '') + part.text;
+          yield { type: 'reasoning-delta', payload: { text: part.text } };
+          opts.onAssistantBuffer?.(buffer);
+          break;
+        }
+        case 'start-step': {
+          const activity: StreamActivityPayload = { phase: 'thinking' };
+          yield { type: 'activity', payload: activity };
+          break;
+        }
         case 'tool-call': {
           const tc = {
             id: part.toolCallId,
@@ -81,20 +94,26 @@ export async function* runChatViaApiKey(
             type: 'tool-call',
             payload: { id: tc.id, name: tc.name, input: tc.input },
           };
+          yield {
+            type: 'activity',
+            payload: { phase: 'tool-running', detail: part.toolName },
+          };
           opts.onAssistantBuffer?.(buffer);
           break;
         }
         case 'tool-result': {
           const tc = buffer.toolCalls.find((c) => c.id === part.toolCallId);
           const text = stringifyToolOutput(part.output);
+          const ok = isToolOutputOk(part.output);
           if (tc) {
-            tc.result = { ok: true, content: text };
-            tc.status = 'success';
+            tc.result = { ok, content: text };
+            tc.status = ok ? 'success' : 'error';
           }
           yield {
             type: 'tool-result',
-            payload: { id: part.toolCallId, ok: true, content: text },
+            payload: { id: part.toolCallId, ok, content: text },
           };
+          yield { type: 'activity', payload: { phase: 'thinking' } };
           opts.onAssistantBuffer?.(buffer);
           break;
         }
@@ -109,6 +128,7 @@ export async function* runChatViaApiKey(
             type: 'tool-result',
             payload: { id: part.toolCallId, ok: false, content: text },
           };
+          yield { type: 'activity', payload: { phase: 'thinking' } };
           opts.onAssistantBuffer?.(buffer);
           break;
         }

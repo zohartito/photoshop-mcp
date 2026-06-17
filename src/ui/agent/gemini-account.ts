@@ -8,6 +8,7 @@ import { resolveCliBinary } from '../providers/cli-utils.js';
 import { buildMcpServerConfig } from './mcp-transport.js';
 import {
   buildPromptWithHistory,
+  isToolOutputOk,
   type AssistantBuffer,
   type RunChatFinishInfo,
   type RunChatStreamEvent,
@@ -86,11 +87,12 @@ export async function* runChatViaGeminiAccount(
   opts.abortSignal.addEventListener('abort', onAbort);
 
   try {
+    const geminiState = { sawMessage: false };
     const events = readJsonLines(child.stdout!);
     for await (const raw of events) {
       if (opts.abortSignal.aborted) break;
       const event = raw as GeminiStreamEvent;
-      const mapped = mapGeminiEvent(event, buffer);
+      const mapped = mapGeminiEvent(event, buffer, geminiState);
       for (const ev of mapped.events) {
         yield ev;
       }
@@ -142,13 +144,18 @@ async function createGeminiWorkspace(chatId?: string): Promise<string> {
 
 function mapGeminiEvent(
   event: GeminiStreamEvent,
-  buffer: AssistantBuffer
+  buffer: AssistantBuffer,
+  state: { sawMessage: boolean }
 ): { events: RunChatStreamEvent[]; finish?: RunChatFinishInfo } {
   const events: RunChatStreamEvent[] = [];
   let finish: RunChatFinishInfo | undefined;
 
   switch (event.type) {
     case 'message': {
+      if (!state.sawMessage && event.role !== 'user') {
+        state.sawMessage = true;
+        events.push({ type: 'activity', payload: { phase: 'thinking' } });
+      }
       const text = event.delta ?? event.content ?? '';
       if (text && event.role !== 'user') {
         buffer.text += text;
@@ -169,6 +176,10 @@ function mapGeminiEvent(
         type: 'tool-call',
         payload: { id: tc.id, name: tc.name, input: tc.input },
       });
+      events.push({
+        type: 'activity',
+        payload: { phase: 'tool-running', detail: tc.name },
+      });
       break;
     }
     case 'tool_result': {
@@ -177,13 +188,14 @@ function mapGeminiEvent(
         typeof event.output === 'string'
           ? event.output
           : JSON.stringify(event.output ?? '');
-      const ok = event.ok !== false;
+      const ok = isToolOutputOk(event.output) && event.ok !== false;
       const tc = buffer.toolCalls.find((c) => c.id === id);
       if (tc) {
         tc.result = { ok, content };
         tc.status = ok ? 'success' : 'error';
       }
       events.push({ type: 'tool-result', payload: { id, ok, content } });
+      events.push({ type: 'activity', payload: { phase: 'thinking' } });
       break;
     }
     case 'error': {

@@ -1,25 +1,49 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { MessageSquarePlus } from 'lucide-vue-next';
+import { computed, ref, watch } from 'vue';
+import { MessageSquarePlus, FlaskConical } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import StatusBar from './StatusBar.vue';
 import MessageList from './MessageList.vue';
 import Composer from './Composer.vue';
 import ModelSelector from './ModelSelector.vue';
-import Footer from './Footer.vue';
-import { apiUpdateChatModel, type ProviderId, type ProviderInfo } from '@/lib/api';
+import {
+  apiSetActionPlanBeta,
+  apiUpdateChatModel,
+  type ProviderId,
+  type ProviderInfo,
+} from '@/lib/api';
 import type { useChatStore } from '@/stores/chat';
 
 const props = defineProps<{
   providers: ProviderInfo[];
   store: ReturnType<typeof useChatStore>;
   settingsOpen: boolean;
+  actionPlanBeta: boolean;
+  hasApiKey: boolean;
 }>();
 
 const emit = defineEmits<{ 
   'new-chat': [];
   'open-settings': [];
 }>();
+
+const planBeta = ref(props.actionPlanBeta);
+watch(
+  () => props.actionPlanBeta,
+  (v) => {
+    planBeta.value = v;
+  }
+);
+
+async function toggleActionPlanBeta(): Promise<void> {
+  const next = !planBeta.value;
+  planBeta.value = next;
+  try {
+    await apiSetActionPlanBeta(next);
+  } catch {
+    planBeta.value = !next;
+  }
+}
 
 const activeChat = computed(() => {
   const id = props.store.activeChatId.value;
@@ -35,6 +59,10 @@ const activeProviderInfo = computed(() => {
 
 const subscriptionMode = computed(
   () => activeProviderInfo.value?.authMethod === 'cli_account'
+);
+
+const actionPlanAvailable = computed(
+  () => props.hasApiKey || !subscriptionMode.value
 );
 
 async function onProviderChange(providerId: ProviderId): Promise<void> {
@@ -69,38 +97,71 @@ async function onModelChange(modelId: string): Promise<void> {
     </div>
 
     <template v-else>
-      <MessageList
-        :messages="props.store.messages"
-        :busy="props.store.sending.value"
-        :providers="props.providers"
-      />
+      <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <MessageList
+          :messages="props.store.messages"
+          :busy="props.store.sending.value"
+          :providers="props.providers"
+        />
 
-      <div
-        v-if="props.store.error.value"
-        class="border-t border-destructive/40 bg-destructive/10 px-4 py-2 text-center text-xs text-destructive"
-      >
-        {{ props.store.error.value }}
+        <div class="pointer-events-none absolute inset-x-0 bottom-0 z-10">
+          <div
+            v-if="props.store.error.value"
+            class="pointer-events-auto border-t border-destructive/40 bg-destructive/10 px-4 py-2 text-center text-xs text-destructive backdrop-blur-sm"
+          >
+            {{ props.store.error.value }}
+          </div>
+
+          <Composer
+            class="pointer-events-auto"
+            :busy="props.store.sending.value"
+            @send="(p) => props.store.send(p)"
+            @abort="props.store.abort"
+          >
+            <template #actions>
+              <div class="flex items-center gap-1">
+                <ModelSelector
+                  :providers="props.providers"
+                  :current-provider="activeChat.provider"
+                  :current-model="activeChat.model"
+                  :disabled="props.store.sending.value"
+                  @update:provider="onProviderChange"
+                  @update:model="onModelChange"
+                  @open-settings="emit('open-settings')"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  :disabled="props.store.sending.value || !actionPlanAvailable"
+                  :title="
+                    !actionPlanAvailable
+                      ? 'Action Plan needs an API key for the planning call. Add one in Settings.'
+                      : subscriptionMode
+                        ? 'Uses your stored API key to plan all steps in one call, then executes them directly.'
+                        : 'Beta: plan all Photoshop steps in one call, then execute them in a single pass.'
+                  "
+                  class="h-7 gap-1.5 px-2 text-xs hover:bg-white/5"
+                  :class="
+                    planBeta
+                      ? 'text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  "
+                  @click="toggleActionPlanBeta"
+                >
+                  <FlaskConical class="size-3.5" :class="planBeta ? 'text-amber-500' : ''" />
+                  Action Plan
+                  <span
+                    class="rounded px-1 text-[9px] font-semibold uppercase"
+                    :class="planBeta ? 'bg-amber-500/15 text-amber-600' : 'bg-white/10 text-muted-foreground'"
+                  >
+                    {{ planBeta ? 'On' : 'Beta' }}
+                  </span>
+                </Button>
+              </div>
+            </template>
+          </Composer>
+        </div>
       </div>
-
-      <Composer
-        :busy="props.store.sending.value"
-        @send="(p) => props.store.send(p)"
-        @abort="props.store.abort"
-      >
-        <template #actions>
-      <ModelSelector
-        :providers="props.providers"
-        :current-provider="activeChat.provider"
-        :current-model="activeChat.model"
-        :disabled="props.store.sending.value"
-        @update:provider="onProviderChange"
-        @update:model="onModelChange"
-        @open-settings="emit('open-settings')"
-      />
-        </template>
-      </Composer>
     </template>
-
-    <Footer />
   </div>
 </template>

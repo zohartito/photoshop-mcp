@@ -1,8 +1,11 @@
 import { createApp } from 'vue';
 import latinWoff2 from '@fontsource-variable/source-sans-3/files/source-sans-3-latin-wght-normal.woff2?url';
 import App from './App.vue';
+import { applyTheme, getStoredTheme } from './composables/useTheme';
 import { router } from './router';
 import './style.css';
+
+applyTheme(getStoredTheme());
 
 // Self-host only the Latin subset of Source Sans 3 Variable to keep the
 // shipped tarball small. Other subsets are intentionally not bundled.

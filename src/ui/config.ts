@@ -1,4 +1,3 @@
-import { getProvider } from './providers/registry.js';
 import { kvGet, kvSet } from './store/kv.js';
 
 export type ProviderId = 'anthropic' | 'openai' | 'openrouter' | 'google';
@@ -16,6 +15,12 @@ export interface UIConfig {
   providers: Partial<Record<ProviderId, ProviderConfig>>;
   activeProvider: ProviderId;
   activeModel: string;
+  /**
+   * Beta: when enabled (and the active provider uses api_key auth), a single
+   * planning LLM call produces an ordered tool plan that is executed directly,
+   * instead of the per-step ReAct loop. Defaults to off (backward compatible).
+   */
+  actionPlanBeta?: boolean;
 }
 
 const KV_KEY = 'config';
@@ -24,6 +29,7 @@ const DEFAULT_CONFIG: UIConfig = {
   providers: {},
   activeProvider: 'anthropic',
   activeModel: 'claude-sonnet-4-5',
+  actionPlanBeta: false,
 };
 
 export function loadConfig(): UIConfig {
@@ -68,16 +74,6 @@ export function isProviderConfigAuthenticated(id: ProviderId): boolean {
   const authMethod = cfg?.authMethod ?? 'api_key';
   if (authMethod === 'api_key') return Boolean(cfg?.apiKey);
   return Boolean(cfg?.cliAccountLabel);
-}
-
-export async function probeProviderAuthentication(id: ProviderId): Promise<boolean> {
-  const cfg = getProviderConfig(id);
-  const authMethod = cfg?.authMethod ?? 'api_key';
-  if (authMethod === 'api_key') return Boolean(cfg?.apiKey);
-  const provider = getProvider(id);
-  if (!provider?.validateCliAccount) return false;
-  const check = await provider.validateCliAccount({ cliPath: cfg?.cliPath });
-  return check.ok;
 }
 
 export function maskApiKey(apiKey?: string): string | null {

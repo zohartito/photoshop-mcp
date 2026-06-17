@@ -83,7 +83,7 @@ function formatDate(ts: number): string {
     class="flex h-screen w-[260px] shrink-0 flex-col border-r border-border bg-card/40"
     @click="menuOpenFor = null"
   >
-    <div class="flex items-center gap-2 border-b border-border px-3 py-3">
+    <div class="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
       <Popover>
         <PopoverTrigger as-child>
           <button
@@ -127,13 +127,17 @@ function formatDate(ts: number): string {
     </div>
 
     <div class="px-3 pt-3">
-      <Button class="w-full justify-start gap-2" variant="outline" @click="emit('new-chat')">
+      <Button
+        class="w-full justify-start gap-2 border-dashed"
+        variant="outline"
+        @click="emit('new-chat')"
+      >
         <MessageSquarePlus class="size-4" />
         New chat
       </Button>
     </div>
 
-    <div class="mt-3 flex-1 overflow-y-auto px-2">
+    <div class="scrollbar-none mt-3 min-h-0 flex-1 overflow-y-auto px-2">
       <div v-if="props.chats.length === 0" class="px-2 py-6 text-center text-xs text-muted-foreground">
         No chats yet.
       </div>
@@ -199,6 +203,18 @@ function formatDate(ts: number): string {
         <Settings2 class="size-4" />
         Settings
       </Button>
+      <div class="my-2 border-t border-border" />
+      <p class="text-center text-[11px] text-muted-foreground">
+        by
+        <a
+          href="https://github.com/alisaitteke"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="transition-colors hover:text-foreground"
+        >
+          @alisaitteke
+        </a>
+      </p>
     </div>
   </aside>
 </template>
