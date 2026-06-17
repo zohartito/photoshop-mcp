@@ -15,6 +15,7 @@ import type { ToolCall } from '@/stores/chat';
 const props = defineProps<{
   plan: PlanView;
   toolCalls?: ToolCall[];
+  partial?: boolean;
 }>();
 
 const expanded = ref<Set<string>>(new Set());
@@ -54,9 +55,12 @@ function stepExpandable(index: number): boolean {
     <div class="flex items-center gap-2 border-b border-border px-3 py-2 text-xs">
       <ListChecks class="size-3.5 text-muted-foreground" />
       <span class="font-medium text-foreground">Action plan</span>
-      <span class="truncate text-muted-foreground">· {{ plan.summary }}</span>
+      <span v-if="partial" class="rounded bg-amber-500/15 px-1 text-[9px] font-semibold uppercase text-amber-600">
+        Draft
+      </span>
+      <span class="truncate text-muted-foreground">· {{ plan.summary || '…' }}</span>
       <span class="ml-auto shrink-0 text-[10px] text-muted-foreground">
-        {{ done }}/{{ plan.steps.length }}
+        {{ done }}/{{ plan.steps.length || '…' }}
       </span>
     </div>
     <ol class="divide-y divide-border/60">
@@ -88,7 +92,12 @@ function stepExpandable(index: number): boolean {
             <div v-else class="flex items-baseline gap-1.5">
               <span class="w-3 shrink-0" />
               <span class="text-[10px] text-muted-foreground">{{ idx + 1 }}.</span>
-              <span class="font-mono text-foreground">{{ displayTool(step.tool) }}</span>
+              <span
+                class="font-mono"
+                :class="step.tool ? 'text-foreground' : 'animate-pulse text-muted-foreground'"
+              >
+                {{ step.tool ? displayTool(step.tool) : '…' }}
+              </span>
             </div>
             <p
               v-if="step.rationale"

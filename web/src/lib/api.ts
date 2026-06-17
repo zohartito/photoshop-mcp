@@ -53,6 +53,7 @@ export interface ProviderInfo {
   apiKeyMasked: string | null;
   accountLabel: string | null;
   cliPath: string | null;
+  cliBinaryName: string | null;
   models: ProviderModel[];
   defaultModel: string;
 }
@@ -118,6 +119,7 @@ export interface PersistedMessage {
   content: {
     text: string;
     toolCalls: PersistedToolCall[];
+    reasoning?: string;
     usage?: UsageDetails;
     cost?: UsageCost;
     provider?: ProviderId;

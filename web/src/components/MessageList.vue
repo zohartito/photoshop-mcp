@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from 'vue';
 import { User, Sparkles } from 'lucide-vue-next';
-import ToolCallCard from './ToolCallCard.vue';
-import PlanCard from './PlanCard.vue';
+import StreamingMessage from './StreamingMessage.vue';
 import ProviderIcon from './ProviderIcon.vue';
 import type { ChatMessage } from '@/stores/chat';
 import type { ProviderInfo } from '@/lib/api';
@@ -23,11 +22,17 @@ async function scrollToBottom(): Promise<void> {
 }
 
 watch(
-  () => [props.messages.length, props.busy, props.messages[props.messages.length - 1]?.text],
+  () => [
+    props.messages.length,
+    props.busy,
+    props.messages[props.messages.length - 1]?.text,
+    props.messages[props.messages.length - 1]?.reasoning,
+    props.messages[props.messages.length - 1]?.plan?.steps.length,
+    props.messages[props.messages.length - 1]?.isStreaming,
+  ],
   () => {
     void scrollToBottom();
-  },
-  { deep: true }
+  }
 );
 
 onMounted(scrollToBottom);
@@ -75,17 +80,17 @@ function standaloneToolCalls(m: ChatMessage) {
             {{ m.role === 'user' ? 'You' : assistantLabel(m) }}
           </div>
           <div
-            v-if="m.text"
+            v-if="m.role === 'user' && m.text"
             class="whitespace-pre-wrap text-sm leading-relaxed text-foreground"
-          >{{ m.text }}</div>
-          <PlanCard v-if="m.plan" :plan="m.plan" :tool-calls="m.toolCalls" />
-          <ToolCallCard v-for="tc in standaloneToolCalls(m)" :key="tc.id" :tool-call="tc" />
+          >
+            {{ m.text }}
+          </div>
+          <StreamingMessage
+            v-else-if="m.role === 'assistant'"
+            :message="m"
+            :standalone-tool-calls="standaloneToolCalls(m)"
+          />
         </div>
-      </div>
-
-      <div v-if="busy" class="flex items-center gap-2 text-xs text-muted-foreground">
-        <span class="inline-block size-1.5 animate-pulse rounded-full bg-muted-foreground" />
-        Working…
       </div>
     </div>
   </div>

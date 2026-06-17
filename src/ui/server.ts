@@ -17,7 +17,6 @@ import {
   isProviderConfigAuthenticated,
   loadConfig,
   maskApiKey,
-  probeProviderAuthentication,
   saveConfig,
   setProviderConfig,
   type AuthMethod,
@@ -93,7 +92,7 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
     const config = loadConfig();
     const active = config.providers[config.activeProvider];
     const authMethod = getAuthMethod(config.activeProvider);
-    const isAuthenticated = await probeProviderAuthentication(config.activeProvider);
+    const isAuthenticated = isProviderConfigAuthenticated(config.activeProvider);
     return c.json({
       activeProvider: config.activeProvider,
       activeModel: config.activeModel,
@@ -128,28 +127,27 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
 
   app.get('/api/providers', async (c) => {
     const config = loadConfig();
-    const out = await Promise.all(
-      listProviders().map(async (p) => {
-        const cfg = config.providers[p.id];
-        const authMethod = cfg?.authMethod ?? 'api_key';
-        const isAuthenticated = await probeProviderAuthentication(p.id);
-        return {
-          id: p.id,
-          label: p.label,
-          apiKeyHint: p.apiKeyHint,
-          apiKeyHelpUrl: p.apiKeyHelpUrl,
-          supportedAuthMethods: p.supportedAuthMethods,
-          authMethod,
-          isAuthenticated,
-          hasApiKey: Boolean(cfg?.apiKey),
-          apiKeyMasked: maskApiKey(cfg?.apiKey),
-          accountLabel: cfg?.cliAccountLabel ?? null,
-          cliPath: cfg?.cliPath ?? null,
-          models: p.listModels(),
-          defaultModel: p.defaultModel(),
-        };
-      })
-    );
+    const out = listProviders().map((p) => {
+      const cfg = config.providers[p.id];
+      const authMethod = cfg?.authMethod ?? 'api_key';
+      const isAuthenticated = isProviderConfigAuthenticated(p.id);
+      return {
+        id: p.id,
+        label: p.label,
+        apiKeyHint: p.apiKeyHint,
+        apiKeyHelpUrl: p.apiKeyHelpUrl,
+        supportedAuthMethods: p.supportedAuthMethods,
+        authMethod,
+        isAuthenticated,
+        hasApiKey: Boolean(cfg?.apiKey),
+        apiKeyMasked: maskApiKey(cfg?.apiKey),
+        accountLabel: cfg?.cliAccountLabel ?? null,
+        cliPath: cfg?.cliPath ?? null,
+        cliBinaryName: p.cliBinaryName ?? null,
+        models: p.listModels(),
+        defaultModel: p.defaultModel(),
+      };
+    });
     return c.json(out);
   });
 
@@ -331,6 +329,8 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
     const controller = new AbortController();
     abortControllers.set(requestId, controller);
 
+    c.header('X-Accel-Buffering', 'no');
+
     return streamSSE(c, async (stream) => {
       let buffer: AssistantBuffer = { text: '', toolCalls: [] };
       let lastFinish: RunChatFinishInfo | null = null;
@@ -338,7 +338,14 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
 
       const persistAssistant = () => {
         if (assistantPersisted) return;
-        if (!buffer.text && buffer.toolCalls.length === 0 && !buffer.plan) return;
+        if (
+          !buffer.text &&
+          !buffer.reasoning &&
+          buffer.toolCalls.length === 0 &&
+          !buffer.plan
+        ) {
+          return;
+        }
         appendMessage({
           chatId: chat.id,
           role: 'assistant',
@@ -347,6 +354,7 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
             toolCalls: buffer.toolCalls,
             provider: chat.provider,
             model: chat.model,
+            ...(buffer.reasoning ? { reasoning: buffer.reasoning } : {}),
             ...(buffer.plan ? { plan: buffer.plan } : {}),
             ...(lastFinish?.usage ? { usage: lastFinish.usage } : {}),
             ...(lastFinish?.cost ? { cost: lastFinish.cost } : {}),

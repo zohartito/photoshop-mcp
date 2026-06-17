@@ -26,6 +26,7 @@ export interface MessageContent {
   cost?: UsageCost;
   provider?: string;
   model?: string;
+  reasoning?: string;
   /** Present only for Action Plan (beta) runs. */
   plan?: {
     summary: string;

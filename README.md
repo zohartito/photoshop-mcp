@@ -1,15 +1,16 @@
 # Photoshop MCP Server
 
-*v1.1+ — recipe workflows, fewer round-trips, snappier sessions.*
+*v1.1+ — recipe workflows, fewer round-trips, snappier sessions. Standalone UI ships **Action Plan (beta)** for plan-then-execute runs.*
 
 > **Note:** This is an unofficial, community-maintained project and is not affiliated with or endorsed by Adobe Inc.
 
 [![npm version](https://img.shields.io/npm/v/@alisaitteke/photoshop-mcp.svg)](https://www.npmjs.com/package/@alisaitteke/photoshop-mcp)
+[![Action Plan](https://img.shields.io/badge/Action%20Plan-beta-amber.svg)](#action-plan-beta)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey.svg)]()
 
-A Model Context Protocol (MCP) server that enables AI assistants like Claude and Cursor to control Adobe Photoshop programmatically. This allows you to create designs, manipulate images, and automate Photoshop workflows through natural language commands while working in your IDE — or through the bundled **standalone web UI**, which supports both API keys and CLI subscription accounts (Claude Code / Gemini CLI).
+A Model Context Protocol (MCP) server that enables AI assistants like Claude and Cursor to control Adobe Photoshop programmatically. This allows you to create designs, manipulate images, and automate Photoshop workflows through natural language commands while working in your IDE — or through the bundled **standalone web UI**, which supports both API keys and CLI subscription accounts (Claude Code / Gemini CLI). The UI also offers an opt-in **Action Plan (beta)** mode that plans every Photoshop step in one LLM call, then runs them in a single pass.
 
 ## 🖥️ Standalone UI (no IDE required)
 
@@ -51,6 +52,29 @@ CLI subscription account (Anthropic and Google):
 
 You can switch auth method per provider in Settings without losing the other
 credential (e.g. keep an API key while trying CLI account, then switch back).
+
+### Action Plan (beta)
+
+An optional execution mode in the standalone web UI for **API key auth only**
+(`cli_account` always uses the default agentic flow). Turn it on with the
+**Action Plan** toggle next to the model selector in the composer.
+
+Instead of a per-step ReAct loop (model → tool → model → tool …), Action Plan:
+
+1. Makes **one** planning LLM call that outputs an ordered todo list of
+   Photoshop MCP tool calls with parameters.
+2. Executes those tools **directly** in sequence — no extra model round-trips
+   between steps.
+3. On a failed step or unresolved dependency, runs a bounded **repair** loop
+   (re-plans only the remaining steps, up to 3 times).
+
+The plan appears as a live todo list above the tool-call cards, with per-step
+status (`pending` → `running` → `done` / `error`). Plans are persisted in chat
+history so they survive reload. The toggle is off by default; the existing
+agentic flow is unchanged when Action Plan is disabled.
+
+Good for multi-step prompts such as *"remove the background and export for web"*
+where you want fewer model calls and faster end-to-end execution.
 
 ### What happens on first launch
 
@@ -426,6 +450,8 @@ Never guess — read get_state after a failure and propose the next single step.
 
 - **Standalone web UI** — local chat interface (`photoshop-mcp-ui`); API key or CLI
   subscription auth per provider (Anthropic, Google)
+- **Action Plan (beta)** — opt-in plan-then-execute mode in the web UI (API key
+  only): one planning call, direct tool execution, bounded repair on failure
 - **Works on both Windows and macOS**
 - **Supports Photoshop 2012-2025+**
 - **ExtendScript API**: Universal compatibility via AppleScript/COM automation

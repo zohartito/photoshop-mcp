@@ -1,6 +1,6 @@
 import { createMCPClient, type MCPClient } from '@ai-sdk/mcp';
 import { Experimental_StdioMCPTransport } from '@ai-sdk/mcp/mcp-stdio';
-import { generateObject, type LanguageModelUsage, type ModelMessage } from 'ai';
+import { Output, streamText, type LanguageModelUsage, type ModelMessage } from 'ai';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { PHOTOSHOP_EXPORT_CHAT_ID_ENV } from '../../lib/export-paths.js';
@@ -118,16 +118,34 @@ export async function* runChatViaActionPlan(
     const catalog = buildToolCatalog(tools);
 
     // ---- 1. Plan ---------------------------------------------------------
-    const planResult = await generateObject({
-      model,
-      schema: planSchema,
-      system: opts.systemPrompt,
-      prompt: buildPlannerPrompt(catalog, opts.history, opts.prompt),
-      abortSignal: opts.abortSignal,
-    });
-    addUsage(planResult.usage);
+    yield { type: 'activity', payload: { phase: 'planning' } };
 
-    let plan: Plan = planResult.object;
+    let plan: Plan;
+    try {
+      const streamed = streamText({
+        model,
+        output: Output.object({ schema: planSchema }),
+        system: opts.systemPrompt,
+        prompt: buildPlannerPrompt(catalog, opts.history, opts.prompt),
+        abortSignal: opts.abortSignal,
+      });
+
+      for await (const partial of streamed.partialOutputStream) {
+        const partialView = toPartialPlanView(partial as Partial<Plan>);
+        buffer.plan = partialView;
+        yield { type: 'plan-partial', payload: partialView };
+        opts.onAssistantBuffer?.(buffer);
+      }
+
+      plan = await streamed.output;
+      addUsage(await streamed.usage);
+    } catch (err) {
+      yield {
+        type: 'error',
+        payload: { message: `Planning failed: ${(err as Error).message}` },
+      };
+      return;
+    }
 
     // Empty plan -> fall back to a single natural-language reply.
     if (!plan.steps.length) {
@@ -359,15 +377,32 @@ export async function* runChatViaActionPlan(
       const remaining = steps.slice(i);
       let replanned: Plan;
       try {
-        const repairResult = await generateObject({
+        yield { type: 'activity', payload: { phase: 'planning' } };
+
+        const streamed = streamText({
           model,
-          schema: planSchema,
+          output: Output.object({ schema: planSchema }),
           system: opts.systemPrompt,
           prompt: buildRepairPrompt(catalog, opts.prompt, remaining, results, errorMessage),
           abortSignal: opts.abortSignal,
         });
-        addUsage(repairResult.usage);
-        replanned = repairResult.object;
+
+        for await (const partial of streamed.partialOutputStream) {
+          const partialTail = toPartialPlanView(partial as Partial<Plan>);
+          const mergedView: PlanView = {
+            summary: partialTail.summary || planView.summary,
+            steps: [
+              ...planView.steps.slice(0, i),
+              ...partialTail.steps,
+            ],
+          };
+          buffer.plan = mergedView;
+          yield { type: 'plan-partial', payload: mergedView };
+          opts.onAssistantBuffer?.(buffer);
+        }
+
+        replanned = await streamed.output;
+        addUsage(await streamed.usage);
       } catch (err) {
         yield {
           type: 'error',
@@ -396,6 +431,24 @@ export async function* runChatViaActionPlan(
 
 function toStepView(step: PlanStep, status: PlanStepStatus) {
   return { id: step.id, tool: step.tool, rationale: step.rationale, status };
+}
+
+function toPartialPlanView(partial: Partial<Plan>): PlanView {
+  const rawSteps = partial.steps ?? [];
+  const steps: PlanView['steps'] = [];
+  for (const s of rawSteps) {
+    if (!s) continue;
+    steps.push({
+      id: s.id ?? '',
+      tool: s.tool ?? '',
+      rationale: s.rationale,
+      status: 'pending',
+    });
+  }
+  return {
+    summary: partial.summary ?? '',
+    steps: steps.filter((s) => s.id || s.tool),
+  };
 }
 
 function setStepStatus(plan: PlanView, id: string, status: PlanStepStatus): void {

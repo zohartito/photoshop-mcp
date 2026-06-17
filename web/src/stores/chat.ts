@@ -18,12 +18,23 @@ import {
 
 export interface ToolCall extends PersistedToolCall {}
 
+export type StreamActivityPhase = 'planning' | 'thinking' | 'tool-running';
+
+export interface StreamActivity {
+  phase: StreamActivityPhase;
+  detail?: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
+  reasoning?: string;
   toolCalls: ToolCall[];
   plan?: PlanView;
+  planPartial?: boolean;
+  activity?: StreamActivity;
+  isStreaming?: boolean;
   usage?: UsageDetails;
   cost?: UsageCost;
   provider?: ProviderId;
@@ -33,6 +44,8 @@ export interface ChatMessage {
 
 export interface ChatStreamEventPayload {
   text?: string;
+  phase?: StreamActivityPhase;
+  detail?: string;
   id?: string;
   name?: string;
   input?: unknown;
@@ -42,11 +55,12 @@ export interface ChatStreamEventPayload {
   usage?: UsageDetails;
   cost?: UsageCost;
   message?: string;
-  // Action Plan (beta) events
   summary?: string;
   steps?: PlanView['steps'];
   status?: PlanStepStatus;
   stepId?: string;
+  attempt?: number;
+  reason?: string;
 }
 
 export interface ChatTotals {
@@ -130,6 +144,7 @@ export function useChatStore() {
         id: m.id,
         role: m.role,
         text: m.content.text,
+        reasoning: m.content.reasoning,
         toolCalls: m.content.toolCalls ?? [],
         plan: m.content.plan,
         usage: m.content.usage,
@@ -174,12 +189,59 @@ export function useChatStore() {
       role: 'assistant',
       text: '',
       toolCalls: [],
+      isStreaming: true,
       provider: activeChat?.provider,
       model: activeChat?.model,
       createdAt: Date.now(),
     };
     messages.push(created);
     return created;
+  }
+
+  let streamingMessage: ChatMessage | null = null;
+  let pendingTextDelta = '';
+  let pendingReasoningDelta = '';
+  let rafScheduled = false;
+
+  function flushDeltaBatch(): void {
+    rafScheduled = false;
+    if (!streamingMessage) return;
+    if (pendingTextDelta) {
+      streamingMessage.text += pendingTextDelta;
+      pendingTextDelta = '';
+    }
+    if (pendingReasoningDelta) {
+      streamingMessage.reasoning = (streamingMessage.reasoning ?? '') + pendingReasoningDelta;
+      pendingReasoningDelta = '';
+    }
+  }
+
+  function scheduleDeltaFlush(): void {
+    if (rafScheduled) return;
+    rafScheduled = true;
+    requestAnimationFrame(flushDeltaBatch);
+  }
+
+  function queueTextDelta(text: string): void {
+    pendingTextDelta += text;
+    scheduleDeltaFlush();
+  }
+
+  function queueReasoningDelta(text: string): void {
+    pendingReasoningDelta += text;
+    scheduleDeltaFlush();
+  }
+
+  function finalizeStreamingMessage(): void {
+    flushDeltaBatch();
+    if (streamingMessage) {
+      streamingMessage.isStreaming = false;
+      streamingMessage.activity = undefined;
+      streamingMessage.planPartial = false;
+    }
+    streamingMessage = null;
+    pendingTextDelta = '';
+    pendingReasoningDelta = '';
   }
 
   function findToolCall(id: string): ToolCall | undefined {
@@ -193,9 +255,20 @@ export function useChatStore() {
   function handleStreamEvent(event: string, data: ChatStreamEventPayload): void {
     if (event === 'text-delta' && data.text) {
       const m = ensureAssistantMessage();
-      m.text += data.text;
-    } else if (event === 'tool-call' && data.id && data.name) {
+      streamingMessage = m;
+      queueTextDelta(data.text);
+    } else if (event === 'reasoning-delta' && data.text) {
       const m = ensureAssistantMessage();
+      streamingMessage = m;
+      queueReasoningDelta(data.text);
+    } else if (event === 'activity' && data.phase) {
+      const m = ensureAssistantMessage();
+      streamingMessage = m;
+      m.activity = { phase: data.phase, detail: data.detail };
+    } else if (event === 'tool-call' && data.id && data.name) {
+      flushDeltaBatch();
+      const m = ensureAssistantMessage();
+      streamingMessage = m;
       m.toolCalls.push({
         id: data.id,
         name: data.name,
@@ -203,26 +276,37 @@ export function useChatStore() {
         status: 'pending',
       });
     } else if (event === 'tool-result' && data.id) {
+      flushDeltaBatch();
       const tc = findToolCall(data.id);
       if (tc) {
         tc.result = { ok: Boolean(data.ok), content: data.content ?? '' };
         tc.status = data.ok ? 'success' : 'error';
       }
-    } else if (event === 'plan') {
+    } else if (event === 'plan-partial') {
       const m = ensureAssistantMessage();
+      streamingMessage = m;
       m.plan = { summary: data.summary ?? '', steps: data.steps ?? [] };
+      m.planPartial = true;
+    } else if (event === 'plan') {
+      flushDeltaBatch();
+      const m = ensureAssistantMessage();
+      streamingMessage = m;
+      m.plan = { summary: data.summary ?? '', steps: data.steps ?? [] };
+      m.planPartial = false;
     } else if (event === 'plan-step' && data.id && data.status) {
+      flushDeltaBatch();
       const m = ensureAssistantMessage();
       const step = m.plan?.steps.find((s) => s.id === data.id);
       if (step) step.status = data.status;
     } else if (event === 'plan-repair') {
       // Re-plan announced; the subsequent 'plan' event replaces the step list.
-      // No dedicated state needed beyond the refreshed plan that follows.
     } else if (event === 'finish') {
+      flushDeltaBatch();
       const m = ensureAssistantMessage();
       if (data.usage) m.usage = data.usage;
       if (data.cost) m.cost = data.cost;
     } else if (event === 'error') {
+      finalizeStreamingMessage();
       error.value = data.message ?? 'Unknown error';
     }
   }
@@ -241,6 +325,8 @@ export function useChatStore() {
       toolCalls: [],
       createdAt: Date.now(),
     });
+
+    ensureAssistantMessage();
 
     const requestId = crypto.randomUUID();
     activeRequestId = requestId;
@@ -261,6 +347,7 @@ export function useChatStore() {
         error.value = (err as Error).message;
       }
     } finally {
+      finalizeStreamingMessage();
       sending.value = false;
       activeRequestId = null;
       abortController = null;

@@ -6,7 +6,6 @@ import StatusBar from './StatusBar.vue';
 import MessageList from './MessageList.vue';
 import Composer from './Composer.vue';
 import ModelSelector from './ModelSelector.vue';
-import Footer from './Footer.vue';
 import {
   apiSetActionPlanBeta,
   apiUpdateChatModel,
@@ -164,7 +163,5 @@ async function onModelChange(modelId: string): Promise<void> {
         </div>
       </div>
     </template>
-
-    <Footer />
   </div>
 </template>

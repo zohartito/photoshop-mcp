@@ -23,6 +23,7 @@ const emit = defineEmits<{
 }>();
 
 const providers = ref<ProviderInfo[]>([]);
+const loading = ref(true);
 const drafts = ref<Record<string, string>>({});
 const cliPathDrafts = ref<Record<string, string>>({});
 const busy = ref<Record<string, boolean>>({});
@@ -40,9 +41,14 @@ const CLI_INSTALL: Partial<Record<ProviderInfo['id'], { install: string; login: 
 };
 
 async function refresh(): Promise<void> {
-  providers.value = await apiListProviders();
-  for (const p of providers.value) {
-    if (p.cliPath) cliPathDrafts.value[p.id] = p.cliPath;
+  loading.value = true;
+  try {
+    providers.value = await apiListProviders();
+    for (const p of providers.value) {
+      if (p.cliPath) cliPathDrafts.value[p.id] = p.cliPath;
+    }
+  } finally {
+    loading.value = false;
   }
 }
 
@@ -121,6 +127,12 @@ async function validateCli(provider: ProviderInfo): Promise<void> {
 function supportsCliAccount(provider: ProviderInfo): boolean {
   return provider.supportedAuthMethods.includes('cli_account');
 }
+
+function cliPathPlaceholder(provider: ProviderInfo): string {
+  return provider.cliBinaryName
+    ? `/usr/local/bin/${provider.cliBinaryName}`
+    : 'Optional custom path';
+}
 </script>
 
 <template>
@@ -139,10 +151,18 @@ function supportsCliAccount(provider: ProviderInfo): boolean {
       <div class="space-y-4">
         <h3 class="text-sm font-medium">Providers</h3>
         <div
-          v-for="p in providers"
-          :key="p.id"
-          class="rounded-lg border border-border p-3"
+          v-if="loading"
+          class="flex items-center justify-center gap-2 rounded-lg border border-border py-10 text-sm text-muted-foreground"
         >
+          <Loader2 class="size-4 animate-spin" />
+          Loading providers…
+        </div>
+        <template v-else>
+          <div
+            v-for="p in providers"
+            :key="p.id"
+            class="rounded-lg border border-border p-3"
+          >
           <div class="mb-2 flex items-center justify-between">
             <div class="flex items-center gap-2">
               <ProviderIcon :provider="p.id" :size="18" />
@@ -237,7 +257,7 @@ function supportsCliAccount(provider: ProviderInfo): boolean {
                 <Label class="text-xs text-muted-foreground">CLI path (optional)</Label>
                 <Input
                   v-model="cliPathDrafts[p.id]"
-                  placeholder="/usr/local/bin/claude"
+                  :placeholder="cliPathPlaceholder(p)"
                   :disabled="busy[p.id]"
                 />
               </div>
@@ -252,6 +272,7 @@ function supportsCliAccount(provider: ProviderInfo): boolean {
             {{ errors[p.id] }}
           </p>
         </div>
+        </template>
       </div>
 
       <div class="mt-6 flex justify-end">

@@ -29,6 +29,8 @@ export async function* runChatViaClaudeAccount(
   const seenToolCalls = new Set<string>();
   const seenToolResults = new Set<string>();
   const abortController = new AbortController();
+  let sawStreamText = false;
+  let emittedThinking = false;
 
   const onAbort = () => abortController.abort();
   opts.abortSignal.addEventListener('abort', onAbort);
@@ -55,6 +57,20 @@ export async function* runChatViaClaudeAccount(
     for await (const message of q) {
       if (opts.abortSignal.aborted) break;
 
+      if (message.type === 'stream_event') {
+        const ev = message.event as {
+          type?: string;
+          delta?: { type?: string; text?: string };
+        };
+        if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) {
+          sawStreamText = true;
+          buffer.text += ev.delta.text;
+          yield { type: 'text-delta', payload: { text: ev.delta.text } };
+          opts.onAssistantBuffer?.(buffer);
+        }
+        continue;
+      }
+
       if (message.type === 'assistant') {
         if (message.error === 'authentication_failed') {
           yield {
@@ -67,8 +83,13 @@ export async function* runChatViaClaudeAccount(
           break;
         }
 
+        if (!emittedThinking) {
+          yield { type: 'activity', payload: { phase: 'thinking' } };
+          emittedThinking = true;
+        }
+
         for (const block of message.message.content) {
-          if ('text' in block && typeof block.text === 'string' && block.text) {
+          if ('text' in block && typeof block.text === 'string' && block.text && !sawStreamText) {
             buffer.text += block.text;
             yield { type: 'text-delta', payload: { text: block.text } };
             opts.onAssistantBuffer?.(buffer);
@@ -86,9 +107,15 @@ export async function* runChatViaClaudeAccount(
               type: 'tool-call',
               payload: { id: tc.id, name: tc.name, input: tc.input },
             };
+            yield {
+              type: 'activity',
+              payload: { phase: 'tool-running', detail: block.name },
+            };
             opts.onAssistantBuffer?.(buffer);
           }
         }
+        sawStreamText = false;
+        emittedThinking = false;
         continue;
       }
 
@@ -111,6 +138,7 @@ export async function* runChatViaClaudeAccount(
           type: 'tool-result',
           payload: { id: toolUseId, ok, content: text },
         };
+        yield { type: 'activity', payload: { phase: 'thinking' } };
         opts.onAssistantBuffer?.(buffer);
         continue;
       }

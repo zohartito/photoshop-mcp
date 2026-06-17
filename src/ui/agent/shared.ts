@@ -26,9 +26,17 @@ export interface PlanView {
   steps: PlanStepView[];
 }
 
+export type StreamActivityPhase = 'planning' | 'thinking' | 'tool-running';
+
+export interface StreamActivityPayload {
+  phase: StreamActivityPhase;
+  detail?: string;
+}
+
 export interface AssistantBuffer {
   text: string;
   toolCalls: ToolCallPersist[];
+  reasoning?: string;
   /** Present only for Action Plan (beta) runs; persisted so it survives reload. */
   plan?: PlanView;
 }
@@ -36,11 +44,14 @@ export interface AssistantBuffer {
 export interface RunChatStreamEvent {
   type:
     | 'text-delta'
+    | 'reasoning-delta'
+    | 'activity'
     | 'tool-call'
     | 'tool-result'
     | 'finish'
     | 'error'
     | 'plan'
+    | 'plan-partial'
     | 'plan-step'
     | 'plan-repair';
   payload: unknown;

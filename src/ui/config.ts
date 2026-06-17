@@ -1,4 +1,3 @@
-import { getProvider } from './providers/registry.js';
 import { kvGet, kvSet } from './store/kv.js';
 
 export type ProviderId = 'anthropic' | 'openai' | 'openrouter' | 'google';
@@ -75,16 +74,6 @@ export function isProviderConfigAuthenticated(id: ProviderId): boolean {
   const authMethod = cfg?.authMethod ?? 'api_key';
   if (authMethod === 'api_key') return Boolean(cfg?.apiKey);
   return Boolean(cfg?.cliAccountLabel);
-}
-
-export async function probeProviderAuthentication(id: ProviderId): Promise<boolean> {
-  const cfg = getProviderConfig(id);
-  const authMethod = cfg?.authMethod ?? 'api_key';
-  if (authMethod === 'api_key') return Boolean(cfg?.apiKey);
-  const provider = getProvider(id);
-  if (!provider?.validateCliAccount) return false;
-  const check = await provider.validateCliAccount({ cliPath: cfg?.cliPath });
-  return check.ok;
 }
 
 export function maskApiKey(apiKey?: string): string | null {
