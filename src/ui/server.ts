@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   capture,
   captureBetaChatTurn,
+  ensureAnalyticsIdentity,
   getAnalyticsRuntimeConfig,
   resetAnalyticsProvider,
   setBetaTelemetryChoice,
@@ -84,6 +85,7 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
   // Initialize the SQLite database eagerly so the first request is fast and
   // any migration error surfaces during startup instead of mid-request.
   getDB();
+  ensureAnalyticsIdentity();
 
   const abortControllers = new Map<string, AbortController>();
 

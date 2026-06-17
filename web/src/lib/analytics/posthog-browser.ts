@@ -1,4 +1,5 @@
 import posthog from 'posthog-js';
+import { buildBrowserLocaleProperties } from './locale';
 
 export interface BrowserAnalyticsConfig {
   enabled: boolean;
@@ -21,6 +22,11 @@ export function initPostHogBrowser(config: BrowserAnalyticsConfig): void {
     capture_pageview: 'history_change',
     autocapture: false,
   });
+  const localeProps = buildBrowserLocaleProperties();
+
+  // Link all browser events to the same anonymous install ID as posthog-node.
+  posthog.identify(config.distinctId, localeProps);
+  posthog.register(localeProps);
 
   initialized = true;
 }

@@ -1,9 +1,9 @@
 import Database, { type Database as DatabaseType } from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { getPhotoshopMcpHomeDir } from '../../lib/export-paths.js';
 
-const DATA_DIR = join(homedir(), '.photoshop-mcp');
+const DATA_DIR = getPhotoshopMcpHomeDir();
 const DB_PATH = join(DATA_DIR, 'data.db');
 
 let instance: DatabaseType | null = null;

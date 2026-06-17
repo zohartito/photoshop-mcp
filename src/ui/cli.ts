@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import getPort from 'get-port';
 import open from 'open';
-import { capture, shutdownAnalytics } from '../analytics/index.js';
+import { capture, ensureAnalyticsIdentity, shutdownAnalytics } from '../analytics/index.js';
 import { Logger } from '../utils/logger.js';
 import { startUIServer } from './server.js';
 
@@ -77,6 +77,8 @@ function printVersion(): void {
 async function main(): Promise<void> {
   const logger = new Logger('UI');
   const flags = parseFlags(process.argv.slice(2));
+
+  ensureAnalyticsIdentity();
 
   const port = flags.port ?? (await getPort({ port: [5174, 5175, 5176, 5180] }));
 

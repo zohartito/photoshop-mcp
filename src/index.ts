@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { capture, shutdownAnalytics } from './analytics/index.js';
+import { capture, ensureAnalyticsIdentity, shutdownAnalytics } from './analytics/index.js';
 import { PhotoshopMCPServer } from './core/server.js';
 import { Logger } from './utils/logger.js';
 
@@ -24,6 +24,8 @@ const logger = new Logger('Main');
 async function main() {
   try {
     logger.info('Starting Photoshop MCP Server...');
+
+    ensureAnalyticsIdentity();
 
     const server = new PhotoshopMCPServer();
     await server.start();

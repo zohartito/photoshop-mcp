@@ -20,6 +20,13 @@ import type {
   BetaTelemetryState,
 } from './types.js';
 
+/** Persist the install ID and register one anonymous PostHog person per process. */
+export function ensureAnalyticsIdentity(): void {
+  if (!isAnalyticsEnabled() || !hasPostHogKey()) return;
+  getOrCreateDistinctId();
+  getAnalytics();
+}
+
 export function capture(
   name: string,
   properties?: Record<string, unknown>

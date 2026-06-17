@@ -1,5 +1,6 @@
 import { getServerAnalyticsContext } from './context.js';
 import { getLaunchMethod } from './launch-method.js';
+import { getSystemLocale, resolveLocaleRegion } from './locale.js';
 
 const BLOCKED_PROPERTY_KEYS = new Set([
   'api_key',
@@ -45,6 +46,11 @@ const ALLOWED_PROPERTY_KEYS = new Set([
   'beta_telemetry_opt_in',
   'theme',
   'launch_method',
+  'browser_language',
+  'browser_timezone',
+  'browser_locale_region',
+  'system_locale',
+  'system_locale_region',
 ]);
 
 export function sanitizeAnalyticsProperties(
@@ -68,11 +74,15 @@ export function sanitizeAnalyticsProperties(
 export function buildRuntimeProperties(
   properties: Record<string, unknown> | undefined
 ): Record<string, string | number | boolean> {
+  const systemLocale = getSystemLocale();
+  const systemLocaleRegion = resolveLocaleRegion(systemLocale);
   return {
     os: process.platform,
     arch: process.arch,
     node_version: process.version,
     launch_method: getLaunchMethod(),
+    system_locale: systemLocale,
+    ...(systemLocaleRegion ? { system_locale_region: systemLocaleRegion } : {}),
     ...getServerAnalyticsContext(),
     ...sanitizeAnalyticsProperties(properties),
   };
