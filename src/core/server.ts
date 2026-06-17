@@ -182,6 +182,10 @@ export class PhotoshopMCPServer {
     };
   }
 
+  isPhotoshopConnected(): boolean {
+    return this.session.getConnectionStatus();
+  }
+
   async start() {
     await this.session.initialize();
 

@@ -6,6 +6,7 @@ import StatusBar from './StatusBar.vue';
 import MessageList from './MessageList.vue';
 import Composer from './Composer.vue';
 import ModelSelector from './ModelSelector.vue';
+import { syncAnalyticsContext } from '@/lib/analytics';
 import {
   apiSetActionPlanBeta,
   apiUpdateChatModel,
@@ -40,6 +41,7 @@ async function toggleActionPlanBeta(): Promise<void> {
   planBeta.value = next;
   try {
     await apiSetActionPlanBeta(next);
+    await syncAnalyticsContext();
   } catch {
     planBeta.value = !next;
   }

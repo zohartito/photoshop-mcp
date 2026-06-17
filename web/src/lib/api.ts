@@ -134,6 +134,16 @@ export interface ChatDetail {
   messages: PersistedMessage[];
 }
 
+export interface AnalyticsConfig {
+  enabled: boolean;
+  distinctId: string;
+  key: string;
+  apiHost: string;
+  uiHost: string;
+  betaTelemetryOptIn: boolean;
+  betaTelemetryPromptAnswered: boolean;
+}
+
 // ---- Status -----------------------------------------------------------
 
 export const apiStatus = () => api<Status>('/api/status');
@@ -148,6 +158,26 @@ export const apiSetActionPlanBeta = (enabled: boolean) =>
   api<{ ok: true; actionPlanBeta: boolean }>('/api/config/action-plan', {
     method: 'POST',
     body: JSON.stringify({ enabled }),
+  });
+
+// ---- Analytics --------------------------------------------------------
+
+export const apiGetAnalyticsConfig = () => api<AnalyticsConfig>('/api/analytics/config');
+
+export const apiSetAnalyticsOptOut = (optedOut: boolean) =>
+  api<{ ok: true; optedOut: boolean }>('/api/analytics/opt-out', {
+    method: 'POST',
+    body: JSON.stringify({ optedOut }),
+  });
+
+export const apiSetBetaTelemetry = (optedIn: boolean) =>
+  api<{
+    ok: true;
+    betaTelemetryOptIn: boolean;
+    betaTelemetryPromptAnswered: boolean;
+  }>('/api/analytics/beta-telemetry', {
+    method: 'POST',
+    body: JSON.stringify({ optedIn }),
   });
 
 // ---- Providers --------------------------------------------------------

@@ -2,6 +2,7 @@ import { createApp } from 'vue';
 import latinWoff2 from '@fontsource-variable/source-sans-3/files/source-sans-3-latin-wght-normal.woff2?url';
 import App from './App.vue';
 import { applyTheme, getStoredTheme } from './composables/useTheme';
+import { initAnalytics } from './lib/analytics';
 import { router } from './router';
 import './style.css';
 
@@ -16,4 +17,9 @@ const fontFace = new FontFace(
 );
 fontFace.load().then((face) => document.fonts.add(face)).catch(() => undefined);
 
-createApp(App).use(router).mount('#app');
+async function bootstrap(): Promise<void> {
+  await initAnalytics();
+  createApp(App).use(router).mount('#app');
+}
+
+void bootstrap();

@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from 'vue';
 import { User, Sparkles } from 'lucide-vue-next';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import StreamingMessage from './StreamingMessage.vue';
 import ProviderIcon from './ProviderIcon.vue';
 import type { ChatMessage } from '@/stores/chat';
@@ -66,31 +72,56 @@ function standaloneToolCalls(m: ChatMessage) {
         </p>
       </div>
 
-      <div v-for="m in messages" :key="m.id" class="flex gap-3">
+      <template v-for="m in messages" :key="m.id">
         <div
-          class="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted-foreground"
+          v-if="m.role === 'user'"
+          class="flex gap-3 rounded-lg border border-user-message-border bg-user-message-bg px-3 py-2.5 text-user-message-fg"
         >
-          <User v-if="m.role === 'user'" class="size-4" />
-          <ProviderIcon v-else-if="m.provider" :provider="m.provider" :size="16" />
-          <Sparkles v-else class="size-4" />
-        </div>
-        <div class="flex min-w-0 flex-1 flex-col gap-2">
-          <div class="text-xs font-medium text-muted-foreground">
-            {{ m.role === 'user' ? 'You' : assistantLabel(m) }}
-          </div>
           <div
-            v-if="m.role === 'user' && m.text"
-            class="whitespace-pre-wrap text-sm leading-relaxed text-foreground"
+            class="flex size-7 shrink-0 items-center justify-center rounded-md border border-user-message-border bg-user-message-avatar-bg text-user-message-avatar-fg"
           >
-            {{ m.text }}
+            <User class="size-4" />
           </div>
-          <StreamingMessage
-            v-else-if="m.role === 'assistant'"
-            :message="m"
-            :standalone-tool-calls="standaloneToolCalls(m)"
-          />
+          <div class="flex min-w-0 flex-1 flex-col gap-1">
+            <div class="text-xs font-medium text-user-message-muted">You</div>
+            <div
+              v-if="m.text"
+              class="whitespace-pre-wrap text-sm leading-relaxed"
+            >
+              {{ m.text }}
+            </div>
+          </div>
         </div>
-      </div>
+
+        <div v-else class="flex gap-3">
+          <TooltipProvider v-if="m.provider">
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <div
+                  class="flex size-7 shrink-0 cursor-default items-center justify-center rounded-md border border-border bg-card text-muted-foreground"
+                >
+                  <ProviderIcon :provider="m.provider" :size="16" />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p class="text-xs">{{ assistantLabel(m) }}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <div
+            v-else
+            class="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted-foreground"
+          >
+            <Sparkles class="size-4" />
+          </div>
+          <div class="flex min-w-0 flex-1 flex-col gap-2">
+            <StreamingMessage
+              :message="m"
+              :standalone-tool-calls="standaloneToolCalls(m)"
+            />
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 </template>

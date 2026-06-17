@@ -32,6 +32,13 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --photoshop-blue: #31a8ff;
+  --user-message-bg: #cce9ff;
+  --user-message-border: #7cc4ff;
+  --user-message-fg: #0a3d66;
+  --user-message-muted: #1a5f94;
+  --user-message-avatar-bg: #b8dfff;
+  --user-message-avatar-fg: #0a3d66;
 }
 
 .dark {
@@ -62,6 +69,13 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  --photoshop-blue: #31a8ff;
+  --user-message-bg: #1a4d73;
+  --user-message-border: rgb(49 168 255 / 35%);
+  --user-message-fg: #e8f4ff;
+  --user-message-muted: #b8d9f5;
+  --user-message-avatar-bg: #245a82;
+  --user-message-avatar-fg: #e8f4ff;
 }
 
 @theme inline {
@@ -96,6 +110,13 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-photoshop-blue: var(--photoshop-blue);
+  --color-user-message-bg: var(--user-message-bg);
+  --color-user-message-border: var(--user-message-border);
+  --color-user-message-fg: var(--user-message-fg);
+  --color-user-message-muted: var(--user-message-muted);
+  --color-user-message-avatar-bg: var(--user-message-avatar-bg);
+  --color-user-message-avatar-fg: var(--user-message-avatar-fg);
 }
 
 @layer base {

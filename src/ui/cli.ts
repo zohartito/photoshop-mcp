@@ -5,8 +5,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import getPort from 'get-port';
 import open from 'open';
-import { startUIServer } from './server.js';
+import { capture, shutdownAnalytics } from '../analytics/index.js';
 import { Logger } from '../utils/logger.js';
+import { startUIServer } from './server.js';
 
 // dist/ui/cli.js -> ../../package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -84,6 +85,14 @@ async function main(): Promise<void> {
     port,
   });
 
+  capture('ui_server_started', {
+    app_version: PKG_VERSION,
+    port,
+    host: flags.host,
+    no_open: flags.noOpen,
+    event_source: 'server',
+  });
+
   const url = server.url;
   process.stdout.write(`\nPhotoshop MCP UI ready at:\n  ${url}\n\n`);
 
@@ -98,6 +107,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info(`Received ${signal}, shutting down`);
     await server.close();
+    await shutdownAnalytics();
     process.exit(0);
   };
   process.on('SIGINT', () => shutdown('SIGINT'));

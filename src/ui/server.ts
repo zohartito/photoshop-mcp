@@ -4,6 +4,15 @@ import { streamSSE } from 'hono/streaming';
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  capture,
+  captureBetaChatTurn,
+  getAnalyticsRuntimeConfig,
+  resetAnalyticsProvider,
+  setBetaTelemetryChoice,
+  shutdownAnalytics,
+} from '../analytics/index.js';
+import { setAnalyticsOptOut } from '../analytics/identity.js';
 import { Logger } from '../utils/logger.js';
 import {
   buildHistory,
@@ -86,6 +95,43 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
     return next();
   });
 
+  // ---- Analytics ----------------------------------------------------------
+
+  app.get('/api/analytics/config', (c) => {
+    const config = getAnalyticsRuntimeConfig();
+    return c.json({
+      enabled: config.enabled,
+      distinctId: config.distinctId,
+      key: config.key,
+      apiHost: config.apiHost,
+      uiHost: config.uiHost,
+      betaTelemetryOptIn: config.betaTelemetryOptIn,
+      betaTelemetryPromptAnswered: config.betaTelemetryPromptAnswered,
+    });
+  });
+
+  app.post('/api/analytics/beta-telemetry', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { optedIn?: boolean };
+    const optedIn = Boolean(body.optedIn);
+    setBetaTelemetryChoice(optedIn);
+    return c.json({
+      ok: true,
+      betaTelemetryOptIn: optedIn,
+      betaTelemetryPromptAnswered: true,
+    });
+  });
+
+  app.post('/api/analytics/opt-out', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { optedOut?: boolean };
+    const optedOut = Boolean(body.optedOut);
+    if (optedOut) {
+      await shutdownAnalytics();
+    }
+    setAnalyticsOptOut(optedOut);
+    resetAnalyticsProvider();
+    return c.json({ ok: true, optedOut });
+  });
+
   // ---- Status -------------------------------------------------------------
 
   app.get('/api/status', async (c) => {
@@ -157,9 +203,21 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
     const body = await c.req.json().catch(() => ({})) as { apiKey?: string };
     if (!body.apiKey) return c.json({ ok: false, error: 'missing_key' }, 400);
     if (!provider.validateApiKeyFormat(body.apiKey)) {
+      capture('setup_validate_key', {
+        provider_id: provider.id,
+        ok: false,
+        error_code: 'invalid_format',
+        event_source: 'server',
+      });
       return c.json({ ok: false, error: 'invalid_format' }, 200);
     }
     const result = await provider.validateApiKey(body.apiKey);
+    capture('setup_validate_key', {
+      provider_id: provider.id,
+      ok: result.ok,
+      error_code: result.ok ? undefined : (result.error ?? 'unknown'),
+      event_source: 'server',
+    });
     return c.json(result);
   });
 
@@ -176,6 +234,10 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
     if (!isProviderConfigAuthenticated(cfg.activeProvider)) {
       saveConfig({ activeProvider: provider.id, activeModel: provider.defaultModel() });
     }
+    capture('setup_key_saved', {
+      provider_id: provider.id,
+      event_source: 'server',
+    });
     return c.json({ ok: true, apiKeyMasked: maskApiKey(body.apiKey) });
   });
 
@@ -187,6 +249,11 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
       return c.json({ error: 'invalid_auth_method' }, 400);
     }
     setProviderConfig(provider.id, { authMethod: body.authMethod });
+    capture('setup_auth_method_selected', {
+      provider_id: provider.id,
+      auth_method: body.authMethod,
+      event_source: 'server',
+    });
     return c.json({ ok: true, authMethod: body.authMethod });
   });
 
@@ -201,6 +268,12 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
     if (result.ok && result.accountLabel) {
       setProviderConfig(provider.id, { cliAccountLabel: result.accountLabel });
     }
+    capture('setup_validate_cli', {
+      provider_id: provider.id,
+      ok: result.ok,
+      error_code: result.ok ? undefined : (result.error ?? 'unknown'),
+      event_source: 'server',
+    });
     return c.json(result);
   });
 
@@ -209,6 +282,11 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
     if (!provider) return c.json({ error: 'unknown_provider' }, 404);
     const body = await c.req.json().catch(() => ({})) as { cliPath?: string };
     setProviderConfig(provider.id, { cliPath: body.cliPath?.trim() || undefined });
+    capture('setup_cli_path_set', {
+      provider_id: provider.id,
+      has_custom_path: Boolean(body.cliPath?.trim()),
+      event_source: 'server',
+    });
     return c.json({ ok: true });
   });
 
@@ -363,6 +441,19 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
         assistantPersisted = true;
       };
 
+      const logBetaTurn = (): void => {
+        if (!assistantPersisted) return;
+        captureBetaChatTurn({
+          providerId: chat.provider,
+          model: chat.model,
+          authMethod,
+          userPrompt: body.prompt!,
+          assistantText: buffer.text,
+          assistantReasoning: buffer.reasoning,
+          toolNames: buffer.toolCalls.map((toolCall) => toolCall.name),
+        });
+      };
+
       await stream.writeSSE({ event: 'start', data: JSON.stringify({ requestId }) });
       try {
         const iterator = runChat({
@@ -389,10 +480,12 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
         }
 
         persistAssistant();
+        logBetaTurn();
         await stream.writeSSE({ event: 'done', data: '{}' });
       } catch (err) {
         logger.error('chat error', err);
         persistAssistant();
+        logBetaTurn();
         await stream.writeSSE({
           event: 'error',
           data: JSON.stringify({ message: (err as Error).message }),
