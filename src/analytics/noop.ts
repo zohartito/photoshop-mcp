@@ -9,6 +9,10 @@ export class NoopAnalyticsProvider implements AnalyticsProvider {
     // intentionally empty
   }
 
+  async flush(): Promise<void> {
+    // intentionally empty
+  }
+
   async shutdown(): Promise<void> {
     // intentionally empty
   }

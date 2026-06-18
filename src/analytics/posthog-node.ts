@@ -38,6 +38,14 @@ export class PostHogNodeProvider implements AnalyticsProvider {
     }
   }
 
+  async flush(): Promise<void> {
+    try {
+      await this.client.flush();
+    } catch (err) {
+      this.logger.debug('Failed to flush analytics client', err);
+    }
+  }
+
   capture(event: AnalyticsEvent): void {
     try {
       this.client.capture({

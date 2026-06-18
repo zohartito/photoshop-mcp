@@ -44,14 +44,15 @@ are sent:
 | `mcp_session_started` | MCP session start | `app_version`, `photoshop_detected`, `tools_registered_count` |
 | `mcp_session_startup_failed` | Startup error | `ok: false`, `error_code` |
 | `mcp_photoshop_connection` | Initial connect or failed reconnect | `ok`, `photoshop_connected`, `error_code?` |
-| `mcp_tool_batch` | After 30s idle or session end | `tools_called_count`, `tools_error_count`, `unique_tools_count`, `tool_usage_summary`, `error_codes_summary?`, `batch_flush_reason` |
+| `mcp_tool_batch` | 3s after last tool, 60s max hold, or session end | `tools_called_count`, `tools_error_count`, `unique_tools_count`, `tool_usage_summary`, `error_codes_summary?`, `batch_flush_reason` |
 | `mcp_prompt_requested` | Prompt template fetch | `prompt_name` |
 | `$pageleave` | Graceful shutdown (SIGINT/SIGTERM/stdio close) | `duration_ms`, `shutdown_reason` |
 | `mcp_session_ended` | Graceful shutdown | `duration_ms`, `shutdown_reason` |
 
 Tool usage is **not** sent per call. Calls are aggregated in memory and flushed as
-`mcp_tool_batch` when the MCP client goes idle for 30 seconds (proxy for end of an
-agent turn) or when the session ends.
+`mcp_tool_batch` when the MCP client pauses for 3 seconds after the last tool in a
+burst (typical IDE agent turn), after 60 seconds of continuous tool activity, or
+when the session ends.
 
 MCP-only installs appear in PostHog Web Analytics via the virtual `$pageview` at
 `photoshop-mcp://mcp`, even when the standalone UI is never opened.

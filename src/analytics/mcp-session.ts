@@ -2,13 +2,15 @@ import { hasPostHogKey } from './config.js';
 import { buildRuntimeProperties } from './events.js';
 import { isAnalyticsEnabled } from './identity.js';
 import { captureMcpPageleave } from './pageview.js';
-import { getAnalytics } from './provider.js';
+import { flushAnalyticsClient, getAnalytics } from './provider.js';
 
 export type McpShutdownReason = 'sigint' | 'sigterm' | 'error' | 'stdio_closed';
-export type McpToolBatchFlushReason = 'idle' | 'shutdown';
+export type McpToolBatchFlushReason = 'debounce' | 'max_hold' | 'shutdown';
 
-/** Flush batched tool usage after this idle gap (proxy for end of an agent turn). */
-const IDLE_FLUSH_MS = 30_000;
+/** Flush after the last tool in a burst — fits IDE agent turns (LLM pauses between bursts). */
+const DEBOUNCE_FLUSH_MS = 3_000;
+/** Force flush during long uninterrupted tool chains (no debounce gap). */
+const MAX_BATCH_HOLD_MS = 60_000;
 const MAX_SUMMARY_LENGTH = 4_000;
 
 interface ToolBatchEntry {
@@ -20,7 +22,8 @@ interface ToolBatchEntry {
 
 let startedAt: number | null = null;
 let toolBatch = new Map<string, ToolBatchEntry>();
-let idleFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let debounceFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let maxHoldFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
 function captureMcpEvent(
   name: string,
@@ -33,10 +36,21 @@ function captureMcpEvent(
   });
 }
 
-function clearIdleFlushTimer(): void {
-  if (!idleFlushTimer) return;
-  clearTimeout(idleFlushTimer);
-  idleFlushTimer = null;
+function clearDebounceFlushTimer(): void {
+  if (!debounceFlushTimer) return;
+  clearTimeout(debounceFlushTimer);
+  debounceFlushTimer = null;
+}
+
+function clearMaxHoldFlushTimer(): void {
+  if (!maxHoldFlushTimer) return;
+  clearTimeout(maxHoldFlushTimer);
+  maxHoldFlushTimer = null;
+}
+
+function clearFlushTimers(): void {
+  clearDebounceFlushTimer();
+  clearMaxHoldFlushTimer();
 }
 
 function formatUsageSummary(batch: Map<string, ToolBatchEntry>): string {
@@ -92,16 +106,28 @@ export function flushMcpToolBatch(reason: McpToolBatchFlushReason): void {
     event_source: 'mcp',
   });
 
+  // Deliver the batch immediately — long-lived MCP stdio sessions may never call shutdown().
+  void flushAnalyticsClient().catch(() => {});
+
   toolBatch.clear();
-  clearIdleFlushTimer();
+  clearFlushTimers();
 }
 
-function scheduleIdleFlush(): void {
-  clearIdleFlushTimer();
-  idleFlushTimer = setTimeout(() => {
-    idleFlushTimer = null;
-    flushMcpToolBatch('idle');
-  }, IDLE_FLUSH_MS);
+function scheduleBatchFlush(): void {
+  clearDebounceFlushTimer();
+  debounceFlushTimer = setTimeout(() => {
+    debounceFlushTimer = null;
+    flushMcpToolBatch('debounce');
+  }, DEBOUNCE_FLUSH_MS);
+  debounceFlushTimer.unref?.();
+
+  if (!maxHoldFlushTimer) {
+    maxHoldFlushTimer = setTimeout(() => {
+      maxHoldFlushTimer = null;
+      flushMcpToolBatch('max_hold');
+    }, MAX_BATCH_HOLD_MS);
+    maxHoldFlushTimer.unref?.();
+  }
 }
 
 export function startMcpAnalyticsSession(): void {
@@ -135,7 +161,7 @@ export function recordMcpToolCall(params: {
   existing.durationMs += params.durationMs;
   toolBatch.set(params.toolName, existing);
 
-  scheduleIdleFlush();
+  scheduleBatchFlush();
 }
 
 export function endMcpAnalyticsSession(reason: McpShutdownReason): void {
@@ -151,5 +177,5 @@ export function endMcpAnalyticsSession(reason: McpShutdownReason): void {
 
   startedAt = null;
   toolBatch.clear();
-  clearIdleFlushTimer();
+  clearFlushTimers();
 }
