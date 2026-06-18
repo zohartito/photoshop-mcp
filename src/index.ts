@@ -9,6 +9,7 @@ import {
   endMcpAnalyticsSession,
   ensureAnalyticsIdentity,
   identifyAnalyticsPerson,
+  onMcpClientDisconnected,
   shutdownAnalytics,
   startMcpAnalyticsSession,
 } from './analytics/index.js';
@@ -39,7 +40,7 @@ async function main() {
 
     ensureAnalyticsIdentity();
 
-    mcpServer = new PhotoshopMCPServer();
+    mcpServer = new PhotoshopMCPServer({ serverVersion: PKG_VERSION });
     await mcpServer.start();
 
     const photoshopVersion = await mcpServer.getPhotoshopVersion();
@@ -92,6 +93,7 @@ async function handleShutdown(signal: string): Promise<void> {
     mcpServer = null;
   }
 
+  onMcpClientDisconnected();
   endMcpAnalyticsSession(reason);
   await shutdownAnalytics();
   process.exit(0);

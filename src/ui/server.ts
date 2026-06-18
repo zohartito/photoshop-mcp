@@ -9,6 +9,7 @@ import {
   captureBetaChatTurn,
   ensureAnalyticsIdentity,
   getAnalyticsRuntimeConfig,
+  identifyUiModelSelection,
   resetAnalyticsProvider,
   setBetaTelemetryChoice,
   shutdownAnalytics,
@@ -317,6 +318,7 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
     if (!provider) return c.json({ error: 'unknown_provider' }, 400);
     const model = body.model ?? config.activeModel ?? provider.defaultModel();
     const chat = createChat({ provider: providerId, model, title: body.title });
+    identifyUiModelSelection(providerId, model);
     return c.json(chat);
   });
 
@@ -347,6 +349,7 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
       if (!adapter) return c.json({ error: 'unknown_provider' }, 400);
       const model = body.model ?? (body.provider ? adapter.defaultModel() : chat.model);
       updateChatModel(id, provider, model);
+      identifyUiModelSelection(provider, model);
     }
     return c.json({ ok: true });
   });

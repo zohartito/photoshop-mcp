@@ -5,13 +5,18 @@ import {
   resolvePostHogKey,
   resolvePostHogUiHost,
 } from './config.js';
-import { buildRuntimeProperties } from './events.js';
+import { buildPersonIdentifyProperties, buildRuntimeProperties } from './events.js';
 import {
   getBetaTelemetryState,
   getOrCreateDistinctId,
   isAnalyticsEnabled,
+  recordUsageSurface,
   setBetaTelemetryChoice,
 } from './identity.js';
+import {
+  onMcpClientConnected,
+  onMcpClientDisconnected,
+} from './mcp-client.js';
 import {
   endMcpAnalyticsSession,
   recordMcpToolCall,
@@ -50,7 +55,33 @@ export function identifyAnalyticsPerson(
   properties?: Record<string, unknown>
 ): void {
   if (!isAnalyticsEnabled() || !hasPostHogKey()) return;
-  getAnalytics().identify(properties);
+  const props = { ...(properties ?? {}) };
+  if (typeof props.usage_surface === 'string') {
+    props.usage_surfaces = recordUsageSurface(props.usage_surface);
+    delete props.usage_surface;
+  }
+  getAnalytics().identify(buildPersonIdentifyProperties(props));
+}
+
+/** Refresh the anonymous person profile when Photoshop version becomes known. */
+export function identifyPhotoshopVersion(version: string): void {
+  if (!version || version === 'Unknown') return;
+  identifyAnalyticsPerson({ photoshop_version: version });
+}
+
+/** Record standalone UI provider/model choice on the person profile (no prompt content). */
+export function identifyUiModelSelection(providerId: string, model: string): void {
+  identifyAnalyticsPerson({
+    usage_surface: 'server',
+    active_provider: providerId,
+    active_model: model,
+    last_active_at: Date.now(),
+  });
+  capture('ui_model_selected', {
+    provider_id: providerId,
+    model,
+    event_source: 'server',
+  });
 }
 
 export async function shutdownAnalytics(): Promise<void> {
@@ -78,6 +109,8 @@ export {
   endMcpAnalyticsSession,
   getAnalytics,
   getBetaTelemetryState,
+  onMcpClientConnected,
+  onMcpClientDisconnected,
   recordMcpToolCall,
   resetAnalyticsProvider,
   setBetaTelemetryChoice,

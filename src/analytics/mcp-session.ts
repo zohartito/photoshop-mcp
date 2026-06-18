@@ -1,11 +1,16 @@
 import { hasPostHogKey } from './config.js';
 import { buildRuntimeProperties } from './events.js';
 import { isAnalyticsEnabled } from './identity.js';
+import { getActiveMcpClient } from './mcp-client-state.js';
 import { captureMcpPageleave } from './pageview.js';
 import { flushAnalyticsClient, getAnalytics } from './provider.js';
 
 export type McpShutdownReason = 'sigint' | 'sigterm' | 'error' | 'stdio_closed';
-export type McpToolBatchFlushReason = 'debounce' | 'max_hold' | 'shutdown';
+export type McpToolBatchFlushReason =
+  | 'debounce'
+  | 'max_hold'
+  | 'shutdown'
+  | 'client_disconnect';
 
 /** Flush after the last tool in a burst — fits IDE agent turns (LLM pauses between bursts). */
 const DEBOUNCE_FLUSH_MS = 3_000;
@@ -30,9 +35,14 @@ function captureMcpEvent(
   properties: Record<string, unknown>
 ): void {
   if (!isAnalyticsEnabled() || !hasPostHogKey()) return;
+  const client = getActiveMcpClient();
   getAnalytics().capture({
     name,
-    properties: buildRuntimeProperties(properties),
+    properties: buildRuntimeProperties({
+      ...(client.name ? { mcp_client_name: client.name } : {}),
+      ...(client.version ? { mcp_client_version: client.version } : {}),
+      ...properties,
+    }),
   });
 }
 
@@ -162,6 +172,10 @@ export function recordMcpToolCall(params: {
   toolBatch.set(params.toolName, existing);
 
   scheduleBatchFlush();
+}
+
+export function flushMcpToolBatchOnClientDisconnect(): void {
+  flushMcpToolBatch('client_disconnect');
 }
 
 export function endMcpAnalyticsSession(reason: McpShutdownReason): void {

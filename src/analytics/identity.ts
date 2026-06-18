@@ -10,12 +10,14 @@ const DISTINCT_ID_KEY = 'analytics_distinct_id';
 const OPT_OUT_KEY = 'analytics_opt_out';
 const BETA_TELEMETRY_OPT_IN_KEY = 'beta_telemetry_opt_in';
 const BETA_TELEMETRY_PROMPT_ANSWERED_KEY = 'beta_telemetry_prompt_answered';
+const USAGE_SURFACES_KEY = 'analytics_usage_surfaces';
 
 interface AnalyticsStore {
   distinctId?: string;
   optedOut?: boolean;
   betaTelemetryOptIn?: boolean;
   betaTelemetryPromptAnswered?: boolean;
+  usageSurfaces?: string[];
 }
 
 const STORE_FILE = 'analytics-store.json';
@@ -180,4 +182,42 @@ export function setBetaTelemetryChoice(optedIn: boolean): void {
     betaTelemetryOptIn: optedIn,
     betaTelemetryPromptAnswered: true,
   });
+}
+
+function readUsageSurfacesFromStore(): string[] {
+  if (canUseKv()) {
+    try {
+      const fromKv = kvGet<string[]>(USAGE_SURFACES_KEY);
+      if (Array.isArray(fromKv)) return fromKv.filter((s) => typeof s === 'string' && s.trim());
+    } catch {
+      dbAvailable = false;
+    }
+  }
+  const fromFile = readFileStore().usageSurfaces;
+  return Array.isArray(fromFile)
+    ? fromFile.filter((s) => typeof s === 'string' && s.trim())
+    : [];
+}
+
+function writeUsageSurfacesToStore(surfaces: string[]): void {
+  if (canUseKv()) {
+    try {
+      kvSet(USAGE_SURFACES_KEY, surfaces);
+    } catch {
+      dbAvailable = false;
+    }
+  }
+  const store = readFileStore();
+  writeFileStore({ ...store, usageSurfaces: surfaces });
+}
+
+/** Accumulates usage surfaces on the anonymous person profile (mcp, server, web). */
+export function recordUsageSurface(surface: string): string {
+  const normalized = surface.trim();
+  if (!normalized) {
+    return readUsageSurfacesFromStore().sort().join(',');
+  }
+  const merged = [...new Set([...readUsageSurfacesFromStore(), normalized])].sort();
+  writeUsageSurfacesToStore(merged);
+  return merged.join(',');
 }
