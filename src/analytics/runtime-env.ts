@@ -1,4 +1,5 @@
 import { cpus, release, totalmem, type } from 'node:os';
+import { getAppVersion } from './app-version.js';
 import { getSystemLocale, resolveLocaleLanguage, resolveLocaleRegion } from './locale.js';
 
 function bucketMemoryGb(totalBytes: number): number {
@@ -43,6 +44,7 @@ export function buildAnonymousRuntimeEnv(): Record<string, string | number | boo
   const nodeMajor = getNodeMajorVersion();
 
   return {
+    app_version: getAppVersion(),
     os: process.platform,
     arch: process.arch,
     os_type: type(),

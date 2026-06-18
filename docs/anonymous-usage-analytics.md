@@ -10,7 +10,9 @@ MCP server and standalone UI are used and to improve the product. Analytics are
 
 - App version, operating system (platform, type, release), CPU count, memory tier
   (bucketed GB), Node.js version, launch method, system locale/timezone, and whether
-  optional env overrides are configured (flags only — never paths or values)
+  optional env overrides are configured (flags only — never paths or values).
+  **App version is attached to every server-side event** via `buildRuntimeProperties()`,
+  not only `mcp_session_started`.
 - **MCP-only usage** (no UI required): process lifecycle, MCP client identity
   (name/version from the initialize handshake), virtual page views, Photoshop
   connection status, **batched** tool usage summaries (tool names and counts per

@@ -1,4 +1,5 @@
 import { captureBetaChatTurn } from './beta-telemetry.js';
+import { getAppVersion } from './app-version.js';
 import {
   hasPostHogKey,
   resolvePostHogApiHost,
@@ -108,6 +109,7 @@ export {
   captureMcpPageview,
   endMcpAnalyticsSession,
   getAnalytics,
+  getAppVersion,
   getBetaTelemetryState,
   onMcpClientConnected,
   onMcpClientDisconnected,
