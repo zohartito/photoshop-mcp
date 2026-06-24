@@ -55,15 +55,15 @@ publish stays manual on the maintainer machine (OTP/2FA).
 2. Bump the `version` field in the root [`package.json`](package.json) only (the
    standalone UI package in `web/package.json` uses its own semver and is bumped
    separately when needed).
-3. Create a **local tag** (needed so `backfill-changelog.sh` includes the new
-   version), regenerate [`CHANGELOG.md`](CHANGELOG.md), then commit and retag:
+3. Regenerate [`CHANGELOG.md`](CHANGELOG.md) and commit the release (tag is
+   created **after** the commit — `backfill-changelog.sh` reads `package.json`
+   for the pending version):
 
    ```bash
-   git tag vX.Y.Z
    ./scripts/backfill-changelog.sh
    git add CHANGELOG.md package.json
    git commit -m "X.Y.Z"
-   git tag -f vX.Y.Z
+   git tag vX.Y.Z
    ```
 
 4. Tag and push:

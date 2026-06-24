@@ -51,6 +51,32 @@ EOF
       echo
     fi
   done
+
+  PKG_VERSION="$(node -p "require('./package.json').version")"
+  LATEST_TAG="${TAGS[0]:-}"
+  LATEST_VERSION="${LATEST_TAG#v}"
+  if [[ -n "$PKG_VERSION" && "$PKG_VERSION" != "$LATEST_VERSION" ]]; then
+    PENDING_TAG="v${PKG_VERSION}"
+    PREV="${LATEST_TAG}"
+    DATE="$(date +%Y-%m-%d)"
+    COMPARE=""
+    [[ -n "$PREV" ]] && COMPARE="https://github.com/${release_notes_repo}/compare/${PREV}...HEAD"
+
+    echo "## [${PKG_VERSION}] - ${DATE}"
+    echo
+    if [[ -n "$COMPARE" ]]; then
+      echo "[${PREV}...HEAD](${COMPARE}) *(pending tag ${PENDING_TAG})*"
+      echo
+    fi
+
+    commits="$(collect_commits "$PREV" "HEAD")"
+    if [[ -n "$commits" ]]; then
+      categorize_commits <<<"$commits"
+    else
+      echo "- No commits in range."
+      echo
+    fi
+  fi
 } >"$CHANGELOG"
 
 echo "Wrote ${CHANGELOG} (${#TAGS[@]} versions)"
