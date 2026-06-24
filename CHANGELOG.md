@@ -5,6 +5,19 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.10] - 2026-06-24
+
+[v1.3.9...v1.3.10](https://github.com/alisaitteke/photoshop-mcp/compare/v1.3.9...v1.3.10)
+
+### Features
+
+- feat(release): add CHANGELOG, categorized notes, and npm refresh workflow (`844485c`)
+- feat(release): enrich GitHub release notes with npm install links (`087bca1`)
+
+### Version bumps
+
+- 1.3.10 (`65dce09`)
+
 ## [1.3.9] - 2026-06-24
 
 [v1.3.8...v1.3.9](https://github.com/alisaitteke/photoshop-mcp/compare/v1.3.8...v1.3.9)
