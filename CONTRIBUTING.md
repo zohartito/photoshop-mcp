@@ -65,7 +65,10 @@ publish stays manual on the maintainer machine (OTP/2FA).
    ```
 
 5. Wait for the [Release workflow](.github/workflows/release.yml) to finish, then
-   verify the new release on the repo **Releases** page.
+   verify the new release on the repo **Releases** page. Each release includes
+   `npx` / `npm install` commands, an npm registry link for that version, a
+   compare URL, and commit-based changelog notes (see
+   [`scripts/build-release-notes.sh`](scripts/build-release-notes.sh)).
 6. From a clean `master` checkout, run `npm publish` (`prepublishOnly` runs
    `npm run build` automatically).
 
@@ -78,7 +81,11 @@ To backfill releases for tags that predate this workflow, run once:
 ./scripts/backfill-github-releases.sh
 ```
 
-Use `--dry-run` to preview without creating releases.
+To rewrite release notes on existing releases (e.g. after improving the template):
+
+```bash
+./scripts/backfill-github-releases.sh --refresh
+```
 
 ## Project layout
 
