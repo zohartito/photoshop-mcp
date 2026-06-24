@@ -1,26 +1,16 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import getPort from 'get-port';
 import open from 'open';
-import { capture, ensureAnalyticsIdentity, identifyAnalyticsPerson, shutdownAnalytics } from '../analytics/index.js';
+import {
+  capture,
+  ensureAnalyticsIdentity,
+  getAppVersion,
+  identifyAnalyticsPerson,
+  shutdownAnalytics,
+} from '../analytics/index.js';
 import { Logger } from '../utils/logger.js';
 import { startUIServer } from './server.js';
-
-// dist/ui/cli.js -> ../../package.json
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const PKG_VERSION = (() => {
-  try {
-    const pkg = JSON.parse(
-      readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8')
-    ) as { version?: string };
-    return pkg.version ?? '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-})();
 
 interface CliFlags {
   port?: number;
@@ -71,7 +61,7 @@ function printHelp(): void {
 }
 
 function printVersion(): void {
-  process.stdout.write(`photoshop-mcp-ui ${PKG_VERSION}\n`);
+  process.stdout.write(`photoshop-mcp-ui ${getAppVersion()}\n`);
 }
 
 async function main(): Promise<void> {
@@ -81,7 +71,6 @@ async function main(): Promise<void> {
   ensureAnalyticsIdentity();
   identifyAnalyticsPerson({
     usage_surface: 'server',
-    app_version: PKG_VERSION,
     event_source: 'server',
   });
 
@@ -93,7 +82,6 @@ async function main(): Promise<void> {
   });
 
   capture('ui_server_started', {
-    app_version: PKG_VERSION,
     port,
     host: flags.host,
     no_open: flags.noOpen,

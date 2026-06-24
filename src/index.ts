@@ -1,32 +1,19 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   capture,
   captureMcpPageview,
   endMcpAnalyticsSession,
   ensureAnalyticsIdentity,
+  getAppVersion,
   identifyAnalyticsPerson,
+  onMcpClientDisconnected,
   shutdownAnalytics,
   startMcpAnalyticsSession,
 } from './analytics/index.js';
 import type { McpShutdownReason } from './analytics/mcp-session.js';
 import { PhotoshopMCPServer } from './core/server.js';
 import { Logger } from './utils/logger.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const PKG_VERSION = (() => {
-  try {
-    const pkg = JSON.parse(
-      readFileSync(join(__dirname, '..', 'package.json'), 'utf8')
-    ) as { version?: string };
-    return pkg.version ?? '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-})();
 
 const logger = new Logger('Main');
 
@@ -39,13 +26,12 @@ async function main() {
 
     ensureAnalyticsIdentity();
 
-    mcpServer = new PhotoshopMCPServer();
+    mcpServer = new PhotoshopMCPServer({ serverVersion: getAppVersion() });
     await mcpServer.start();
 
     const photoshopVersion = await mcpServer.getPhotoshopVersion();
     identifyAnalyticsPerson({
       usage_surface: 'mcp',
-      app_version: PKG_VERSION,
       event_source: 'mcp',
       ...(photoshopVersion ? { photoshop_version: photoshopVersion } : {}),
     });
@@ -53,7 +39,6 @@ async function main() {
     startMcpAnalyticsSession();
     captureMcpPageview();
     capture('mcp_session_started', {
-      app_version: PKG_VERSION,
       photoshop_detected: mcpServer.isPhotoshopConnected(),
       tools_registered_count: mcpServer.getToolCount(),
       event_source: 'mcp',
@@ -92,6 +77,7 @@ async function handleShutdown(signal: string): Promise<void> {
     mcpServer = null;
   }
 
+  onMcpClientDisconnected();
   endMcpAnalyticsSession(reason);
   await shutdownAnalytics();
   process.exit(0);

@@ -7,7 +7,7 @@ import {
   GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { Logger } from '../utils/logger.js';
-import { capture, recordMcpToolCall } from '../analytics/index.js';
+import { capture, onMcpClientConnected, onMcpClientDisconnected, recordMcpToolCall } from '../analytics/index.js';
 import { ToolRegistry, ToolDefinition } from './tool-registry.js';
 import { PromptRegistry } from './prompt-registry.js';
 import { Session } from './session.js';
@@ -31,6 +31,10 @@ import { createLayerOrderingTools } from '../tools/layer-ordering-tools.js';
 import { createStateTools } from '../tools/state-tools.js';
 import { createRecipeTools } from '../tools/recipes/index.js';
 
+export interface PhotoshopMCPServerOptions {
+  serverVersion: string;
+}
+
 export class PhotoshopMCPServer {
   private server: Server;
   private logger: Logger;
@@ -38,7 +42,7 @@ export class PhotoshopMCPServer {
   private promptRegistry: PromptRegistry;
   private session: Session;
 
-  constructor() {
+  constructor(options: PhotoshopMCPServerOptions) {
     this.logger = new Logger('PhotoshopMCPServer');
     this.toolRegistry = new ToolRegistry();
     this.promptRegistry = new PromptRegistry();
@@ -47,7 +51,7 @@ export class PhotoshopMCPServer {
     this.server = new Server(
       {
         name: 'photoshop-mcp',
-        version: '1.1.2',
+        version: options.serverVersion,
       },
       {
         capabilities: {
@@ -223,6 +227,13 @@ export class PhotoshopMCPServer {
 
   async start() {
     await this.session.initialize();
+
+    this.server.oninitialized = () => {
+      onMcpClientConnected(this.server.getClientVersion());
+    };
+    this.server.onclose = () => {
+      onMcpClientDisconnected();
+    };
 
     const transport = new StdioServerTransport();
     await this.server.connect(transport);

@@ -1,5 +1,5 @@
 import { Logger } from '../utils/logger.js';
-import { capture } from '../analytics/index.js';
+import { capture, identifyPhotoshopVersion } from '../analytics/index.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 
 export interface SessionConfig {
@@ -45,6 +45,7 @@ export class Session {
         this.isConnected = true;
         this.updateActivity();
         this.logger.info('Successfully connected to Photoshop');
+        void this.refreshPhotoshopVersionOnPerson();
         return true;
       } else {
         this.isConnected = false;
@@ -107,6 +108,15 @@ export class Session {
       ...(connected ? {} : { error_code: 'photoshop_unreachable' }),
       event_source: 'mcp',
     });
+  }
+
+  private async refreshPhotoshopVersionOnPerson(): Promise<void> {
+    try {
+      const version = await this.connection.getVersion();
+      identifyPhotoshopVersion(version);
+    } catch {
+      // Best-effort person enrichment only.
+    }
   }
 
   private delay(ms: number): Promise<void> {

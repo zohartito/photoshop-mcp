@@ -25,5 +25,7 @@ export type UsageSurface = 'mcp' | 'server' | 'ui';
 export interface AnalyticsProvider {
   capture(event: AnalyticsEvent): void;
   identify(properties?: Record<string, unknown>): void;
+  /** Push queued events to PostHog without shutting down the client. */
+  flush(): Promise<void>;
   shutdown(): Promise<void>;
 }

@@ -24,6 +24,11 @@ export function resetAnalyticsProvider(): void {
   provider = null;
 }
 
+export async function flushAnalyticsClient(): Promise<void> {
+  if (!provider) return;
+  await provider.flush();
+}
+
 export async function shutdownAnalyticsClient(): Promise<void> {
   if (!provider) return;
   await provider.shutdown();

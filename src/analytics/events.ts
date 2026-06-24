@@ -76,6 +76,14 @@ const ALLOWED_PROPERTY_KEYS = new Set([
   'tool_usage_summary',
   'error_codes_summary',
   'batch_flush_reason',
+  'mcp_client_name',
+  'mcp_client_version',
+  'mcp_client_connect_count',
+  'usage_surfaces',
+  'active_provider',
+  'active_model',
+  'model',
+  'last_active_at',
 ]);
 
 const POSTHOG_RESERVED_PROPERTY_KEYS = new Set([
