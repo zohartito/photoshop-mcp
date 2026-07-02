@@ -1,5 +1,11 @@
 # Photoshop MCP Server
 
+<p align="center">
+  <a href="https://github.com/alisaitteke/photoshop-mcp">
+    <img src="./images/readme-hero.png" alt="Photoshop MCP — AI-driven Photoshop automation" width="100%" />
+  </a>
+</p>
+
 *v1.1+ — recipe workflows, fewer round-trips, snappier sessions. Standalone UI ships **Action Plan (beta)** for plan-then-execute runs.*
 
 > **Note:** This is an unofficial, community-maintained project and is not affiliated with or endorsed by Adobe Inc.
