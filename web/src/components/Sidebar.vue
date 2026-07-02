@@ -205,14 +205,31 @@ function formatDate(ts: number): string {
       </Button>
       <div class="my-2 border-t border-border" />
       <p class="text-center text-[11px] text-muted-foreground">
-        by
         <a
-          href="https://github.com/alisaitteke"
+          href="https://alisait.com"
           target="_blank"
           rel="noopener noreferrer"
           class="transition-colors hover:text-foreground"
         >
-          @alisaitteke
+          Ali Sait Teke
+        </a>
+        ·
+        <a
+          href="https://github.com/alisaitteke/photoshop-mcp"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="transition-colors hover:text-foreground"
+        >
+          GitHub
+        </a>
+        ·
+        <a
+          href="https://www.linkedin.com/in/alisait/"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="transition-colors hover:text-foreground"
+        >
+          LinkedIn
         </a>
       </p>
     </div>

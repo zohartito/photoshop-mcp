@@ -13,6 +13,14 @@
 
 A Model Context Protocol (MCP) server that enables AI assistants like Claude and Cursor to control Adobe Photoshop programmatically. This allows you to create designs, manipulate images, and automate Photoshop workflows through natural language commands while working in your IDE — or through the bundled **standalone web UI**, which supports both API keys and CLI subscription accounts (Claude Code / Gemini CLI). The UI also offers an opt-in **Action Plan (beta)** mode that plans every Photoshop step in one LLM call, then runs them in a single pass.
 
+## Why this exists
+
+Designers and developers want to drive Photoshop from AI assistants, but raw ExtendScript calls are brittle: agents waste tokens on trial-and-error, layer types break filters, and one failed command leaves the document in an unknown state.
+
+Photoshop MCP adds **state awareness** (`get_state`, `get_preview`, `get_capabilities`), **recipe tools** that wrap multi-step outcomes in a single undo step, and **structured error envelopes** so agents know what to try next. The optional standalone UI and Action Plan mode reduce round-trips for longer workflows — so natural language can actually ship pixels, not just suggest them.
+
+Engineering deep-dive: [`docs/architecture.md`](docs/architecture.md).
+
 ## 🖥️ Standalone UI (no IDE required)
 
 Don't want to wire this into Claude Desktop or Cursor? The same package ships a
@@ -636,12 +644,32 @@ From-source setup, build, lint, integration tests (with latest results), and usa
 
 ## Architecture
 
-Repository layout and module map:
+System design, data flow, platform abstraction, and UI agent modes:
 [`docs/architecture.md`](docs/architecture.md).
+
+Sharing on LinkedIn or social? Use [`images/og-social.png`](images/og-social.png) and
+[`docs/social-preview.md`](docs/social-preview.md) for OG setup and post copy.
 
 ## Contributing
 
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
+
+## About the maintainer
+
+**[Ali Sait Teke](https://alisait.com)** — Full-Stack engineer & AI-era software architect
+(Python, Go, Node.js, React, Next.js, Vue).
+
+This project started from a practical question: *how do you make Photoshop reliably
+controllable by LLMs without fragile one-off scripts?* It grew into an MCP server
+with 80 tools, a recipe/prompt layer for dependable multi-step workflows, and a
+local web UI so creative work does not require an IDE.
+
+**What this codebase demonstrates:** TypeScript systems design, MCP protocol
+integration, cross-platform desktop automation (macOS AppleScript / Windows COM),
+structured error recovery for agentic loops, and a production-minded local-first UI
+(Vue 3 + Hono + SQLite).
+
+- [Portfolio](https://alisait.com) · [GitHub](https://github.com/alisaitteke) · [LinkedIn](https://www.linkedin.com/in/alisait/)
 
 ## License
 
