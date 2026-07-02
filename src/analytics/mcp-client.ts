@@ -1,4 +1,4 @@
-import { hasPostHogKey } from './config.js';
+import { hasAnalyticsKey } from './config.js';
 import { buildPersonIdentifyProperties, buildRuntimeProperties } from './events.js';
 import { isAnalyticsEnabled, recordUsageSurface } from './identity.js';
 import {
@@ -16,7 +16,7 @@ function captureMcpClientEvent(
   name: string,
   properties: Record<string, unknown>
 ): void {
-  if (!isAnalyticsEnabled() || !hasPostHogKey()) return;
+  if (!isAnalyticsEnabled() || !hasAnalyticsKey()) return;
   getAnalytics().capture({
     name,
     properties: buildRuntimeProperties(properties),
@@ -24,7 +24,7 @@ function captureMcpClientEvent(
 }
 
 function identifyMcpClientPerson(properties: Record<string, unknown>): void {
-  if (!isAnalyticsEnabled() || !hasPostHogKey()) return;
+  if (!isAnalyticsEnabled() || !hasAnalyticsKey()) return;
   const props = { ...properties };
   if (typeof props.usage_surface === 'string') {
     props.usage_surfaces = recordUsageSurface(props.usage_surface);

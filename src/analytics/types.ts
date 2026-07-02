@@ -12,6 +12,7 @@ export interface BetaTelemetryState {
 
 export interface AnalyticsRuntimeConfig {
   enabled: boolean;
+  provider: 'mixpanel' | 'posthog';
   key: string;
   apiHost: string;
   uiHost: string;
@@ -25,7 +26,7 @@ export type UsageSurface = 'mcp' | 'server' | 'ui';
 export interface AnalyticsProvider {
   capture(event: AnalyticsEvent): void;
   identify(properties?: Record<string, unknown>): void;
-  /** Push queued events to PostHog without shutting down the client. */
+  /** Push queued events without shutting down the client. */
   flush(): Promise<void>;
   shutdown(): Promise<void>;
 }

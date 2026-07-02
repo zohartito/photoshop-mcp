@@ -86,7 +86,7 @@ const ALLOWED_PROPERTY_KEYS = new Set([
   'last_active_at',
 ]);
 
-const POSTHOG_RESERVED_PROPERTY_KEYS = new Set([
+const ANALYTICS_RESERVED_PROPERTY_KEYS = new Set([
   '$current_url',
   '$pathname',
   '$screen_name',
@@ -96,7 +96,7 @@ function isAllowedAnalyticsPropertyKey(key: string): boolean {
   const normalized = key.toLowerCase();
   if (BLOCKED_PROPERTY_KEYS.has(normalized)) return false;
   if (ALLOWED_PROPERTY_KEYS.has(normalized)) return true;
-  return POSTHOG_RESERVED_PROPERTY_KEYS.has(key);
+  return ANALYTICS_RESERVED_PROPERTY_KEYS.has(key);
 }
 
 export function sanitizeAnalyticsProperties(
@@ -109,7 +109,7 @@ export function sanitizeAnalyticsProperties(
     if (!isAllowedAnalyticsPropertyKey(key)) continue;
     if (value === null || value === undefined) continue;
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      const outKey = POSTHOG_RESERVED_PROPERTY_KEYS.has(key) ? key : key.toLowerCase();
+      const outKey = ANALYTICS_RESERVED_PROPERTY_KEYS.has(key) ? key : key.toLowerCase();
       out[outKey] = value;
     }
   }

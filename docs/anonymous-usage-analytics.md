@@ -21,20 +21,35 @@ MCP server and standalone UI are used and to improve the product. Analytics are
   validation success/failure codes — not credentials), plus **active provider/model**
   on the anonymous person profile when a chat is created or the model changes
 - **Browser UI** events (app loaded, onboarding completed, page views on route
-  changes)
+  changes). When analytics are enabled, the browser also records UI interactions
+  via autocapture and session replay (see [Session replay and autocapture](#session-replay-and-autocapture))
 
 Events use a random anonymous identifier stored locally at
 `~/.photoshop-mcp/` (SQLite `kv` table and/or `analytics-store.json`). That ID
-is registered with PostHog via `identify()` so MCP, UI server, and browser
-events merge under one anonymous person per install (`person_profiles:
-identified_only` — no email, name, or other PII).
+is registered with Mixpanel via `identify()` so MCP, UI server, and browser
+events merge under one anonymous person per install — no email, name, or other
+PII.
 
 The person profile also stores **total installed RAM (GB)** and the **detected
 Photoshop version** when available, so cohort reports can segment by hardware
 and Photoshop release without repeating those fields on every event.
 
-Country/region signals come from PostHog GeoIP on outbound requests (when enabled)
-and from `system_locale_region` / `browser_locale_region` as a secondary hint.
+Country/region signals come from Mixpanel geolocation on Node server egress
+(`geolocate: true`) and from `system_locale_region` / `browser_locale_region`
+as a secondary hint.
+
+## Session replay and autocapture
+
+When anonymous usage analytics are **enabled**, the standalone browser UI
+initializes Mixpanel with **autocapture** (automatic click and form interaction
+tracking) and **session replay** at a **100% sample rate**
+(`record_sessions_percent: 100`). This records UI interactions and session
+replays to help maintainers understand how the product is used.
+
+These features are **disabled** when you turn off anonymous usage analytics
+(Settings → Privacy, or `ANALYTICS_DISABLED=1` / `POSTHOG_DISABLED=1`). The
+previous PostHog integration did not record session replay and had autocapture
+turned off.
 
 ## MCP events
 
@@ -73,7 +88,7 @@ when the session ends or the MCP client disconnects.
 | --- | --- | --- |
 | `ui_model_selected` | Chat created or model/provider changed | `provider_id`, `model` |
 
-MCP-only installs appear in PostHog Web Analytics via the virtual `$pageview` at
+MCP-only installs appear in Mixpanel via the virtual `$pageview` at
 `photoshop-mcp://mcp`, even when the standalone UI is never opened.
 
 ## What we do **not** collect (unless you opt into beta team sharing)
@@ -92,7 +107,7 @@ beta team**. This is separate from anonymous usage analytics above.
 If you accept:
 
 - Your **prompts**, **assistant responses**, **reasoning text**, and **tool names**
-  (not arguments or results) may be sent to PostHog after each chat turn
+  (not arguments or results) may be sent to Mixpanel after each chat turn
 - Content is truncated for very long messages
 - Requires anonymous analytics to remain enabled
 
@@ -103,32 +118,37 @@ Existing installs that have not answered yet are prompted once on the next launc
 
 ## Processor and hosting
 
-Analytics are processed by [PostHog](https://posthog.com/). Events are sent to a
-managed reverse proxy at `https://a.alisait.com`; the PostHog project UI is
-hosted in the EU (`https://eu.posthog.com`). See the
-[PostHog privacy policy](https://posthog.com/privacy) for how PostHog handles
-data on their side.
+Analytics are processed by [Mixpanel](https://mixpanel.com/). Events are sent to
+the **EU ingest endpoint** at `https://api-eu.mixpanel.com` (browser and Node
+server). See the [Mixpanel privacy policy](https://mixpanel.com/legal/privacy-policy/)
+for how Mixpanel handles data on their side.
 
-### GeoIP and the reverse proxy
+### Geolocation
 
-PostHog enriches server-side events with `$geoip_country_code` from the client IP
-when GeoIP is enabled (`disableGeoip: false` in `posthog-node`). The reverse proxy
-at `https://a.alisait.com` **must forward the end-user IP** (e.g. via
-`X-Forwarded-For` / `X-Real-IP`) to PostHog ingest. If all MCP users appear in one
-country, fix proxy headers before investigating application code.
+Mixpanel enriches server-side events with country/region from the client IP when
+`geolocate: true` is set on the Node SDK. Browser events use Mixpanel's default
+geo enrichment on ingest.
 
-## PostHog dashboard recipes (maintainers)
+To roll back to the legacy PostHog processor, set `ANALYTICS_PROVIDER=posthog`.
+PostHog events then go through the managed reverse proxy at `https://a.alisait.com`
+with the project UI at `https://eu.posthog.com`.
 
-| Insight | Configuration |
+## Mixpanel dashboard recipes (maintainers)
+
+These insights must be rebuilt manually in Mixpanel — they are not auto-migrated
+from any prior PostHog setup.
+
+| Insight | Mixpanel approach |
 | --- | --- |
-| MCP active users | `$pageview` where `$current_url = photoshop-mcp://mcp` |
-| MCP client breakdown | `mcp_client_connected` breakdown by `mcp_client_name` |
-| Country breakdown | Breakdown by `$geoip_country_code` on `mcp_tool_batch` or `$pageview` |
-| Tool error rate | `mcp_tool_batch` where `tools_error_count > 0`, breakdown by `error_codes_summary` |
+| MCP active users | Filter `$pageview` where `$current_url = photoshop-mcp://mcp` |
+| MCP client breakdown | `mcp_client_connected` segmented by `mcp_client_name` |
+| Country breakdown | Segment `mcp_tool_batch` or `$pageview` by country property |
+| Tool error rate | `mcp_tool_batch` where `tools_error_count > 0`, segment by `error_codes_summary` |
 | Photoshop reachability | `mcp_photoshop_connection` where `ok = false` |
 | Session duration | Average `duration_ms` on `mcp_session_ended` |
-| MCP vs UI usage | Person property `usage_surfaces` (comma-separated: `mcp`, `server`, `web`) |
-| Standalone UI model | Person `active_provider` / `active_model` or event `ui_model_selected` |
+| MCP vs UI usage | User property `usage_surfaces` (comma-separated: `mcp`, `server`, `web`) |
+| Standalone UI model | User `active_provider` / `active_model` or event `ui_model_selected` |
+| Session replay | Mixpanel Session Replay — filter by users with browser UI events |
 
 ## How to opt out
 
@@ -136,6 +156,7 @@ country, fix proxy headers before investigating application code.
    analytics** to **Off** (also disables beta content sharing).
 2. **Beta content only:** Settings → General → Privacy → set **Beta team content
    sharing** to **Off** (anonymous analytics can stay on).
-3. **Environment variable:** set `POSTHOG_DISABLED=1` before starting
-   `photoshop-mcp` or `photoshop-mcp-ui` (disables all analytics for that
-   process and persists opt-out in local storage).
+3. **Environment variable:** set `ANALYTICS_DISABLED=1` (or the legacy alias
+   `POSTHOG_DISABLED=1`) before starting `photoshop-mcp` or `photoshop-mcp-ui`
+   (disables all analytics for that process and persists opt-out in local
+   storage).

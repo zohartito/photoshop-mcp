@@ -1,4 +1,4 @@
-import { hasPostHogKey } from './config.js';
+import { hasAnalyticsKey } from './config.js';
 import { buildRuntimeProperties } from './events.js';
 import { isAnalyticsEnabled } from './identity.js';
 import { getAnalytics } from './provider.js';
@@ -9,7 +9,7 @@ function capturePageEvent(
   name: string,
   properties: Record<string, unknown>
 ): void {
-  if (!isAnalyticsEnabled() || !hasPostHogKey()) return;
+  if (!isAnalyticsEnabled() || !hasAnalyticsKey()) return;
   getAnalytics().capture({
     name,
     properties: buildRuntimeProperties(properties),

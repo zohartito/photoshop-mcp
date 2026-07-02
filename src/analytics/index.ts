@@ -1,7 +1,10 @@
 import { captureBetaChatTurn } from './beta-telemetry.js';
 import { getAppVersion } from './app-version.js';
 import {
-  hasPostHogKey,
+  hasAnalyticsKey,
+  resolveAnalyticsProvider,
+  resolveMixpanelApiHost,
+  resolveMixpanelToken,
   resolvePostHogApiHost,
   resolvePostHogKey,
   resolvePostHogUiHost,
@@ -34,9 +37,9 @@ import type {
 } from './types.js';
 export type { McpShutdownReason } from './mcp-session.js';
 
-/** Persist the install ID and register one anonymous PostHog person per process. */
+/** Persist the install ID and register one anonymous analytics person per process. */
 export function ensureAnalyticsIdentity(): void {
-  if (!isAnalyticsEnabled() || !hasPostHogKey()) return;
+  if (!isAnalyticsEnabled() || !hasAnalyticsKey()) return;
   getOrCreateDistinctId();
   getAnalytics();
 }
@@ -45,7 +48,7 @@ export function capture(
   name: string,
   properties?: Record<string, unknown>
 ): void {
-  if (!isAnalyticsEnabled() || !hasPostHogKey()) return;
+  if (!isAnalyticsEnabled() || !hasAnalyticsKey()) return;
   getAnalytics().capture({
     name,
     properties: buildRuntimeProperties(properties),
@@ -55,7 +58,7 @@ export function capture(
 export function identifyAnalyticsPerson(
   properties?: Record<string, unknown>
 ): void {
-  if (!isAnalyticsEnabled() || !hasPostHogKey()) return;
+  if (!isAnalyticsEnabled() || !hasAnalyticsKey()) return;
   const props = { ...(properties ?? {}) };
   if (typeof props.usage_surface === 'string') {
     props.usage_surfaces = recordUsageSurface(props.usage_surface);
@@ -90,10 +93,24 @@ export async function shutdownAnalytics(): Promise<void> {
 }
 
 export function getAnalyticsRuntimeConfig(): AnalyticsRuntimeConfig {
-  const enabled = isAnalyticsEnabled() && hasPostHogKey();
+  const provider = resolveAnalyticsProvider();
+  const enabled = isAnalyticsEnabled() && hasAnalyticsKey();
   const beta = getBetaTelemetryState();
+  if (provider === 'mixpanel') {
+    return {
+      enabled,
+      provider,
+      key: resolveMixpanelToken(),
+      apiHost: resolveMixpanelApiHost(),
+      uiHost: '',
+      distinctId: getOrCreateDistinctId(),
+      betaTelemetryOptIn: beta.betaTelemetryOptIn,
+      betaTelemetryPromptAnswered: beta.betaTelemetryPromptAnswered,
+    };
+  }
   return {
     enabled,
+    provider,
     key: resolvePostHogKey(),
     apiHost: resolvePostHogApiHost(),
     uiHost: resolvePostHogUiHost(),

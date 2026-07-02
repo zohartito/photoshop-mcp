@@ -1,7 +1,7 @@
 import { getStoredTheme, type Theme } from '@/composables/useTheme';
 import { apiGetAnalyticsConfig, apiStatus } from '@/lib/api';
 import { buildBrowserLocaleProperties } from '@/lib/analytics/locale';
-import { registerBrowserAnalyticsContext, isBrowserAnalyticsInitialized } from './posthog-browser';
+import { registerBrowserAnalyticsContext, isBrowserAnalyticsInitialized } from './browser-provider';
 
 export interface BrowserAnalyticsContext {
   privacy_mode: boolean;

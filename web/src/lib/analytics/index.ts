@@ -2,11 +2,11 @@ import { apiGetAnalyticsConfig, apiSetAnalyticsOptOut } from '@/lib/api';
 import { syncAnalyticsContext } from './context';
 import {
   captureBrowserEvent,
-  initPostHogBrowser,
+  initBrowserAnalytics,
   isBrowserAnalyticsInitialized,
   optInBrowserCapturing,
   optOutBrowserCapturing,
-} from './posthog-browser';
+} from './browser-provider';
 
 export { syncAnalyticsContext } from './context';
 
@@ -16,7 +16,7 @@ export async function initAnalytics(): Promise<void> {
   try {
     const config = await apiGetAnalyticsConfig();
     enabled = config.enabled;
-    initPostHogBrowser(config);
+    initBrowserAnalytics(config);
     if (config.enabled) {
       await syncAnalyticsContext();
     }
@@ -54,7 +54,7 @@ export async function refreshAnalyticsState(): Promise<boolean> {
     const config = await apiGetAnalyticsConfig();
     enabled = config.enabled;
     if (config.enabled && !isBrowserAnalyticsInitialized()) {
-      initPostHogBrowser(config);
+      initBrowserAnalytics(config);
     }
     if (config.enabled) {
       await syncAnalyticsContext();

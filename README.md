@@ -526,10 +526,14 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 
 - `PHOTOSHOP_PATH`: (Optional) Specify custom Photoshop installation path
 - `LOG_LEVEL`: Logging level (0=DEBUG, 1=INFO, 2=WARN, 3=ERROR)
-- `POSTHOG_DISABLED`: Set to `1` or `true` to disable anonymous usage analytics entirely
-- `POSTHOG_KEY`: (Optional) Override the PostHog project key used for analytics
-- `POSTHOG_API_HOST`: (Optional) PostHog ingest host (default: `https://a.alisait.com`)
-- `POSTHOG_UI_HOST`: (Optional) PostHog UI host for dashboard links (default: `https://eu.posthog.com`)
+- `ANALYTICS_DISABLED`: Set to `1` or `true` to disable anonymous usage analytics entirely
+- `POSTHOG_DISABLED`: Legacy alias for `ANALYTICS_DISABLED`
+- `ANALYTICS_PROVIDER`: Analytics backend — `mixpanel` (default) or `posthog` (rollback)
+- `MIXPANEL_TOKEN`: (Optional) Override the Mixpanel project token
+- `MIXPANEL_API_HOST`: (Optional) Mixpanel ingest host (default: `https://api-eu.mixpanel.com`)
+- `POSTHOG_KEY`: (Optional, legacy) PostHog project key — used only when `ANALYTICS_PROVIDER=posthog`
+- `POSTHOG_API_HOST`: (Optional, legacy) PostHog ingest host (default: `https://a.alisait.com`)
+- `POSTHOG_UI_HOST`: (Optional, legacy) PostHog UI host (default: `https://eu.posthog.com`)
 
 ## Available Tools
 

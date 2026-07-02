@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getPhotoshopMcpHomeDir } from '../lib/export-paths.js';
 import { kvGet, kvSet } from '../ui/store/kv.js';
-import { isPostHogDisabledByEnv } from './config.js';
+import { isAnalyticsDisabledByEnv } from './config.js';
 import type { BetaTelemetryState } from './types.js';
 
 const DISTINCT_ID_KEY = 'analytics_distinct_id';
@@ -119,7 +119,7 @@ export function getOrCreateDistinctId(): string {
 }
 
 export function isAnalyticsOptedOut(): boolean {
-  if (isPostHogDisabledByEnv()) return true;
+  if (isAnalyticsDisabledByEnv()) return true;
 
   const fromKv = readOptOutFromKv();
   if (fromKv !== undefined) return fromKv;

@@ -104,6 +104,7 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
     const config = getAnalyticsRuntimeConfig();
     return c.json({
       enabled: config.enabled,
+      provider: config.provider,
       distinctId: config.distinctId,
       key: config.key,
       apiHost: config.apiHost,

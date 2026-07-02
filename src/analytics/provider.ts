@@ -1,5 +1,10 @@
-import { hasPostHogKey, isPostHogDisabledByEnv } from './config.js';
+import {
+  hasAnalyticsKey,
+  isAnalyticsDisabledByEnv,
+  resolveAnalyticsProvider,
+} from './config.js';
 import { isAnalyticsOptedOut } from './identity.js';
+import { MixpanelNodeProvider } from './mixpanel-node.js';
 import { NoopAnalyticsProvider } from './noop.js';
 import { PostHogNodeProvider } from './posthog-node.js';
 import type { AnalyticsProvider } from './types.js';
@@ -7,10 +12,15 @@ import type { AnalyticsProvider } from './types.js';
 let provider: AnalyticsProvider | null = null;
 
 function createProvider(): AnalyticsProvider {
-  if (isPostHogDisabledByEnv() || isAnalyticsOptedOut() || !hasPostHogKey()) {
+  if (isAnalyticsDisabledByEnv() || isAnalyticsOptedOut() || !hasAnalyticsKey()) {
     return new NoopAnalyticsProvider();
   }
-  return new PostHogNodeProvider();
+  switch (resolveAnalyticsProvider()) {
+    case 'posthog':
+      return new PostHogNodeProvider();
+    default:
+      return new MixpanelNodeProvider();
+  }
 }
 
 export function getAnalytics(): AnalyticsProvider {
