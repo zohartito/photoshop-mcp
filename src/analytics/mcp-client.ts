@@ -1,5 +1,6 @@
 import { hasAnalyticsKey } from './config.js';
 import { buildPersonIdentifyProperties, buildRuntimeProperties } from './events.js';
+import { applyInstallCohortPersonOnce } from './install-cohorts.js';
 import { isAnalyticsEnabled, recordUsageSurface } from './identity.js';
 import {
   clearActiveMcpClient,
@@ -48,6 +49,11 @@ export function onMcpClientConnected(
     mcp_client_version: client?.version ?? 'unknown',
     mcp_client_connect_count: clientConnectCount,
     event_source: 'mcp',
+  });
+
+  applyInstallCohortPersonOnce({
+    usageSurface: 'mcp',
+    mcpClientName: client?.name,
   });
 
   identifyMcpClientPerson({

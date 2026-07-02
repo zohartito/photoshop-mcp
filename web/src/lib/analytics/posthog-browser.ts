@@ -23,10 +23,18 @@ export function initPostHogBrowser(config: BrowserAnalyticsConfig): void {
     autocapture: false,
   });
   const localeProps = buildBrowserLocaleProperties();
+  const installCohortProps = {
+    ...localeProps,
+    first_install_at: new Date().toISOString(),
+    first_usage_surface: 'web',
+  };
 
   // Link all browser events to the same anonymous install ID as posthog-node.
-  posthog.identify(config.distinctId, localeProps);
-  posthog.register(localeProps);
+  posthog.identify(config.distinctId, {
+    ...localeProps,
+    $set_once: installCohortProps,
+  });
+  posthog.register_once(localeProps);
 
   initialized = true;
 }

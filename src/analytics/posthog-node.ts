@@ -1,7 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { PostHog } from 'posthog-node';
 import { Logger } from '../utils/logger.js';
 import { resolvePostHogApiHost, resolvePostHogKey } from './config.js';
-import { buildPersonIdentifyProperties } from './events.js';
+import { buildPersonIdentifyProperties, sanitizePersonOnceProperties } from './events.js';
 import { getOrCreateDistinctId } from './identity.js';
 import type { AnalyticsEvent, AnalyticsProvider } from './types.js';
 
@@ -20,6 +21,7 @@ export class PostHogNodeProvider implements AnalyticsProvider {
     });
     this.distinctId = getOrCreateDistinctId();
     this.identifyPerson();
+    this.setPersonOnce({ first_install_at: new Date().toISOString() });
   }
 
   private identifyPerson(): void {
@@ -38,6 +40,23 @@ export class PostHogNodeProvider implements AnalyticsProvider {
     }
   }
 
+  setPersonOnce(properties: Record<string, unknown>): void {
+    const props = sanitizePersonOnceProperties(properties);
+    if (Object.keys(props).length === 0) return;
+
+    try {
+      this.client.identify({
+        distinctId: this.distinctId,
+        properties: {
+          $set_once: props,
+        },
+        disableGeoip: false,
+      });
+    } catch (err) {
+      this.logger.debug('Failed to set_once analytics person properties', err);
+    }
+  }
+
   async flush(): Promise<void> {
     try {
       await this.client.flush();
@@ -52,6 +71,7 @@ export class PostHogNodeProvider implements AnalyticsProvider {
         distinctId: this.distinctId,
         event: event.name,
         properties: event.properties,
+        uuid: event.insertId ?? randomUUID(),
         disableGeoip: false,
       });
     } catch (err) {

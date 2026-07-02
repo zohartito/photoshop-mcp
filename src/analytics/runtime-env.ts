@@ -17,6 +17,11 @@ export function getTotalRamGb(): number {
   return Math.round(totalmem() / 1024 ** 3);
 }
 
+/** Bucketed memory tier (GB) for person-profile cohort segmentation. */
+export function getMemoryGbBucket(): number {
+  return bucketMemoryGb(totalmem());
+}
+
 function getSystemTimezone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -52,7 +57,6 @@ export function buildAnonymousRuntimeEnv(): Record<string, string | number | boo
     node_version: process.version,
     ...(nodeMajor !== undefined ? { node_major: nodeMajor } : {}),
     cpu_count: cpus().length,
-    memory_gb: bucketMemoryGb(totalmem()),
     system_locale: systemLocale,
     system_timezone: getSystemTimezone(),
     ...(systemLocaleRegion ? { system_locale_region: systemLocaleRegion } : {}),

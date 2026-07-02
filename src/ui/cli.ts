@@ -67,6 +67,7 @@ function printVersion(): void {
 async function main(): Promise<void> {
   const logger = new Logger('UI');
   const flags = parseFlags(process.argv.slice(2));
+  const startedAt = Date.now();
 
   ensureAnalyticsIdentity();
   identifyAnalyticsPerson({
@@ -101,6 +102,11 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string) => {
     logger.info(`Received ${signal}, shutting down`);
+    capture('ui_server_ended', {
+      duration_ms: Date.now() - startedAt,
+      shutdown_reason: signal.toLowerCase(),
+      event_source: 'server',
+    });
     await server.close();
     await shutdownAnalytics();
     process.exit(0);

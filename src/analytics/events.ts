@@ -1,6 +1,6 @@
 import { getServerAnalyticsContext } from './context.js';
 import { getLaunchMethod } from './launch-method.js';
-import { buildAnonymousRuntimeEnv, getTotalRamGb } from './runtime-env.js';
+import { buildAnonymousRuntimeEnv, getMemoryGbBucket, getTotalRamGb } from './runtime-env.js';
 
 const BLOCKED_PROPERTY_KEYS = new Set([
   'api_key',
@@ -75,6 +75,9 @@ const ALLOWED_PROPERTY_KEYS = new Set([
   'unique_tools_count',
   'tool_usage_summary',
   'error_codes_summary',
+  'tools_used',
+  'error_codes',
+  'had_errors',
   'batch_flush_reason',
   'mcp_client_name',
   'mcp_client_version',
@@ -92,6 +95,15 @@ const ANALYTICS_RESERVED_PROPERTY_KEYS = new Set([
   '$screen_name',
 ]);
 
+const ARRAY_PROPERTY_KEYS = new Set(['tools_used', 'error_codes']);
+
+/** Install-cohort fields written via people.set_once / PostHog $set_once only. */
+const PERSON_ONCE_PROPERTY_KEYS = new Set([
+  'first_install_at',
+  'first_usage_surface',
+  'first_mcp_client_name',
+]);
+
 function isAllowedAnalyticsPropertyKey(key: string): boolean {
   const normalized = key.toLowerCase();
   if (BLOCKED_PROPERTY_KEYS.has(normalized)) return false;
@@ -101,16 +113,43 @@ function isAllowedAnalyticsPropertyKey(key: string): boolean {
 
 export function sanitizeAnalyticsProperties(
   properties: Record<string, unknown> | undefined
+): Record<string, string | number | boolean | string[]> {
+  if (!properties) return {};
+
+  const out: Record<string, string | number | boolean | string[]> = {};
+  for (const [key, value] of Object.entries(properties)) {
+    if (!isAllowedAnalyticsPropertyKey(key)) continue;
+    if (value === null || value === undefined) continue;
+
+    const outKey = ANALYTICS_RESERVED_PROPERTY_KEYS.has(key) ? key : key.toLowerCase();
+
+    if (Array.isArray(value)) {
+      if (!ARRAY_PROPERTY_KEYS.has(outKey)) continue;
+      if (!value.every((item) => typeof item === 'string')) continue;
+      out[outKey] = value;
+      continue;
+    }
+
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      out[outKey] = value;
+    }
+  }
+  return out;
+}
+
+/** Sanitize person.set_once cohort properties (not attached to every event). */
+export function sanitizePersonOnceProperties(
+  properties: Record<string, unknown> | undefined
 ): Record<string, string | number | boolean> {
   if (!properties) return {};
 
   const out: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(properties)) {
-    if (!isAllowedAnalyticsPropertyKey(key)) continue;
+    const normalized = key.toLowerCase();
+    if (!PERSON_ONCE_PROPERTY_KEYS.has(normalized)) continue;
     if (value === null || value === undefined) continue;
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      const outKey = ANALYTICS_RESERVED_PROPERTY_KEYS.has(key) ? key : key.toLowerCase();
-      out[outKey] = value;
+      out[normalized] = value;
     }
   }
   return out;
@@ -118,7 +157,7 @@ export function sanitizeAnalyticsProperties(
 
 export function buildRuntimeProperties(
   properties: Record<string, unknown> | undefined
-): Record<string, string | number | boolean> {
+): Record<string, string | number | boolean | string[]> {
   return {
     ...buildAnonymousRuntimeEnv(),
     launch_method: getLaunchMethod(),
@@ -127,12 +166,21 @@ export function buildRuntimeProperties(
   };
 }
 
-/** Person-profile fields merged on PostHog identify() — includes install-level hardware signals. */
+/** Person-profile fields merged on identify() — includes install-level hardware signals. */
 export function buildPersonIdentifyProperties(
   properties?: Record<string, unknown>
 ): Record<string, string | number | boolean> {
-  return buildRuntimeProperties({
+  const merged = buildRuntimeProperties({
     total_ram_gb: getTotalRamGb(),
+    memory_gb: getMemoryGbBucket(),
     ...properties,
   });
+
+  const out: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(merged)) {
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      out[key] = value;
+    }
+  }
+  return out;
 }

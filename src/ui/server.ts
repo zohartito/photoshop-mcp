@@ -261,6 +261,7 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
       return c.json({ error: 'invalid_auth_method' }, 400);
     }
     setProviderConfig(provider.id, { authMethod: body.authMethod });
+    // Authoritative analytics source for setup_auth_method_selected (browser Onboarding only calls the API).
     capture('setup_auth_method_selected', {
       provider_id: provider.id,
       auth_method: body.authMethod,

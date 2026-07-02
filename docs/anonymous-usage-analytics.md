@@ -8,20 +8,20 @@ MCP server and standalone UI are used and to improve the product. Analytics are
 
 ## What we collect
 
-- App version, operating system (platform, type, release), CPU count, memory tier
-  (bucketed GB), Node.js version, launch method, system locale/timezone, and whether
-  optional env overrides are configured (flags only — never paths or values).
+- App version, operating system (platform, type, release), CPU count, Node.js version,
+  launch method, system locale/timezone, and whether optional env overrides are
+  configured (flags only — never paths or values).
   **App version is attached to every server-side event** via `buildRuntimeProperties()`,
   not only `mcp_session_started`.
 - **MCP-only usage** (no UI required): process lifecycle, MCP client identity
   (name/version from the initialize handshake), virtual page views, Photoshop
   connection status, **batched** tool usage summaries (tool names and counts per
   agent turn — never arguments or results), and prompt template names when requested
-- **UI server** startup and setup funnel events (provider chosen, auth method,
+- **UI server** startup/shutdown and setup funnel events (provider chosen, auth method,
   validation success/failure codes — not credentials), plus **active provider/model**
   on the anonymous person profile when a chat is created or the model changes
-- **Browser UI** events (app loaded, onboarding completed, page views on route
-  changes). When analytics are enabled, the browser also records UI interactions
+- **Browser UI** events (app loaded, setup completed, page views via Mixpanel
+  autocapture). When analytics are enabled, the browser also records UI interactions
   via autocapture and session replay (see [Session replay and autocapture](#session-replay-and-autocapture))
 
 Events use a random anonymous identifier stored locally at
@@ -30,9 +30,12 @@ is registered with Mixpanel via `identify()` so MCP, UI server, and browser
 events merge under one anonymous person per install — no email, name, or other
 PII.
 
-The person profile also stores **total installed RAM (GB)** and the **detected
-Photoshop version** when available, so cohort reports can segment by hardware
-and Photoshop release without repeating those fields on every event.
+The person profile also stores **install cohort** fields (via `people.set_once` /
+PostHog `$set_once`): `first_install_at`, `first_usage_surface` (`mcp` | `server`
+| `web`), and `first_mcp_client_name` when an MCP client first connects. It also
+stores **total installed RAM (GB)**, **memory tier (bucketed GB)**, and the
+**detected Photoshop version** when available — these hardware fields are on the
+person profile only, not repeated on every event.
 
 Country/region signals come from Mixpanel geolocation on Node server egress
 (`geolocate: true`) and from `system_locale_region` / `browser_locale_region`
@@ -48,8 +51,9 @@ replays to help maintainers understand how the product is used.
 
 These features are **disabled** when you turn off anonymous usage analytics
 (Settings → Privacy, or `ANALYTICS_DISABLED=1` / `POSTHOG_DISABLED=1`). The
-previous PostHog integration did not record session replay and had autocapture
-turned off.
+previous PostHog integration used explicit `$pageview` on SPA route changes;
+Mixpanel relies on **autocapture** for in-app navigation signals instead of a
+dedicated route-change pageview hook.
 
 ## MCP events
 
@@ -64,7 +68,9 @@ are sent:
 | `mcp_client_disconnected` | MCP transport closed | `mcp_client_name?`, `mcp_client_version?` |
 | `mcp_session_startup_failed` | Startup error | `ok: false`, `error_code` |
 | `mcp_photoshop_connection` | Initial connect or failed reconnect | `ok`, `photoshop_connected`, `error_code?` |
-| `mcp_tool_batch` | 3s after last tool, 60s max hold, client disconnect, or session end | `tools_called_count`, `tools_error_count`, `unique_tools_count`, `tool_usage_summary`, `error_codes_summary?`, `batch_flush_reason`, `mcp_client_name?` |
+| `mcp_photoshop_first_connected` | First successful Photoshop connection (once per install) | `event_source: mcp` |
+| `mcp_first_tool_success` | First successful tool call (once per install) | `tool_name`, `event_source: mcp` |
+| `mcp_tool_batch` | 3s after last tool, 60s max hold, client disconnect, or session end | `tools_called_count`, `tools_error_count`, `unique_tools_count`, `tool_usage_summary`, `tools_used[]`, `had_errors`, `error_codes[]?`, `error_codes_summary?`, `batch_flush_reason`, `mcp_client_name?` |
 | `mcp_prompt_requested` | Prompt template fetch | `prompt_name` |
 | `$pageleave` | Graceful shutdown (SIGINT/SIGTERM/stdio close) | `duration_ms`, `shutdown_reason` |
 | `mcp_session_ended` | Graceful shutdown | `duration_ms`, `shutdown_reason` |
@@ -74,6 +80,9 @@ Tool usage is **not** sent per call. Calls are aggregated in memory and flushed 
 burst (typical IDE agent turn), after 60 seconds of continuous tool activity, or
 when the session ends or the MCP client disconnects.
 
+One-time funnel milestones (`mcp_first_tool_success`, `mcp_photoshop_first_connected`)
+use a persisted local flag plus Mixpanel `$insert_id` deduplication.
+
 ## Model tracking
 
 | Surface | Where to see model | Notes |
@@ -82,11 +91,19 @@ when the session ends or the MCP client disconnects.
 | **Standalone UI** (all users) | Person `active_provider` / `active_model`, event `ui_model_selected` | Set when a chat is created or provider/model changes — no prompt content |
 | **Standalone UI** (beta opt-in) | `beta_chat_turn` event `model` property | Includes truncated prompt/response text |
 
-## UI events (standalone server)
+## UI events (standalone server + browser)
 
 | Event | When | Key properties |
 | --- | --- | --- |
+| `ui_server_started` | UI CLI process ready | `port`, `host`, `no_open`, `event_source: server` |
+| `ui_server_ended` | UI CLI shutdown (SIGINT/SIGTERM) | `duration_ms`, `shutdown_reason`, `event_source: server` |
 | `ui_model_selected` | Chat created or model/provider changed | `provider_id`, `model` |
+| `setup_provider_selected` | Onboarding provider pick (browser) | `provider_id` |
+| `setup_auth_method_selected` | Auth method saved (server API only) | `provider_id`, `auth_method`, `event_source: server` |
+| `setup_validate_key` | API key validation (server) | `provider_id`, `ok`, `error_code?` |
+| `setup_key_saved` | API key persisted (server) | `provider_id` |
+| `setup_completed` | Onboarding finished (browser) | `provider_id`, `auth_method` |
+| `app_loaded` | Browser UI ready | `has_auth` |
 
 MCP-only installs appear in Mixpanel via the virtual `$pageview` at
 `photoshop-mcp://mcp`, even when the standalone UI is never opened.
@@ -120,7 +137,9 @@ Existing installs that have not answered yet are prompted once on the next launc
 
 Analytics are processed by [Mixpanel](https://mixpanel.com/). Events are sent to
 the **EU ingest endpoint** at `https://api-eu.mixpanel.com` (browser and Node
-server). See the [Mixpanel privacy policy](https://mixpanel.com/legal/privacy-policy/)
+server). Server-side events include a per-event `$insert_id` (UUID) for ingest
+deduplication; one-time milestones use a deterministic `$insert_id` per install.
+See the [Mixpanel privacy policy](https://mixpanel.com/legal/privacy-policy/)
 for how Mixpanel handles data on their side.
 
 ### Geolocation
@@ -142,10 +161,12 @@ from any prior PostHog setup.
 | --- | --- |
 | MCP active users | Filter `$pageview` where `$current_url = photoshop-mcp://mcp` |
 | MCP client breakdown | `mcp_client_connected` segmented by `mcp_client_name` |
+| Install cohorts | Person `first_usage_surface`, `first_mcp_client_name`, `first_install_at` |
+| First tool / Photoshop reach | Funnel on `mcp_first_tool_success`, `mcp_photoshop_first_connected` |
 | Country breakdown | Segment `mcp_tool_batch` or `$pageview` by country property |
-| Tool error rate | `mcp_tool_batch` where `tools_error_count > 0`, segment by `error_codes_summary` |
+| Tool error rate | `mcp_tool_batch` where `had_errors = true`, segment by `error_codes` or `error_codes_summary` |
 | Photoshop reachability | `mcp_photoshop_connection` where `ok = false` |
-| Session duration | Average `duration_ms` on `mcp_session_ended` |
+| Session duration | Average `duration_ms` on `mcp_session_ended` or `ui_server_ended` |
 | MCP vs UI usage | User property `usage_surfaces` (comma-separated: `mcp`, `server`, `web`) |
 | Standalone UI model | User `active_provider` / `active_model` or event `ui_model_selected` |
 | Session replay | Mixpanel Session Replay — filter by users with browser UI events |

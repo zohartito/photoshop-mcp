@@ -10,6 +10,7 @@ import {
   resolvePostHogUiHost,
 } from './config.js';
 import { buildPersonIdentifyProperties, buildRuntimeProperties } from './events.js';
+import { applyInstallCohortPersonOnce } from './install-cohorts.js';
 import {
   getBetaTelemetryState,
   getOrCreateDistinctId,
@@ -46,12 +47,14 @@ export function ensureAnalyticsIdentity(): void {
 
 export function capture(
   name: string,
-  properties?: Record<string, unknown>
+  properties?: Record<string, unknown>,
+  options?: { insertId?: string }
 ): void {
   if (!isAnalyticsEnabled() || !hasAnalyticsKey()) return;
   getAnalytics().capture({
     name,
     properties: buildRuntimeProperties(properties),
+    insertId: options?.insertId,
   });
 }
 
@@ -60,10 +63,18 @@ export function identifyAnalyticsPerson(
 ): void {
   if (!isAnalyticsEnabled() || !hasAnalyticsKey()) return;
   const props = { ...(properties ?? {}) };
-  if (typeof props.usage_surface === 'string') {
-    props.usage_surfaces = recordUsageSurface(props.usage_surface);
+  const usageSurface =
+    typeof props.usage_surface === 'string' ? props.usage_surface : undefined;
+  if (usageSurface) {
+    props.usage_surfaces = recordUsageSurface(usageSurface);
     delete props.usage_surface;
   }
+  applyInstallCohortPersonOnce({
+    ...(usageSurface ? { usageSurface } : {}),
+    ...(typeof props.mcp_client_name === 'string'
+      ? { mcpClientName: props.mcp_client_name }
+      : {}),
+  });
   getAnalytics().identify(buildPersonIdentifyProperties(props));
 }
 
@@ -120,6 +131,10 @@ export function getAnalyticsRuntimeConfig(): AnalyticsRuntimeConfig {
   };
 }
 
+export {
+  captureAnalyticsMilestoneOnce,
+} from './milestones.js';
+export type { AnalyticsMilestone } from './milestones.js';
 export {
   captureBetaChatTurn,
   captureMcpPageleave,

@@ -1,6 +1,6 @@
 /**
  * Mixpanel browser analytics adapter for the standalone UI.
- * See docs/plans/2026-07-02-1141-mixpanel-analytics/ (mpa-phase-2.0-browser-analytics.md).
+ * See docs/anonymous-usage-analytics.md.
  */
 import mixpanel from 'mixpanel-browser';
 import { buildBrowserLocaleProperties } from './locale';
@@ -23,10 +23,15 @@ export function initMixpanelBrowser(config: MixpanelBrowserConfig): void {
     record_sessions_percent: 100,
   });
   const localeProps = buildBrowserLocaleProperties();
+  const installCohortProps = {
+    ...localeProps,
+    first_install_at: new Date().toISOString(),
+    first_usage_surface: 'web',
+  };
 
   mixpanel.identify(config.distinctId);
-  mixpanel.people.set(localeProps);
-  mixpanel.register(localeProps);
+  mixpanel.register_once(localeProps);
+  mixpanel.people.set_once(installCohortProps);
 
   initialized = true;
 }

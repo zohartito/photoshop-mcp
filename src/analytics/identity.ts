@@ -11,6 +11,7 @@ const OPT_OUT_KEY = 'analytics_opt_out';
 const BETA_TELEMETRY_OPT_IN_KEY = 'beta_telemetry_opt_in';
 const BETA_TELEMETRY_PROMPT_ANSWERED_KEY = 'beta_telemetry_prompt_answered';
 const USAGE_SURFACES_KEY = 'analytics_usage_surfaces';
+const MILESTONES_KEY = 'analytics_milestones';
 
 interface AnalyticsStore {
   distinctId?: string;
@@ -18,6 +19,7 @@ interface AnalyticsStore {
   betaTelemetryOptIn?: boolean;
   betaTelemetryPromptAnswered?: boolean;
   usageSurfaces?: string[];
+  milestones?: Record<string, boolean>;
 }
 
 const STORE_FILE = 'analytics-store.json';
@@ -209,6 +211,40 @@ function writeUsageSurfacesToStore(surfaces: string[]): void {
   }
   const store = readFileStore();
   writeFileStore({ ...store, usageSurfaces: surfaces });
+}
+
+function readMilestonesFromStore(): Record<string, boolean> {
+  if (canUseKv()) {
+    try {
+      const fromKv = kvGet<Record<string, boolean>>(MILESTONES_KEY);
+      if (fromKv && typeof fromKv === 'object') return fromKv;
+    } catch {
+      dbAvailable = false;
+    }
+  }
+  return readFileStore().milestones ?? {};
+}
+
+function writeMilestonesToStore(milestones: Record<string, boolean>): void {
+  if (canUseKv()) {
+    try {
+      kvSet(MILESTONES_KEY, milestones);
+    } catch {
+      dbAvailable = false;
+    }
+  }
+  const store = readFileStore();
+  writeFileStore({ ...store, milestones });
+}
+
+/** Returns whether a one-time funnel milestone was already captured for this install. */
+export function hasAnalyticsMilestone(key: string): boolean {
+  return readMilestonesFromStore()[key] === true;
+}
+
+export function markAnalyticsMilestone(key: string): void {
+  const milestones = { ...readMilestonesFromStore(), [key]: true };
+  writeMilestonesToStore(milestones);
 }
 
 /** Accumulates usage surfaces on the anonymous person profile (mcp, server, web). */

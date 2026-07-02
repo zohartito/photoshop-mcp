@@ -1,5 +1,5 @@
 import { Logger } from '../utils/logger.js';
-import { capture, identifyPhotoshopVersion } from '../analytics/index.js';
+import { capture, captureAnalyticsMilestoneOnce, identifyPhotoshopVersion } from '../analytics/index.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 
 export interface SessionConfig {
@@ -108,6 +108,12 @@ export class Session {
       ...(connected ? {} : { error_code: 'photoshop_unreachable' }),
       event_source: 'mcp',
     });
+
+    if (connected) {
+      captureAnalyticsMilestoneOnce('mcp_photoshop_first_connected', {
+        event_source: 'mcp',
+      });
+    }
   }
 
   private async refreshPhotoshopVersionOnPerson(): Promise<void> {

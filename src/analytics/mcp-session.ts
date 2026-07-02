@@ -2,6 +2,7 @@ import { hasAnalyticsKey } from './config.js';
 import { buildRuntimeProperties } from './events.js';
 import { isAnalyticsEnabled } from './identity.js';
 import { getActiveMcpClient } from './mcp-client-state.js';
+import { captureAnalyticsMilestoneOnce } from './milestones.js';
 import { captureMcpPageleave } from './pageview.js';
 import { flushAnalyticsClient, getAnalytics } from './provider.js';
 
@@ -90,6 +91,16 @@ function formatErrorCodesSummary(batch: Map<string, ToolBatchEntry>): string | u
     .join(',');
 }
 
+function collectErrorCodes(batch: Map<string, ToolBatchEntry>): string[] {
+  const codes = new Set<string>();
+  for (const entry of batch.values()) {
+    for (const code of entry.errors.keys()) {
+      codes.add(code);
+    }
+  }
+  return [...codes].sort();
+}
+
 export function flushMcpToolBatch(reason: McpToolBatchFlushReason): void {
   if (toolBatch.size === 0) return;
 
@@ -104,13 +115,18 @@ export function flushMcpToolBatch(reason: McpToolBatchFlushReason): void {
   }
 
   const errorCodesSummary = formatErrorCodesSummary(toolBatch);
+  const errorCodes = collectErrorCodes(toolBatch);
+  const toolsUsed = [...toolBatch.keys()].sort();
 
   captureMcpEvent('mcp_tool_batch', {
     tools_called_count: toolsCalledCount,
     tools_error_count: toolsErrorCount,
     unique_tools_count: toolBatch.size,
     tool_usage_summary: formatUsageSummary(toolBatch),
+    tools_used: toolsUsed,
+    had_errors: toolsErrorCount > 0,
     ...(errorCodesSummary ? { error_codes_summary: errorCodesSummary } : {}),
+    ...(errorCodes.length > 0 ? { error_codes: errorCodes } : {}),
     batch_flush_reason: reason,
     duration_ms: totalDurationMs,
     event_source: 'mcp',
@@ -170,6 +186,13 @@ export function recordMcpToolCall(params: {
   }
   existing.durationMs += params.durationMs;
   toolBatch.set(params.toolName, existing);
+
+  if (params.ok) {
+    captureAnalyticsMilestoneOnce('mcp_first_tool_success', {
+      tool_name: params.toolName,
+      event_source: 'mcp',
+    });
+  }
 
   scheduleBatchFlush();
 }

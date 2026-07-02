@@ -82,10 +82,7 @@ async function selectAuthMethod(method: AuthMethod): Promise<void> {
   authMethod.value = method;
   error.value = null;
   if (selected.value) {
-    capture('setup_auth_method_selected', {
-      provider_id: selected.value.id,
-      auth_method: method,
-    });
+    // setup_auth_method_selected is captured server-side in /api/providers/:id/auth-method.
     await apiSetAuthMethod(selected.value.id, method);
   }
 }
