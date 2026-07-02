@@ -8,15 +8,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useTheme, type Theme } from '@/composables/useTheme';
 import ProviderIcon from './ProviderIcon.vue';
 import {
+  apiDeleteCustomProvider,
   apiDeleteKey,
   apiGetAnalyticsConfig,
+  apiGetCustomProvider,
   apiListProviders,
+  apiSaveCustomProvider,
   apiSaveKey,
   apiSetAuthMethod,
   apiSetCliPath,
   apiValidateCli,
+  apiValidateCustomProvider,
   apiValidateKey,
   type AuthMethod,
+  type CustomProviderResponse,
   type ProviderInfo,
 } from '@/lib/api';
 import { refreshAnalyticsState, setAnalyticsOptOut, syncAnalyticsContext } from '@/lib/analytics';
@@ -60,12 +65,36 @@ const CLI_INSTALL: Partial<Record<ProviderInfo['id'], { install: string; login: 
   },
 };
 
+// Custom provider state
+const customCfg = ref<CustomProviderResponse | null>(null);
+const customName = ref('');
+const customBaseUrl = ref('');
+const customApiKey = ref('');
+const customApiFormat = ref<'openai' | 'anthropic'>('openai');
+const customModels = ref('');
+const customWebsiteUrl = ref('');
+const customBusy = ref(false);
+const customError = ref<string | null>(null);
+
 async function refresh(): Promise<void> {
   loading.value = true;
   try {
-    providers.value = await apiListProviders();
+    const [providerList, custom] = await Promise.all([
+      apiListProviders(),
+      apiGetCustomProvider(),
+    ]);
+    providers.value = providerList;
+    customCfg.value = custom;
     for (const p of providers.value) {
       if (p.cliPath) cliPathDrafts.value[p.id] = p.cliPath;
+    }
+    if (custom) {
+      customName.value = custom.name;
+      customBaseUrl.value = custom.baseUrl;
+      customApiFormat.value = custom.apiFormat;
+      customModels.value = custom.models.map((m) => m.id).join(', ');
+      customWebsiteUrl.value = custom.websiteUrl;
+      customApiKey.value = '';
     }
     analyticsEnabled.value = await refreshAnalyticsState();
     const config = await apiGetAnalyticsConfig();
@@ -209,6 +238,69 @@ function onSetTheme(next: Theme): void {
 function confirmClearHistoryAction(): void {
   confirmClearHistory.value = false;
   emit('clear-history');
+}
+
+async function saveCustom(): Promise<void> {
+  if (!customName.value.trim() || !customBaseUrl.value.trim() || !customApiKey.value.trim()) {
+    customError.value = 'Name, Base URL, and API Key are required.';
+    return;
+  }
+  const modelEntries = customModels.value
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((id) => ({ id, label: id }));
+  if (!modelEntries.length) {
+    customError.value = 'At least one model is required.';
+    return;
+  }
+
+  customError.value = null;
+  customBusy.value = true;
+  try {
+    const validation = await apiValidateCustomProvider({
+      baseUrl: customBaseUrl.value.trim(),
+      apiKey: customApiKey.value.trim(),
+      apiFormat: customApiFormat.value,
+    });
+    if (!validation.ok) {
+      customError.value = validation.error || 'Validation failed.';
+      return;
+    }
+    await apiSaveCustomProvider({
+      name: customName.value.trim(),
+      websiteUrl: customWebsiteUrl.value.trim(),
+      apiKey: customApiKey.value.trim(),
+      baseUrl: customBaseUrl.value.trim(),
+      apiFormat: customApiFormat.value,
+      models: modelEntries,
+      defaultModel: modelEntries[0].id,
+    });
+    customApiKey.value = '';
+    await refresh();
+    emit('saved');
+  } catch (err) {
+    customError.value = (err as Error).message;
+  } finally {
+    customBusy.value = false;
+  }
+}
+
+async function removeCustom(): Promise<void> {
+  customBusy.value = true;
+  try {
+    await apiDeleteCustomProvider();
+    customCfg.value = null;
+    customName.value = '';
+    customBaseUrl.value = '';
+    customApiKey.value = '';
+    customModels.value = '';
+    customWebsiteUrl.value = '';
+    await refresh();
+    emit('saved');
+  } finally {
+    customBusy.value = false;
+  }
 }
 
 watch(
@@ -374,7 +466,7 @@ watch(
           </div>
           <template v-else>
             <div
-              v-for="p in providers"
+              v-for="p in providers.filter((p) => p.id !== 'custom')"
               :key="p.id"
               class="rounded-lg border border-border p-3"
             >
@@ -489,6 +581,85 @@ watch(
               <p v-if="errors[p.id]" class="mt-2 text-xs text-destructive">
                 {{ errors[p.id] }}
               </p>
+            </div>
+
+            <!-- Custom Provider -->
+            <div class="rounded-lg border border-border p-3">
+              <div class="mb-2 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <ProviderIcon provider="custom" :size="18" />
+                  <span class="text-sm font-semibold">{{ customCfg?.name || 'Custom' }}</span>
+                  <span
+                    v-if="customCfg?.apiKeyPresent"
+                    class="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400"
+                  >
+                    <Check class="size-3" />
+                    {{ customCfg?.apiKey }}
+                  </span>
+                </div>
+                <Button
+                  v-if="customCfg?.apiKeyPresent"
+                  size="icon"
+                  variant="ghost"
+                  :disabled="customBusy"
+                  @click="removeCustom"
+                >
+                  <Trash2 class="size-4 text-muted-foreground" />
+                </Button>
+              </div>
+
+              <div class="space-y-2">
+                <div class="flex items-center gap-2">
+                  <Input
+                    v-model="customName"
+                    placeholder="Provider name"
+                    :disabled="customBusy"
+                    class="flex-1"
+                  />
+                  <select
+                    v-model="customApiFormat"
+                    class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                    :disabled="customBusy"
+                  >
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                  </select>
+                </div>
+                <Input
+                  v-model="customBaseUrl"
+                  placeholder="Base URL (e.g. https://api.example.com/v1)"
+                  :disabled="customBusy"
+                />
+                <Input
+                  v-model="customWebsiteUrl"
+                  placeholder="Website URL (optional)"
+                  :disabled="customBusy"
+                />
+                <Input
+                  v-model="customApiKey"
+                  type="password"
+                  :placeholder="customCfg?.apiKeyPresent ? 'Replace key…' : 'API key'"
+                  :disabled="customBusy"
+                />
+                <Input
+                  v-model="customModels"
+                  placeholder="Models (comma-separated, e.g. deepseek-chat, deepseek-reasoner)"
+                  :disabled="customBusy"
+                />
+                <div class="flex justify-end">
+                  <Button
+                    size="sm"
+                    :disabled="customBusy || !customName || !customBaseUrl || !customApiKey || !customModels"
+                    @click="saveCustom"
+                  >
+                    <Loader2 v-if="customBusy" class="size-4 animate-spin" />
+                    {{ customBusy ? '…' : 'Save' }}
+                  </Button>
+                </div>
+                <p v-if="customError" class="text-xs text-destructive">
+                  {{ customError }}
+                </p>
+              </div>
             </div>
           </template>
         </TabsContent>
