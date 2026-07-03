@@ -53,3 +53,6 @@ docs/plans/
 
 # Local maintenance scripts (not published)
 scripts/add-copyright-headers.ts
+
+# Spike probe output (generated locally)
+scripts/output/*.json

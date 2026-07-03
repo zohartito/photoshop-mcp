@@ -2,7 +2,7 @@ import { readFile, unlink } from 'node:fs/promises';
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
-import { getPhotoshopCapabilities } from '../platform/capabilities.js';
+import { resolvePhotoshopCapabilities } from '../platform/capabilities.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { envelopeToToolResult, classifyError } from '../errors/envelope.js';
 import { parseExtendScriptPayload } from '../utils/extendscript-result.js';
@@ -153,7 +153,7 @@ async function getPreview(
 async function getCapabilities(connection: PhotoshopConnection): Promise<ToolResult> {
   try {
     const version = await connection.getVersion();
-    const capabilities = getPhotoshopCapabilities(version);
+    const capabilities = await resolvePhotoshopCapabilities(version);
     return {
       content: [{ type: 'text', text: JSON.stringify(capabilities, null, 2) }],
     };

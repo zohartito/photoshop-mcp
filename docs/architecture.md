@@ -28,6 +28,7 @@ flowchart TB
 
   subgraph ps [Adobe Photoshop]
     ES[ExtendScript runtime]
+    UXP[UXP Bridge plugin]
   end
 
   IDE -->|stdio MCP| MCP
@@ -36,14 +37,15 @@ flowchart TB
   Hono --> UI
   Hono --> SQLite
   MCP -->|AppleScript / COM| ES
+  MCP -->|HTTP poll 127.0.0.1:38452| UXP
 ```
 
 | Layer | Responsibility | Key paths |
 | ----- | -------------- | --------- |
 | **MCP core** | Tool/prompt registry, session, MCP protocol | `src/core/` |
 | **Platform** | Photoshop detection, script execution | `src/platform/` |
-| **Tools** | 68 atomic + 12 recipe MCP tools | `src/tools/` |
-| **Prompt layer** | Server instructions, 16 MCP prompt templates | `src/prompts/` |
+| **Tools** | 74 atomic + 12 recipe MCP tools (+ generative & neural) | `src/tools/` |
+| **Prompt layer** | Server instructions, 19 MCP prompt templates | `src/prompts/` |
 | **Errors** | Structured envelopes for agent self-correction | `src/errors/envelope.ts` |
 | **Standalone UI** | Hono API, multi-provider agent, chat persistence | `src/ui/`, `web/` |
 | **Analytics** | Opt-out anonymous usage (Mixpanel / PostHog) | `src/analytics/` |
@@ -54,8 +56,8 @@ flowchart TB
 
 `PhotoshopMCPServer` wires the official MCP SDK with:
 
-- **80 tools** registered via `ToolRegistry` (atomic operations + outcome-oriented recipes).
-- **16 prompts** via `PromptRegistry` (`prompts/list`, `prompts/get`).
+- **86 tools** registered via `ToolRegistry` (atomic operations + outcome-oriented recipes + generative/neural AI).
+- **19 prompts** via `PromptRegistry` (`prompts/list`, `prompts/get`).
 - **Server instructions** on `initialize` — workflow contract for host LLMs (state-before-action, prefer recipes, error recovery). See [`src/prompts/instructions.ts`](../src/prompts/instructions.ts).
 - **Structured error wrapping** — every tool handler passes through `wrapToolHandler` so failures return JSON with `code` and `suggested_next_tool` for agentic repair loops.
 
@@ -74,7 +76,7 @@ Photoshop has no stable HTTP API for external automation. This server uses **Ext
 
 `connection.ts` manages the lifecycle: find Photoshop, verify responsiveness, route scripts.
 
-**Design decision:** UXP is not used for external control — UXP targets in-app plugins; AppleScript/COM can only drive ExtendScript. That trade-off keeps compatibility with **Photoshop 2012–2025+** on both platforms.
+**Design decision:** ExtendScript remains the default external automation path for **Photoshop 2012–2026+** on both platforms. **Generative Fill / Remove / Expand** run via ExtendScript `executeAction` with extended timeouts. **Neural Filters** require the optional **UXP bridge** (`uxp-plugin/` + MCP-hosted poll server on `127.0.0.1:38452`) because `batchPlay` is only available inside a UXP plugin.
 
 ExtendScript snippets live in [`src/api/extendscript.ts`](../src/api/extendscript.ts); tools compose them rather than embedding raw strings inline.
 
@@ -142,7 +144,8 @@ photoshop-mcp/
 ├── web/                   # Vue SPA (built to web/dist, bundled in npm)
 ├── docs/                  # Architecture, development, prompt layer, …
 ├── images/                # README screenshots, OG social preview
-└── scripts/               # Integration tests, release tooling
+├── uxp-plugin/            # Optional UXP bridge for Neural Filters
+└── scripts/               # Integration tests, spike probes, release tooling
 ```
 
 ---

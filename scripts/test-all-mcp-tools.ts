@@ -385,6 +385,29 @@ async function main(): Promise<void> {
   await t.run('photoshop_recipe_sky_blend', { sky_image_path: testPng, horizon_pct: 45 });
   await t.run('photoshop_undo', { steps: 1 });
 
+  const generativeSkip =
+    process.env.PHOTOSHOP_AI_SMOKE === '1'
+      ? undefined
+      : 'set PHOTOSHOP_AI_SMOKE=1 for live generative credit tests';
+
+  console.log('\n=== Phase 14b: Generative & Neural AI ===');
+  await t.run('photoshop_select_rectangle', { left: 100, top: 100, right: 250, bottom: 250 });
+  await t.run('photoshop_generative_fill', { prompt: 'soft gradient' }, { skip: generativeSkip });
+  await t.run('photoshop_generative_remove', { feather_px: 0 }, { skip: generativeSkip });
+  await t.run('photoshop_generative_expand', { prompt: 'extend background', direction: 'all' }, {
+    skip: generativeSkip,
+  });
+  await t.run('photoshop_generative_upscale', { target_scale: 2 }, { skip: generativeSkip });
+  await t.run('photoshop_sky_replacement', { sky_image_path: testPng }, { skip: generativeSkip });
+  await t.run('photoshop_generate_image', { prompt: 'abstract gradient', width: 512, height: 512 }, {
+    skip: generativeSkip,
+  });
+  await t.run(
+    'photoshop_neural_filter',
+    { filter: 'skin_smoothing', smoothness: 40, blur: 40 },
+    { skip: generativeSkip ?? 'requires UXP bridge plugin panel open' }
+  );
+
   console.log('\n=== Phase 15: State, preview, save ===');
   await t.run('photoshop_get_preview', { max_dimension_px: 512, quality: 7 });
   await t.run('photoshop_save_document', {

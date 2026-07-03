@@ -2153,6 +2153,302 @@ export const ExtendScriptSnippets = {
       mimeType: 'image/jpeg'
     };
   `,
+
+  /**
+   * Shared helpers for Firefly generative actions via Action Manager.
+   * See docs/plans/2026-07-03-1149-photoshop-ai-features/ and scripts/spike-photoshop-actions.ts.
+   */
+  generativeHelpers: () => `
+    ${helperFunctions}
+
+    function __mcp_tryGenerativeAction(actionIds, buildDesc) {
+      var lastError = '';
+      for (var i = 0; i < actionIds.length; i++) {
+        var actionId = actionIds[i];
+        try {
+          var desc = buildDesc ? buildDesc(actionId) : new ActionDescriptor();
+          executeAction(sTID(actionId), desc, DialogModes.NO);
+          return { ok: true, action_id: actionId };
+        } catch (e) {
+          lastError = actionId + ': ' + (e.message || String(e));
+        }
+      }
+      return { ok: false, error: lastError || 'No generative action succeeded' };
+    }
+
+    function __mcp_waitGenerativeComplete(doc, baselineHist, maxWaitMs) {
+      var waited = 0;
+      var step = 500;
+      var maxMs = maxWaitMs || 90000;
+      var baseline = baselineHist;
+      while (waited < maxMs) {
+        try {
+          if (doc.historyStates.length > baseline + 1) {
+            return { completed: true, waited_ms: waited, history_states: doc.historyStates.length };
+          }
+        } catch (e) {}
+        $.sleep(step);
+        waited += step;
+      }
+      return { completed: false, waited_ms: waited, history_states: doc.historyStates.length };
+    }
+
+    function __mcp_hasSelection(doc) {
+      try { return doc.selection.bounds != null; } catch (e) { return false; }
+    }
+  `,
+
+  generativeFill: (prompt: string) => {
+    const escaped = jsString(prompt);
+    return `
+      ${helperFunctions}
+      ${ExtendScriptSnippets.generativeHelpers()}
+
+      if (app.documents.length === 0) throw new Error('No active document');
+      var doc = app.activeDocument;
+      app.displayDialogs = DialogModes.NO;
+
+      if (!__mcp_hasSelection(doc)) {
+        return { ok: false, code: 'generative_no_selection', message: 'Active pixel selection required for generative fill' };
+      }
+
+      var baselineHist = doc.activeHistoryState.index;
+      var result = __mcp_tryGenerativeAction(
+        ['generativeFill', 'generativeLayerFill', 'firefly'],
+        function(actionId) {
+          var desc = new ActionDescriptor();
+          try { desc.putString(sTID('prompt'), ${escaped}); } catch (eP) {}
+          try { desc.putString(sTID('text'), ${escaped}); } catch (eT) {}
+          try { desc.putString(sTID('promptText'), ${escaped}); } catch (ePT) {}
+          return desc;
+        }
+      );
+
+      if (!result.ok) {
+        var msg = String(result.error || '');
+        if (/credit|quota|sign in|subscription/i.test(msg)) {
+          return { ok: false, code: 'generative_credits_exhausted', message: msg };
+        }
+        return { ok: false, code: 'generative_unavailable', message: msg };
+      }
+
+      var wait = __mcp_waitGenerativeComplete(doc, baselineHist, 90000);
+      try { doc.selection.deselect(); } catch (eDesel) {}
+
+      return {
+        ok: true,
+        summary: 'Generative fill invoked via ' + result.action_id,
+        details: { action_id: result.action_id, prompt: ${escaped}, wait },
+        next_suggested_tool: 'photoshop_get_preview'
+      };
+    `;
+  },
+
+  generativeRemove: (featherPx: number, autoSelectSubject: boolean) => `
+    ${helperFunctions}
+    ${ExtendScriptSnippets.generativeHelpers()}
+
+    if (app.documents.length === 0) throw new Error('No active document');
+    var doc = app.activeDocument;
+    app.displayDialogs = DialogModes.NO;
+
+    var hasSel = __mcp_hasSelection(doc);
+    if (!hasSel && ${autoSelectSubject ? 'true' : 'false'}) {
+      try {
+        doc.selection.selectSubject();
+        hasSel = __mcp_hasSelection(doc);
+      } catch (eSub) {}
+    }
+    if (!hasSel) {
+      return { ok: false, code: 'generative_no_selection', message: 'Selection required for generative remove' };
+    }
+
+    if (${featherPx} > 0) {
+      try { doc.selection.feather(${featherPx}); } catch (eF) {}
+    }
+
+    var baselineHist = doc.activeHistoryState.index;
+    var result = __mcp_tryGenerativeAction(
+      ['removeTool', 'generativeFill', 'spotHealingBrush'],
+      function(actionId) {
+        var desc = new ActionDescriptor();
+        if (actionId === 'generativeFill') {
+          try { desc.putString(sTID('prompt'), 'remove'); } catch (eP) {}
+        }
+        return desc;
+      }
+    );
+
+    if (!result.ok) {
+      return { ok: false, code: 'generative_unavailable', message: String(result.error || '') };
+    }
+
+    var wait = __mcp_waitGenerativeComplete(doc, baselineHist, 90000);
+    try { doc.selection.deselect(); } catch (eDesel) {}
+
+    return {
+      ok: true,
+      summary: 'Generative remove invoked via ' + result.action_id,
+      details: { action_id: result.action_id, feather_px: ${featherPx}, wait },
+      next_suggested_tool: 'photoshop_get_preview'
+    };
+  `,
+
+  generativeExpand: (direction: string, prompt: string) => {
+    const escaped = jsString(prompt);
+    const dir = jsString(direction);
+    return `
+      ${helperFunctions}
+      ${ExtendScriptSnippets.generativeHelpers()}
+
+      if (app.documents.length === 0) throw new Error('No active document');
+      var doc = app.activeDocument;
+      app.displayDialogs = DialogModes.NO;
+
+      var baselineHist = doc.activeHistoryState.index;
+      var result = __mcp_tryGenerativeAction(
+        ['generativeExpand', 'expandCanvas', 'generativeCanvasExpand'],
+        function(actionId) {
+          var desc = new ActionDescriptor();
+          try { desc.putString(sTID('prompt'), ${escaped}); } catch (eP) {}
+          try { desc.putString(sTID('direction'), ${dir}); } catch (eD) {}
+          return desc;
+        }
+      );
+
+      if (!result.ok) {
+        return { ok: false, code: 'generative_unavailable', message: String(result.error || '') };
+      }
+
+      var wait = __mcp_waitGenerativeComplete(doc, baselineHist, 120000);
+
+      return {
+        ok: true,
+        summary: 'Generative expand invoked via ' + result.action_id,
+        details: { action_id: result.action_id, direction: ${dir}, prompt: ${escaped}, wait },
+        next_suggested_tool: 'photoshop_get_preview'
+      };
+    `;
+  },
+
+  generativeUpscale: (targetScale: number) => `
+    ${helperFunctions}
+    ${ExtendScriptSnippets.generativeHelpers()}
+
+    if (app.documents.length === 0) throw new Error('No active document');
+    var doc = app.activeDocument;
+    app.displayDialogs = DialogModes.NO;
+
+    var baselineHist = doc.activeHistoryState.index;
+    var result = __mcp_tryGenerativeAction(
+      ['generativeUpscale', 'superResolution', 'enhanceDetail'],
+      function(actionId) {
+        var desc = new ActionDescriptor();
+        try { desc.putInteger(sTID('scale'), ${targetScale}); } catch (eS) {}
+        return desc;
+      }
+    );
+
+    if (!result.ok) {
+      return { ok: false, code: 'generative_unavailable', message: String(result.error || '') };
+    }
+
+    var wait = __mcp_waitGenerativeComplete(doc, baselineHist, 120000);
+
+    return {
+      ok: true,
+      summary: 'Generative upscale invoked via ' + result.action_id,
+      details: { action_id: result.action_id, target_scale: ${targetScale}, wait },
+      next_suggested_tool: 'photoshop_get_preview'
+    };
+  `,
+
+  skyReplacement: (skyImagePath: string) => {
+    const escaped = jsString(skyImagePath);
+    return `
+      ${helperFunctions}
+      ${ExtendScriptSnippets.generativeHelpers()}
+
+      if (app.documents.length === 0) throw new Error('No active document');
+      var doc = app.activeDocument;
+      app.displayDialogs = DialogModes.NO;
+
+      var skyFile = new File(${escaped});
+      var baselineHist = doc.activeHistoryState.index;
+      var result = __mcp_tryGenerativeAction(
+        ['skyReplacement', 'replaceSky', 'replaceSkyBackground'],
+        function(actionId) {
+          var desc = new ActionDescriptor();
+          if (skyFile.exists) {
+            try { desc.putPath(sTID('skyImage'), skyFile); } catch (eP) {}
+            try { desc.putPath(sTID('null'), skyFile); } catch (eN) {}
+          }
+          return desc;
+        }
+      );
+
+      if (!result.ok) {
+        return { ok: false, code: 'generative_unavailable', message: String(result.error || '') };
+      }
+
+      var wait = __mcp_waitGenerativeComplete(doc, baselineHist, 120000);
+
+      return {
+        ok: true,
+        summary: 'Sky replacement invoked via ' + result.action_id,
+        details: { action_id: result.action_id, sky_image_path: ${escaped}, wait },
+        next_suggested_tool: 'photoshop_get_preview'
+      };
+    `;
+  },
+
+  generateImage: (prompt: string, width: number, height: number) => {
+    const escaped = jsString(prompt);
+    return `
+      ${helperFunctions}
+      ${ExtendScriptSnippets.generativeHelpers()}
+
+      app.displayDialogs = DialogModes.NO;
+
+      var doc;
+      if (app.documents.length === 0) {
+        doc = app.documents.add(
+          UnitValue(${width}, 'px'),
+          UnitValue(${height}, 'px'),
+          72,
+          'Generated',
+          NewDocumentMode.RGB,
+          DocumentFill.WHITE
+        );
+      } else {
+        doc = app.activeDocument;
+      }
+
+      var baselineHist = doc.activeHistoryState.index;
+      var result = __mcp_tryGenerativeAction(
+        ['textToImage', 'generateImage', 'fireflyTextToImage', 'generativeFill'],
+        function(actionId) {
+          var desc = new ActionDescriptor();
+          try { desc.putString(sTID('prompt'), ${escaped}); } catch (eP) {}
+          try { desc.putString(sTID('text'), ${escaped}); } catch (eT) {}
+          return desc;
+        }
+      );
+
+      if (!result.ok) {
+        return { ok: false, code: 'generative_unavailable', message: String(result.error || '') };
+      }
+
+      var wait = __mcp_waitGenerativeComplete(doc, baselineHist, 120000);
+
+      return {
+        ok: true,
+        summary: 'Generate image invoked via ' + result.action_id,
+        details: { action_id: result.action_id, prompt: ${escaped}, width: ${width}, height: ${height}, wait },
+        next_suggested_tool: 'photoshop_get_preview'
+      };
+    `;
+  },
 };
 
 /**

@@ -5,6 +5,25 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.4.0] - 2026-07-03
+
+[v1.3.13...v1.4.0](https://github.com/alisaitteke/photoshop-mcp/compare/v1.3.13...v1.4.0)
+
+### Features
+
+- **Generative AI tools** — `photoshop_generative_fill`, `photoshop_generative_remove`, `photoshop_generative_expand`, `photoshop_generative_upscale`, `photoshop_sky_replacement`, `photoshop_generate_image` (Firefly via ExtendScript, 120s timeout).
+- **Neural Filters** — `photoshop_neural_filter` via optional UXP bridge (`uxp-plugin/` + MCP poll server on port 38452).
+- **Capabilities** — extended `photoshop_get_capabilities` with `generative_remove`, `generative_expand`, `neural_filters`, `uxp_bridge_reachable`, `sky_replacement_native`.
+- **Prompts** — `ps.generative_fill`, `ps.generative_remove`, `ps.generative_expand` guide templates.
+- **Recipe upgrades** — `remove_distraction` and `sky_blend` prefer native generative paths when capable; `enhance_portrait` supports `use_neural_skin`.
+- **Spike** — extended `spike:photoshop-actions` probes + `scripts/output/generative-probe-report.json`.
+
+### Version bumps
+
+- 1.4.0
+
 ## [1.3.11] - 2026-07-02
 
 [v1.3.10...v1.3.11](https://github.com/alisaitteke/photoshop-mcp/compare/v1.3.10...v1.3.11)

@@ -1,14 +1,20 @@
 /**
- * Dev-only ExtendScript probe runner for Phase 0 research.
- * Run: npx tsx scripts/spike-photoshop-actions.ts
+ * Dev-only ExtendScript probe runner for generative AI action research.
+ * Run: npm run spike:photoshop-actions
  *
- * Requires Photoshop on macOS with an active session (launches PS if needed).
- * Outputs a JSON array of spike rows to stdout.
+ * Requires Photoshop on macOS/Windows with an active session (launches PS if needed).
+ * Writes machine-readable report to scripts/output/generative-probe-report.json and stdout.
  */
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ExtendScriptSnippets } from '../src/api/extendscript.js';
 import { PhotoshopConnection } from '../src/platform/connection.js';
 import { RECIPE_ACTION_HELPERS } from '../src/tools/recipes/_shared.js';
 import { parseExtendScriptPayload } from '../src/utils/extendscript-result.js';
+
+const SPIKE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const REPORT_PATH = join(SPIKE_ROOT, 'scripts', 'output', 'generative-probe-report.json');
 
 /** Snippet-backed probes (Phase 2) — keeps spike aligned with ExtendScriptSnippets. */
 export const SPIKE_SNIPPET_IDS = [
@@ -451,6 +457,182 @@ const PROBES: Array<{
       ));
     `),
   },
+  {
+    action_id: 'generative_expand',
+    descriptor: "executeAction('generativeExpand'|'canvasSize'|'expandCanvas')",
+    timeoutMs: 120_000,
+    script: wrapProbe(`
+      var doc = __spike_newDoc();
+      var hist = __spike_historyIndex(doc);
+      var candidates = ['generativeExpand', 'expandCanvas', 'canvasSize', 'generativeCanvasExpand'];
+      var lastError = '';
+      for (var i = 0; i < candidates.length; i++) {
+        var actionId = candidates[i];
+        try {
+          __spike_makeContrastSubject(doc);
+          var desc = new ActionDescriptor();
+          try { desc.putString(__spike_s2t('prompt'), 'extend background'); } catch (eP) {}
+          executeAction(__spike_s2t(actionId), desc, DialogModes.NO);
+          return __spike_finish(__spike_probeResult(
+            'generative_expand',
+            "executeAction('" + actionId + "')",
+            'partial',
+            'Action accepted without throw; verify canvas expansion manually'
+          ));
+        } catch (e) {
+          lastError = actionId + ': ' + (e.message || String(e));
+          __spike_revertTo(doc, hist);
+        }
+      }
+      try { doc.close(SaveOptions.DONOTSAVECHANGES); } catch (eClose) {}
+      return __spike_finish(__spike_probeResult(
+        'generative_expand',
+        "executeAction('generativeExpand')",
+        'manual_only',
+        lastError || 'No generative expand action ID succeeded'
+      ));
+    `),
+  },
+  {
+    action_id: 'generative_upscale',
+    descriptor: "executeAction('generativeUpscale'|'imageSize')",
+    timeoutMs: 120_000,
+    script: wrapProbe(`
+      var doc = __spike_newDoc();
+      var hist = __spike_historyIndex(doc);
+      var candidates = ['generativeUpscale', 'superResolution', 'enhanceDetail'];
+      var lastError = '';
+      for (var i = 0; i < candidates.length; i++) {
+        var actionId = candidates[i];
+        try {
+          __spike_makeContrastSubject(doc);
+          var desc = new ActionDescriptor();
+          executeAction(__spike_s2t(actionId), desc, DialogModes.NO);
+          return __spike_finish(__spike_probeResult(
+            'generative_upscale',
+            "executeAction('" + actionId + "')",
+            'partial',
+            'Action accepted via ' + actionId + '; verify upscale output manually'
+          ));
+        } catch (e) {
+          lastError = actionId + ': ' + (e.message || String(e));
+          __spike_revertTo(doc, hist);
+        }
+      }
+      try { doc.close(SaveOptions.DONOTSAVECHANGES); } catch (eClose) {}
+      return __spike_finish(__spike_probeResult(
+        'generative_upscale',
+        "executeAction('generativeUpscale')",
+        'manual_only',
+        lastError || 'No generative upscale action ID succeeded'
+      ));
+    `),
+  },
+  {
+    action_id: 'generate_image',
+    descriptor: "executeAction('textToImage'|'generateImage'|'firefly')",
+    timeoutMs: 120_000,
+    script: wrapProbe(`
+      var doc = __spike_newDoc();
+      var hist = __spike_historyIndex(doc);
+      var candidates = ['textToImage', 'generateImage', 'fireflyTextToImage', 'generativeFill'];
+      var lastError = '';
+      for (var i = 0; i < candidates.length; i++) {
+        var actionId = candidates[i];
+        try {
+          var desc = new ActionDescriptor();
+          try { desc.putString(__spike_s2t('prompt'), 'blue gradient background'); } catch (eP) {}
+          try { desc.putString(__spike_s2t('text'), 'blue gradient background'); } catch (eT) {}
+          executeAction(__spike_s2t(actionId), desc, DialogModes.NO);
+          return __spike_finish(__spike_probeResult(
+            'generate_image',
+            "executeAction('" + actionId + "')",
+            'partial',
+            'Action accepted via ' + actionId + '; verify generated layer manually'
+          ));
+        } catch (e) {
+          lastError = actionId + ': ' + (e.message || String(e));
+          __spike_revertTo(doc, hist);
+        }
+      }
+      try { doc.close(SaveOptions.DONOTSAVECHANGES); } catch (eClose) {}
+      return __spike_finish(__spike_probeResult(
+        'generate_image',
+        "executeAction('textToImage')",
+        'manual_only',
+        lastError || 'No generate-image action ID succeeded'
+      ));
+    `),
+  },
+  {
+    action_id: 'find_distractions',
+    descriptor: "executeAction('findDistractions'|'removeTool')",
+    timeoutMs: 120_000,
+    script: wrapProbe(`
+      var doc = __spike_newDoc();
+      var hist = __spike_historyIndex(doc);
+      var candidates = ['findDistractions', 'detectDistractions', 'removeTool'];
+      var lastError = '';
+      for (var i = 0; i < candidates.length; i++) {
+        var actionId = candidates[i];
+        try {
+          __spike_makeContrastSubject(doc);
+          executeAction(__spike_s2t(actionId), new ActionDescriptor(), DialogModes.NO);
+          return __spike_finish(__spike_probeResult(
+            'find_distractions',
+            "executeAction('" + actionId + "')",
+            'partial',
+            'Action accepted via ' + actionId
+          ));
+        } catch (e) {
+          lastError = actionId + ': ' + (e.message || String(e));
+          __spike_revertTo(doc, hist);
+        }
+      }
+      try { doc.close(SaveOptions.DONOTSAVECHANGES); } catch (eClose) {}
+      return __spike_finish(__spike_probeResult(
+        'find_distractions',
+        "executeAction('findDistractions')",
+        'manual_only',
+        lastError || 'No find-distractions action ID succeeded'
+      ));
+    `),
+  },
+  {
+    action_id: 'neural_gallery_filters',
+    descriptor: "executeAction('neuralGalleryFilters')",
+    timeoutMs: 120_000,
+    script: wrapProbe(`
+      var doc = __spike_newDoc();
+      var hist = __spike_historyIndex(doc);
+      __spike_makeContrastSubject(doc);
+      var candidates = ['neuralGalleryFilters', 'neuralFilter', 'skinSmoothing'];
+      var lastError = '';
+      for (var i = 0; i < candidates.length; i++) {
+        var actionId = candidates[i];
+        try {
+          var desc = new ActionDescriptor();
+          executeAction(__spike_s2t(actionId), desc, DialogModes.NO);
+          return __spike_finish(__spike_probeResult(
+            'neural_gallery_filters',
+            "executeAction('" + actionId + "')",
+            'partial',
+            'ExtendScript action accepted; full neural filters require UXP batchPlay bridge'
+          ));
+        } catch (e) {
+          lastError = actionId + ': ' + (e.message || String(e));
+          __spike_revertTo(doc, hist);
+        }
+      }
+      try { doc.close(SaveOptions.DONOTSAVECHANGES); } catch (eClose) {}
+      return __spike_finish(__spike_probeResult(
+        'neural_gallery_filters',
+        "executeAction('neuralGalleryFilters')",
+        'manual_only',
+        lastError || 'Neural filters not reachable via ExtendScript alone'
+      ));
+    `),
+  },
 ];
 
 function parseProbePayload(raw: unknown): Omit<SpikeRow, 'ps_version_tested'> | null {
@@ -528,7 +710,21 @@ async function main(): Promise<void> {
     rows.push(row);
   }
 
-  process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+  const report = {
+    generated_at: new Date().toISOString(),
+    ps_version: psVersion,
+    probes: rows,
+    winning_action_ids: Object.fromEntries(
+      rows
+        .filter((r) => r.status !== 'manual_only')
+        .map((r) => [r.action_id, r.descriptor])
+    ),
+  };
+
+  mkdirSync(dirname(REPORT_PATH), { recursive: true });
+  writeFileSync(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 }
 
 main().catch((error) => {

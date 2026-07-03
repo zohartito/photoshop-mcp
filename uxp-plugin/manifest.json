@@ -1,0 +1,26 @@
+{
+  "id": "com.photoshop-mcp.uxp-bridge",
+  "name": "Photoshop MCP UXP Bridge",
+  "version": "1.0.0",
+  "main": "main.js",
+  "host": {
+    "app": "PS",
+    "minVersion": "24.0.0"
+  },
+  "requiredPermissions": {
+    "network": {
+      "domains": ["127.0.0.1", "localhost"]
+    },
+    "localFileSystem": "request"
+  },
+  "entrypoints": [
+    {
+      "type": "panel",
+      "id": "bridgePanel",
+      "label": { "default": "MCP Bridge" },
+      "minimumSize": { "width": 240, "height": 120 },
+      "maximumSize": { "width": 400, "height": 200 },
+      "preferredDockedSize": { "width": 280, "height": 140 }
+    }
+  ]
+}

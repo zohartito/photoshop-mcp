@@ -791,3 +791,32 @@ photoshop_open_image({
   filePath: "/Users/username/Pictures/photo.jpg"
 })
 ```
+
+### Generative AI (Firefly)
+
+Requires Photoshop 24+ and signed-in Adobe generative credits. Call `photoshop_get_capabilities` first.
+
+#### `photoshop_generative_fill`
+Fill the current selection with Generative Fill. **Parameters:** `prompt` (required)
+
+#### `photoshop_generative_remove`
+AI Remove on the current selection. **Parameters:** `feather_px`, `auto_select_subject`
+
+#### `photoshop_generative_expand`
+Extend canvas with Generative Expand. **Parameters:** `prompt`, `direction`
+
+#### `photoshop_generative_upscale`
+Generative Upscale (PS 27+). **Parameters:** `target_scale` (2 or 4)
+
+#### `photoshop_sky_replacement`
+Native Sky Replacement. **Parameters:** `sky_image_path` (optional)
+
+#### `photoshop_generate_image`
+Text-to-image. **Parameters:** `prompt`, `width`, `height`
+
+### Neural Filters (UXP bridge)
+
+Requires `uxp-plugin/` — see [development.md](development.md).
+
+#### `photoshop_neural_filter`
+**Parameters:** `filter` (skin_smoothing|harmonize|depth_blur|super_zoom), `smoothness`, `blur`

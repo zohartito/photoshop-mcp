@@ -39,8 +39,28 @@ npm run build:server
 npm run spike:issue-2     # issue #2 targeted regression (10 checks)
 npm run test:mcp-local    # prompt-layer smoke
 npm run test:mcp-all      # full sequential tool sweep
+npm run spike:photoshop-actions  # generative AI action probes → scripts/output/generative-probe-report.json
 npm run verify:photoshop-prompts
 ```
+
+### UXP bridge plugin (Neural Filters)
+
+Neural Filters (`photoshop_neural_filter`) require the companion plugin in `uxp-plugin/`:
+
+1. Install [Adobe UXP Developer Tools](https://developer.adobe.com/photoshop/uxp/2022/guides/devtool/).
+2. **Load Plugin** → select the `uxp-plugin/` folder in this repo.
+3. Open the **MCP Bridge** panel in Photoshop (keeps polling the MCP server on `127.0.0.1:38452`).
+4. Start `photoshop-mcp` or the web UI — the server starts the bridge HTTP listener automatically.
+
+Override port with `PHOTOSHOP_UXP_BRIDGE_PORT` (default `38452`).
+
+### Generative AI tools
+
+Firefly tools (`photoshop_generative_*`, `photoshop_generate_image`, `photoshop_sky_replacement`) require:
+
+- Photoshop 24+ (Generative Fill) or 27+ (Generative Upscale)
+- Signed-in Adobe account with generative credits
+- Optional live smoke: `PHOTOSHOP_AI_SMOKE=1 npm run test:mcp-all`
 
 ## Integration test results
 

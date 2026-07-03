@@ -150,15 +150,19 @@ requests into reliable Photoshop actions:
 - **Server `instructions`** — workflow contract advertised on MCP `initialize`
   (ping once, state-before-action, prefer recipes, error recovery). See
   [`src/prompts/instructions.ts`](src/prompts/instructions.ts).
-- **MCP `prompts` primitive** — 16 pre-engineered templates (12 recipe + 4 guide:
-  `ps.enhance_portrait`, `ps.remove_background`, `ps.gradient_fade`, `ps.sky_blend`, …)
+- **MCP `prompts` primitive** — 19 pre-engineered templates (12 recipe + 7 guide:
+  `ps.enhance_portrait`, `ps.remove_background`, `ps.generative_fill`, …)
   via `prompts/list` and `prompts/get`.
 - **Recipe tools** — 12 outcome-oriented `photoshop_recipe_*` tools (remove
   background, enhance portrait, prepare for web, export social variants, color
   grade, frequency separation, batch mockup, organize layers, gradient fade,
   sky blend, dodge & burn, remove distraction). Each wraps steps in a single
-  Photoshop history state (one Undo reverts all). **80 tools total** (68 atomic
+  Photoshop history state (one Undo reverts all). **86 tools total** (74 atomic
   + 12 recipe).
+- **Generative AI** — `photoshop_generative_fill`, `photoshop_generative_remove`,
+  `photoshop_generative_expand`, `photoshop_generative_upscale`, `photoshop_sky_replacement`,
+  `photoshop_generate_image` (Firefly via ExtendScript; Adobe account + credits required).
+- **Neural Filters** — `photoshop_neural_filter` via optional UXP bridge plugin (`uxp-plugin/`).
 - **State & preview** — `photoshop_get_state` (cheap snapshot),
   `photoshop_get_preview` (base64 JPEG for vision verification),
   `photoshop_get_capabilities` (version-aware feature flags).

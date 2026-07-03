@@ -73,11 +73,12 @@ User intent glossary
 - bg.remove — "remove background", "cut out", "isolate subject", "transparent
   background", "arka planı sil" → \`photoshop_recipe_remove_background\`
 - obj.remove — "remove that person", "erase distraction", "generative remove"
-  → \`photoshop_recipe_remove_distraction\` (content-aware; select region first);
-  fallback \`photoshop_content_aware_fill\` after manual selection
+  → \`photoshop_generative_remove\` first; fallback
+  \`photoshop_recipe_remove_distraction\` (content-aware) after manual selection
 - mask.gradient_fade — "fade into background", "gradient mask", "blend subject"
   → \`photoshop_recipe_gradient_fade\`; guide \`ps.gradient_blend\` for atomic chain
 - sky.replace — "replace sky", "fix blown sky", "better clouds" →
+  \`photoshop_sky_replacement\` when \`sky_replacement_native\`; else
   \`photoshop_recipe_sky_blend\`; guide \`ps.composite_blend\` for manual composite
 - portrait.enhance — "smooth skin", "retouch portrait", "fix blemishes" →
   \`photoshop_recipe_enhance_portrait\`
@@ -95,14 +96,14 @@ User intent glossary
 - layers.organize — "organize layers", "rename mess" → \`photoshop_recipe_organize_layers\`
 
 Degrade paths
-- Generative remove / distraction — ideal \`photoshop_generative_remove\` is not
-  available via ExtendScript. Degrade: user selects region →
-  \`photoshop_recipe_remove_distraction\` or \`photoshop_content_aware_fill\` →
-  ask user to refine manually.
-- Sky replacement menu — ideal \`photoshop_sky_replacement\` is not scriptable.
-  Degrade: \`photoshop_recipe_sky_blend\` when a sky file path is available;
-  otherwise \`photoshop_place_image\` + \`photoshop_create_layer_mask\` +
-  \`photoshop_apply_gradient_mask\` or guide \`ps.composite_blend\`.
+- Generative remove / distraction — prefer \`photoshop_generative_remove\`; degrade to
+  \`photoshop_recipe_remove_distraction\` or \`photoshop_content_aware_fill\` when
+  \`generative_unavailable\` or \`generative_credits_exhausted\`.
+- Sky replacement — prefer \`photoshop_sky_replacement\`; degrade:
+  \`photoshop_recipe_sky_blend\` when a sky file path is available;
+  otherwise \`photoshop_place_image\` + mask workflow or guide \`ps.composite_blend\`.
+- Neural skin / harmonize — \`photoshop_neural_filter\` when \`neural_filters\` is true;
+  else frequency separation / manual recipes.
 - Select Subject v2 missing — \`photoshop_recipe_remove_background\` returns
   \`version_unsupported\` → manual selection tools + \`photoshop_create_layer_mask\`.
 - Curves unavailable — use \`photoshop_auto_levels\` then
@@ -126,7 +127,8 @@ Guide prompts (MCP prompts/get)
   \`ps.remove_distraction\`
 - Guide prompts (no recipe pair): \`ps.gradient_blend\` — fade via mask gradient;
   \`ps.color_correct\` — tone / contrast fix chain; \`ps.dodge_burn_guide\` — 50% gray
-  overlay setup; \`ps.composite_blend\` — place asset + mask + blend mode
+  overlay setup; \`ps.composite_blend\` — place asset + mask + blend mode;
+  \`ps.generative_fill\`, \`ps.generative_remove\`, \`ps.generative_expand\` — Firefly workflows
 `.trim();
 
 export function buildPhotoshopInstructions(): string {

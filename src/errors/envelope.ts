@@ -9,6 +9,10 @@ export type PhotoshopErrorCode =
   | 'selection_required'
   | 'version_unsupported'
   | 'generative_unavailable'
+  | 'generative_timeout'
+  | 'generative_credits_exhausted'
+  | 'generative_no_selection'
+  | 'uxp_bridge_unavailable'
   | 'extendscript_runtime_error'
   | 'file_not_found'
   | 'font_not_found'
@@ -34,6 +38,10 @@ const ERROR_PATTERNS: Array<{
   { pattern: /layer not found/i, code: 'layer_not_found', suggested_next_tool: 'photoshop_get_layers' },
   { pattern: /selection/i, code: 'selection_required', suggested_next_tool: 'photoshop_get_state' },
   { pattern: /version_unsupported|not supported.*version/i, code: 'version_unsupported', suggested_next_tool: 'photoshop_get_capabilities' },
+  { pattern: /generative.*credit|quota|sign in/i, code: 'generative_credits_exhausted', suggested_next_tool: 'photoshop_get_capabilities' },
+  { pattern: /generative.*timeout|timed out/i, code: 'generative_timeout', suggested_next_tool: 'photoshop_get_preview' },
+  { pattern: /generative_no_selection|selection required for generative/i, code: 'generative_no_selection', suggested_next_tool: 'photoshop_select_rectangle' },
+  { pattern: /uxp.?bridge|neural filter.*bridge/i, code: 'uxp_bridge_unavailable', suggested_next_tool: 'photoshop_get_capabilities' },
   { pattern: /generative/i, code: 'generative_unavailable', suggested_next_tool: 'photoshop_get_capabilities' },
   { pattern: /font_not_found/i, code: 'font_not_found', suggested_next_tool: 'photoshop_list_fonts' },
   { pattern: /file not found|does not exist/i, code: 'file_not_found' },

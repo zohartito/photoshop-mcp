@@ -87,12 +87,15 @@ async function main(): Promise<void> {
     'ps.composite_blend',
     'ps.dodge_burn_guide',
     'ps.gradient_blend',
+    'ps.generative_fill',
+    'ps.generative_remove',
+    'ps.generative_expand',
   ];
-  if (promptNames.length !== 16) fail('prompt count', String(promptNames.length));
+  if (promptNames.length !== 19) fail('prompt count', String(promptNames.length));
   for (const name of [...expectedRecipePrompts, ...expectedGuidePrompts]) {
     if (!promptNames.includes(name)) fail('missing prompt', name);
   }
-  ok('16 prompt templates', `${expectedRecipePrompts.length} recipe + ${expectedGuidePrompts.length} guide`);
+  ok('19 prompt templates', `${expectedRecipePrompts.length} recipe + ${expectedGuidePrompts.length} guide`);
 
   section('Get prompt (ps.remove_background)');
   const promptResult = await client.getPrompt({
@@ -141,6 +144,13 @@ async function main(): Promise<void> {
     'photoshop_recipe_sky_blend',
     'photoshop_recipe_dodge_burn',
     'photoshop_recipe_remove_distraction',
+    'photoshop_generative_fill',
+    'photoshop_generative_remove',
+    'photoshop_generative_expand',
+    'photoshop_generative_upscale',
+    'photoshop_sky_replacement',
+    'photoshop_generate_image',
+    'photoshop_neural_filter',
   ];
   for (const name of required) {
     if (!toolNames.has(name)) fail('missing tool', name);

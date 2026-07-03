@@ -30,6 +30,9 @@ import { createHistoryTools } from '../tools/history-tools.js';
 import { createLayerOrderingTools } from '../tools/layer-ordering-tools.js';
 import { createStateTools } from '../tools/state-tools.js';
 import { createRecipeTools } from '../tools/recipes/index.js';
+import { createGenerativeTools } from '../tools/generative-tools.js';
+import { createNeuralTools } from '../tools/neural-tools.js';
+import { ensureUxpBridgeServer } from '../platform/uxp-bridge-server.js';
 
 export interface PhotoshopMCPServerOptions {
   serverVersion: string;
@@ -109,6 +112,10 @@ export class PhotoshopMCPServer {
 
     const connection = this.session.getConnection();
 
+    void ensureUxpBridgeServer().catch((err) => {
+      this.logger.debug('UXP bridge server not started:', err);
+    });
+
     this.registerToolDefinitions(createDocumentTools(connection));
     this.registerToolDefinitions(createLayerTools(connection));
     this.registerToolDefinitions(createImageTools(connection));
@@ -124,6 +131,8 @@ export class PhotoshopMCPServer {
     this.registerToolDefinitions(createHistoryTools(connection));
     this.registerToolDefinitions(createLayerOrderingTools(connection));
     this.registerToolDefinitions(createStateTools(connection));
+    this.registerToolDefinitions(createGenerativeTools(connection));
+    this.registerToolDefinitions(createNeuralTools(connection));
     this.registerToolDefinitions(createRecipeTools(connection));
 
     this.logger.info(

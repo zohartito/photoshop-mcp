@@ -1,7 +1,7 @@
 # AI / Prompt Layer for Photoshop
 
-The photoshop-mcp server exposes 66 atomic `photoshop_*` tools plus 12 recipe
-`photoshop_recipe_*` tools (78 total), along with a thin
+The photoshop-mcp server exposes 74 atomic `photoshop_*` tools plus 12 recipe
+`photoshop_recipe_*` tools (86 total), along with a thin
 AI/prompt layer ported from TTT: server-level instructions, MCP prompt templates,
 recipe tools, state/preview tools, version-aware capabilities, and structured
 error envelopes.
@@ -36,7 +36,7 @@ Sixteen templates in [`src/prompts/templates/`](../src/prompts/templates/), regi
 | `ps.dodge_burn` | `photoshop_recipe_dodge_burn` |
 | `ps.remove_distraction` | `photoshop_recipe_remove_distraction` |
 
-### Guide prompts (4 — no recipe pair)
+### Guide prompts (7 — no recipe pair)
 
 | Prompt | Purpose |
 |--------|---------|
@@ -44,6 +44,9 @@ Sixteen templates in [`src/prompts/templates/`](../src/prompts/templates/), regi
 | `ps.color_correct` | Tone / contrast fix chain |
 | `ps.dodge_burn_guide` | 50% gray overlay retouch setup |
 | `ps.composite_blend` | Place asset + mask + blend mode |
+| `ps.generative_fill` | Firefly generative fill workflow |
+| `ps.generative_remove` | AI Remove workflow |
+| `ps.generative_expand` | Generative Expand workflow |
 
 Each template uses arg coercion helpers from [`src/prompts/_shared.ts`](../src/prompts/_shared.ts)
 and returns a `GetPromptResult` with `description` + structured Goal/Plan/End state text

@@ -7,7 +7,7 @@ import {
 export const removeDistractionTemplate: PhotoshopPromptTemplate = {
   name: 'ps.remove_distraction',
   description:
-    'One-shot distraction removal via content-aware fill on the current selection. Users often say: remove that person, erase distraction, content aware remove, clone out object. Generative remove is not scriptable — content-aware only.',
+    'One-shot distraction removal: generative AI remove when available, else content-aware fill. Users often say: remove that person, erase distraction, content aware remove, clone out object.',
   arguments: [
     {
       name: 'feather_px',
@@ -24,11 +24,10 @@ export const removeDistractionTemplate: PhotoshopPromptTemplate = {
       `Plan:`,
       `1. Call \`photoshop_get_state\` to confirm an active document and check whether a pixel selection exists.`,
       `2. If no selection: call \`photoshop_select_rectangle\`, \`photoshop_select_subject\`, or ask the user to define the region to remove.`,
-      `3. Call \`photoshop_recipe_remove_distraction\` with { feather_px: ${feather} }.`,
-      `   - The recipe feathers the selection (if ${feather} > 0), runs content-aware fill, and deselects.`,
+      `3. Call \`photoshop_recipe_remove_distraction\` with { feather_px: ${feather} } (uses generative remove when capable).`,
+      `   - Fallback: content-aware fill when generative is unavailable.`,
       `4. If the result returns \`selection_required\`, go back to step 2.`,
-      `5. Call \`photoshop_get_preview\` once. If artifacts remain, ask the user to refine manually — generative remove is not available via ExtendScript.`,
-      `6. For generative-remove requests, explain the limitation and offer content-aware fill or manual clone/heal.`,
+      `5. Call \`photoshop_get_preview\` once. For best results prefer \`ps.generative_remove\` or \`photoshop_generative_remove\` when capabilities allow.`,
       ``,
       `End state: selected pixels are inpainted; selection cleared; one undo reverts the fill.`,
     ].join('\n');

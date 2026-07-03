@@ -16,12 +16,18 @@ import { gradientBlendTemplate } from './templates/gradient-blend.js';
 import { colorCorrectTemplate } from './templates/color-correct.js';
 import { dodgeBurnGuideTemplate } from './templates/dodge-burn-guide.js';
 import { compositeBlendTemplate } from './templates/composite-blend.js';
+import { generativeFillTemplate } from './templates/generative-fill.js';
+import { generativeRemoveTemplate } from './templates/generative-remove.js';
+import { generativeExpandTemplate } from './templates/generative-expand.js';
 
 export const PHOTOSHOP_GUIDE_PROMPT_NAMES = [
   'ps.gradient_blend',
   'ps.color_correct',
   'ps.dodge_burn_guide',
   'ps.composite_blend',
+  'ps.generative_fill',
+  'ps.generative_remove',
+  'ps.generative_expand',
 ] as const;
 
 export const PHOTOSHOP_PROMPT_TEMPLATES = [
@@ -41,6 +47,9 @@ export const PHOTOSHOP_PROMPT_TEMPLATES = [
   colorCorrectTemplate,
   compositeBlendTemplate,
   dodgeBurnGuideTemplate,
+  generativeFillTemplate,
+  generativeRemoveTemplate,
+  generativeExpandTemplate,
 ] as const;
 
 export function registerPhotoshopPrompts(registry: PromptRegistry): void {
