@@ -11,7 +11,7 @@
     "network": {
       "domains": ["127.0.0.1", "localhost"]
     },
-    "localFileSystem": "request"
+    "localFileSystem": "fullAccess"
   },
   "entrypoints": [
     {
