@@ -1,6 +1,5 @@
 import { ToolResult } from '../core/tool-registry.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
-import { PhotoshopConnection } from '../platform/connection.js';
+import { TransportRouter } from '../transport/index.js';
 import { classifyError, type PhotoshopErrorEnvelope } from '../errors/envelope.js';
 import { parseExtendScriptPayload } from '../utils/extendscript-result.js';
 
@@ -12,12 +11,10 @@ export interface AtomicSuccess {
 }
 
 export async function runSnippet(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   script: string
 ): Promise<unknown> {
-  const apiFactory = new PhotoshopAPIFactory(connection);
-  const api = await apiFactory.createAPI();
-  return api.executeScript(script);
+  return transport.runScript(script);
 }
 
 export function parseSnippetResult(raw: unknown): Record<string, unknown> | null {

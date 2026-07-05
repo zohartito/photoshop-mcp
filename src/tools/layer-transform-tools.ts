@@ -1,9 +1,8 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 
-export function createLayerTransformTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createLayerTransformTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -22,7 +21,7 @@ export function createLayerTransformTools(connection: PhotoshopConnection): Tool
           },
         },
       },
-      handler: async (args) => fitLayerToDocument(connection, args),
+      handler: async (args) => fitLayerToDocument(transport, args),
     },
     {
       tool: {
@@ -45,7 +44,7 @@ export function createLayerTransformTools(connection: PhotoshopConnection): Tool
           required: ['scalePercent'],
         },
       },
-      handler: async (args) => scaleLayer(connection, args),
+      handler: async (args) => scaleLayer(transport, args),
     },
     {
       tool: {
@@ -66,7 +65,7 @@ export function createLayerTransformTools(connection: PhotoshopConnection): Tool
           required: ['deltaX', 'deltaY'],
         },
       },
-      handler: async (args) => moveLayer(connection, args),
+      handler: async (args) => moveLayer(transport, args),
     },
     {
       tool: {
@@ -83,23 +82,20 @@ export function createLayerTransformTools(connection: PhotoshopConnection): Tool
           required: ['degrees'],
         },
       },
-      handler: async (args) => rotateLayer(connection, args),
+      handler: async (args) => rotateLayer(transport, args),
     },
   ];
 }
 
 async function fitLayerToDocument(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const fillDocument = (args.fillDocument as boolean) || false;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.fitLayerToDocument(fillDocument);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -123,18 +119,15 @@ async function fitLayerToDocument(
 }
 
 async function scaleLayer(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const scalePercent = args.scalePercent as number;
   const centerAnchor = args.centerAnchor !== undefined ? (args.centerAnchor as boolean) : true;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.scaleLayer(scalePercent, centerAnchor);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -158,18 +151,15 @@ async function scaleLayer(
 }
 
 async function moveLayer(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const deltaX = args.deltaX as number;
   const deltaY = args.deltaY as number;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.moveLayer(deltaX, deltaY);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -193,17 +183,14 @@ async function moveLayer(
 }
 
 async function rotateLayer(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const degrees = args.degrees as number;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.rotateLayer(degrees);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [

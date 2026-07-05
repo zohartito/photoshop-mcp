@@ -1,11 +1,11 @@
 import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
-import { PhotoshopConnection } from '../../platform/connection.js';
+import type { TransportRouter } from '../../transport/index.js';
 import { PhotoshopDetector } from '../../platform/detector.js';
 import { clampInt, executeRecipe, toolFailure } from './_shared.js';
 
 const TOOL_NAME = 'photoshop_recipe_remove_background';
 
-export function bindRemoveBackground(connection: PhotoshopConnection): ToolDefinition {
+export function bindRemoveBackground(transport: TransportRouter): ToolDefinition {
   return {
     tool: {
       name: TOOL_NAME,
@@ -47,19 +47,19 @@ export function bindRemoveBackground(connection: PhotoshopConnection): ToolDefin
         },
       },
     },
-    handler: async (args) => runRemoveBackground(connection, args),
+    handler: async (args) => runRemoveBackground(transport, args),
   };
 }
 
 async function runRemoveBackground(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const feather = clampInt(args.feather_px, 0, 20, 0);
   const keepShadow = args.keep_shadow === true;
 
-  await connection.ping().catch(() => undefined);
-  const info = connection.getPhotoshopInfo();
+  await transport.ping().catch(() => undefined);
+  const info = transport.getPhotoshopInfo();
   if (info) {
     const detector = new PhotoshopDetector();
     if (!detector.supportsSelectSubjectV2(info.version)) {
@@ -121,5 +121,5 @@ async function runRemoveBackground(
     };
   `;
 
-  return executeRecipe(connection, 'Remove Background', body);
+  return executeRecipe(transport, 'Remove Background', body);
 }

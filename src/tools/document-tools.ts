@@ -1,9 +1,8 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 
-export function createDocumentTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createDocumentTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -42,7 +41,7 @@ export function createDocumentTools(connection: PhotoshopConnection): ToolDefini
           required: ['width', 'height'],
         },
       },
-      handler: async (args) => createDocument(connection, args),
+      handler: async (args) => createDocument(transport, args),
     },
     {
       tool: {
@@ -53,7 +52,7 @@ export function createDocumentTools(connection: PhotoshopConnection): ToolDefini
           properties: {},
         },
       },
-      handler: async () => getDocumentInfo(connection),
+      handler: async () => getDocumentInfo(transport),
     },
     {
       tool: {
@@ -88,7 +87,7 @@ export function createDocumentTools(connection: PhotoshopConnection): ToolDefini
           required: ['path'],
         },
       },
-      handler: async (args) => saveDocument(connection, args),
+      handler: async (args) => saveDocument(transport, args),
     },
     {
       tool: {
@@ -105,13 +104,13 @@ export function createDocumentTools(connection: PhotoshopConnection): ToolDefini
           },
         },
       },
-      handler: async (args) => closeDocument(connection, args),
+      handler: async (args) => closeDocument(transport, args),
     },
   ];
 }
 
 async function createDocument(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const width = args.width as number;
@@ -120,9 +119,6 @@ async function createDocument(
   const colorMode = (args.colorMode as string) || 'RGB';
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const colorModeMap: Record<string, string> = {
       RGB: 'NewDocumentMode.RGB',
       CMYK: 'NewDocumentMode.CMYK',
@@ -136,7 +132,7 @@ async function createDocument(
       colorModeMap[colorMode] || 'NewDocumentMode.RGB'
     );
 
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -159,13 +155,10 @@ async function createDocument(
   }
 }
 
-async function getDocumentInfo(connection: PhotoshopConnection): Promise<ToolResult> {
+async function getDocumentInfo(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.getDocumentInfo();
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -189,7 +182,7 @@ async function getDocumentInfo(connection: PhotoshopConnection): Promise<ToolRes
 }
 
 async function saveDocument(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const path = args.path as string;
@@ -197,9 +190,6 @@ async function saveDocument(
   const quality = (args.quality as number) || 8;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     let script;
     switch (format.toUpperCase()) {
       case 'JPEG':
@@ -211,7 +201,7 @@ async function saveDocument(
       default:
         script = ExtendScriptSnippets.saveAsPSD(path);
     }
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -235,17 +225,14 @@ async function saveDocument(
 }
 
 async function closeDocument(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const save = (args.save as boolean) || false;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.closeDocument(save);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [

@@ -33,6 +33,7 @@ import { createRecipeTools } from '../tools/recipes/index.js';
 import { createGenerativeTools } from '../tools/generative-tools.js';
 import { createNeuralTools } from '../tools/neural-tools.js';
 import { ensureUxpBridgeServer } from '../platform/uxp-bridge-server.js';
+import { TransportRouter } from '../transport/index.js';
 
 export interface PhotoshopMCPServerOptions {
   serverVersion: string;
@@ -110,30 +111,34 @@ export class PhotoshopMCPServer {
       handler: async () => this.getVersion(),
     });
 
-    const connection = this.session.getConnection();
+    // Single injection point (transport-layer.md §4.4): one TransportRouter over
+    // the session's PhotoshopConnection flows into every create*Tools factory in
+    // place of the raw connection. The router owns backend selection, per-command
+    // pins, and the one global command queue (§4.3/§6.2); tools are transport-agnostic.
+    const transport = new TransportRouter(this.session.getConnection());
 
     void ensureUxpBridgeServer().catch((err) => {
       this.logger.debug('UXP bridge server not started:', err);
     });
 
-    this.registerToolDefinitions(createDocumentTools(connection));
-    this.registerToolDefinitions(createLayerTools(connection));
-    this.registerToolDefinitions(createImageTools(connection));
-    this.registerToolDefinitions(createImagePlacementTools(connection));
-    this.registerToolDefinitions(createLayerTransformTools(connection));
-    this.registerToolDefinitions(createLayerPropertiesTools(connection));
-    this.registerToolDefinitions(createFilterTools(connection));
-    this.registerToolDefinitions(createAdjustmentTools(connection));
-    this.registerToolDefinitions(createTextTools(connection));
-    this.registerToolDefinitions(createSelectionTools(connection));
-    this.registerToolDefinitions(createMaskTools(connection));
-    this.registerToolDefinitions(createActionTools(connection));
-    this.registerToolDefinitions(createHistoryTools(connection));
-    this.registerToolDefinitions(createLayerOrderingTools(connection));
-    this.registerToolDefinitions(createStateTools(connection));
-    this.registerToolDefinitions(createGenerativeTools(connection));
-    this.registerToolDefinitions(createNeuralTools(connection));
-    this.registerToolDefinitions(createRecipeTools(connection));
+    this.registerToolDefinitions(createDocumentTools(transport));
+    this.registerToolDefinitions(createLayerTools(transport));
+    this.registerToolDefinitions(createImageTools(transport));
+    this.registerToolDefinitions(createImagePlacementTools(transport));
+    this.registerToolDefinitions(createLayerTransformTools(transport));
+    this.registerToolDefinitions(createLayerPropertiesTools(transport));
+    this.registerToolDefinitions(createFilterTools(transport));
+    this.registerToolDefinitions(createAdjustmentTools(transport));
+    this.registerToolDefinitions(createTextTools(transport));
+    this.registerToolDefinitions(createSelectionTools(transport));
+    this.registerToolDefinitions(createMaskTools(transport));
+    this.registerToolDefinitions(createActionTools(transport));
+    this.registerToolDefinitions(createHistoryTools(transport));
+    this.registerToolDefinitions(createLayerOrderingTools(transport));
+    this.registerToolDefinitions(createStateTools(transport));
+    this.registerToolDefinitions(createGenerativeTools(transport));
+    this.registerToolDefinitions(createNeuralTools(transport));
+    this.registerToolDefinitions(createRecipeTools(transport));
 
     this.logger.info(
       `Registered ${this.toolRegistry.count()} tools and ${this.promptRegistry.count()} prompts`

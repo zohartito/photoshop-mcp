@@ -1,9 +1,8 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 
-export function createTextTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createTextTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -31,7 +30,7 @@ export function createTextTools(connection: PhotoshopConnection): ToolDefinition
           },
         },
       },
-      handler: async (args) => listFonts(connection, args),
+      handler: async (args) => listFonts(transport, args),
     },
     {
       tool: {
@@ -56,7 +55,7 @@ export function createTextTools(connection: PhotoshopConnection): ToolDefinition
           required: ['fontName'],
         },
       },
-      handler: async (args) => setTextFont(connection, args),
+      handler: async (args) => setTextFont(transport, args),
     },
     {
       tool: {
@@ -87,7 +86,7 @@ export function createTextTools(connection: PhotoshopConnection): ToolDefinition
           required: ['red', 'green', 'blue'],
         },
       },
-      handler: async (args) => setTextColor(connection, args),
+      handler: async (args) => setTextColor(transport, args),
     },
     {
       tool: {
@@ -105,7 +104,7 @@ export function createTextTools(connection: PhotoshopConnection): ToolDefinition
           required: ['alignment'],
         },
       },
-      handler: async (args) => setTextAlignment(connection, args),
+      handler: async (args) => setTextAlignment(transport, args),
     },
     {
       tool: {
@@ -122,24 +121,21 @@ export function createTextTools(connection: PhotoshopConnection): ToolDefinition
           required: ['text'],
         },
       },
-      handler: async (args) => updateTextContent(connection, args),
+      handler: async (args) => updateTextContent(transport, args),
     },
   ];
 }
 
 async function listFonts(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const query = args.query as string | undefined;
   const limit = (args.limit as number | undefined) ?? 200;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.listFonts(query, limit);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -163,18 +159,15 @@ async function listFonts(
 }
 
 async function setTextFont(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const fontName = args.fontName as string;
   const fontSize = args.fontSize as number | undefined;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.setTextFont(fontName, fontSize);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -198,7 +191,7 @@ async function setTextFont(
 }
 
 async function setTextColor(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const red = args.red as number;
@@ -206,11 +199,8 @@ async function setTextColor(
   const blue = args.blue as number;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.setTextColor(red, green, blue);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -234,17 +224,14 @@ async function setTextColor(
 }
 
 async function setTextAlignment(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const alignment = args.alignment as string;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.setTextAlignment(alignment);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -268,17 +255,14 @@ async function setTextAlignment(
 }
 
 async function updateTextContent(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const text = args.text as string;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.updateTextContent(text);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [

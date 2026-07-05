@@ -1,21 +1,18 @@
 import { readFile, unlink } from 'node:fs/promises';
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { resolvePhotoshopCapabilities } from '../platform/capabilities.js';
-import { PhotoshopConnection } from '../platform/connection.js';
 import { envelopeToToolResult, classifyError } from '../errors/envelope.js';
 import { parseExtendScriptPayload } from '../utils/extendscript-result.js';
 
 const PREVIEW_MAX_BYTES = 4 * 1024 * 1024;
 
-async function runScript(connection: PhotoshopConnection, script: string): Promise<unknown> {
-  const apiFactory = new PhotoshopAPIFactory(connection);
-  const api = await apiFactory.createAPI();
-  return api.executeScript(script);
+async function runScript(transport: TransportRouter, script: string): Promise<unknown> {
+  return transport.runScript(script);
 }
 
-export function createStateTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createStateTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -28,7 +25,7 @@ export function createStateTools(connection: PhotoshopConnection): ToolDefinitio
           'Preconditions: none (safe on empty session). Side effects: none.',
         inputSchema: { type: 'object', properties: {} },
       },
-      handler: async () => getState(connection),
+      handler: async () => getState(transport),
     },
     {
       tool: {
@@ -57,7 +54,7 @@ export function createStateTools(connection: PhotoshopConnection): ToolDefinitio
           },
         },
       },
-      handler: async (args) => getPreview(connection, args),
+      handler: async (args) => getPreview(transport, args),
     },
     {
       tool: {
@@ -70,14 +67,14 @@ export function createStateTools(connection: PhotoshopConnection): ToolDefinitio
           'Preconditions: none. Side effects: none.',
         inputSchema: { type: 'object', properties: {} },
       },
-      handler: async () => getCapabilities(connection),
+      handler: async () => getCapabilities(transport),
     },
   ];
 }
 
-async function getState(connection: PhotoshopConnection): Promise<ToolResult> {
+async function getState(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const raw = await runScript(connection, ExtendScriptSnippets.getState());
+    const raw = await runScript(transport, ExtendScriptSnippets.getState());
     const result = parseExtendScriptPayload(raw);
     return {
       content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
@@ -90,7 +87,7 @@ async function getState(connection: PhotoshopConnection): Promise<ToolResult> {
 }
 
 async function getPreview(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const maxDimension = (args.max_dimension_px as number) || 1024;
@@ -100,7 +97,7 @@ async function getPreview(
 
   try {
     const result = (await runScript(
-      connection,
+      transport,
       ExtendScriptSnippets.exportPreview(maxDimension, quality)
     )) as { path: string; width: number; height: number; mimeType: string };
 
@@ -150,9 +147,9 @@ async function getPreview(
   }
 }
 
-async function getCapabilities(connection: PhotoshopConnection): Promise<ToolResult> {
+async function getCapabilities(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const version = await connection.getVersion();
+    const version = await transport.getVersion();
     const capabilities = await resolvePhotoshopCapabilities(version);
     return {
       content: [{ type: 'text', text: JSON.stringify(capabilities, null, 2) }],

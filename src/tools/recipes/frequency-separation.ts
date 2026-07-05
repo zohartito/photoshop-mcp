@@ -1,10 +1,10 @@
 import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
-import { PhotoshopConnection } from '../../platform/connection.js';
+import type { TransportRouter } from '../../transport/index.js';
 import { clampInt, executeRecipe } from './_shared.js';
 
 const TOOL_NAME = 'photoshop_recipe_frequency_separation';
 
-export function bindFrequencySeparation(connection: PhotoshopConnection): ToolDefinition {
+export function bindFrequencySeparation(transport: TransportRouter): ToolDefinition {
   return {
     tool: {
       name: TOOL_NAME,
@@ -34,12 +34,12 @@ export function bindFrequencySeparation(connection: PhotoshopConnection): ToolDe
         },
       },
     },
-    handler: async (args) => runFrequencySeparation(connection, args),
+    handler: async (args) => runFrequencySeparation(transport, args),
   };
 }
 
 async function runFrequencySeparation(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const radius = clampInt(args.radius_px, 1, 50, 6);
@@ -84,5 +84,5 @@ async function runFrequencySeparation(
     };
   `;
 
-  return executeRecipe(connection, 'Frequency Separation', body);
+  return executeRecipe(transport, 'Frequency Separation', body);
 }

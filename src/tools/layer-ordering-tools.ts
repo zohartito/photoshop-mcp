@@ -1,9 +1,8 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 
-export function createLayerOrderingTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createLayerOrderingTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -25,7 +24,7 @@ export function createLayerOrderingTools(connection: PhotoshopConnection): ToolD
           required: ['targetLayerName', 'position'],
         },
       },
-      handler: async (args) => moveLayerToPosition(connection, args),
+      handler: async (args) => moveLayerToPosition(transport, args),
     },
     {
       tool: {
@@ -36,7 +35,7 @@ export function createLayerOrderingTools(connection: PhotoshopConnection): ToolD
           properties: {},
         },
       },
-      handler: async () => moveLayerToTop(connection),
+      handler: async () => moveLayerToTop(transport),
     },
     {
       tool: {
@@ -47,7 +46,7 @@ export function createLayerOrderingTools(connection: PhotoshopConnection): ToolD
           properties: {},
         },
       },
-      handler: async () => moveLayerToBottom(connection),
+      handler: async () => moveLayerToBottom(transport),
     },
     {
       tool: {
@@ -58,7 +57,7 @@ export function createLayerOrderingTools(connection: PhotoshopConnection): ToolD
           properties: {},
         },
       },
-      handler: async () => moveLayerUp(connection),
+      handler: async () => moveLayerUp(transport),
     },
     {
       tool: {
@@ -69,24 +68,21 @@ export function createLayerOrderingTools(connection: PhotoshopConnection): ToolD
           properties: {},
         },
       },
-      handler: async () => moveLayerDown(connection),
+      handler: async () => moveLayerDown(transport),
     },
   ];
 }
 
 async function moveLayerToPosition(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const targetLayerName = args.targetLayerName as string;
   const position = args.position as string;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.moveLayerToPosition(targetLayerName, position);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -109,13 +105,10 @@ async function moveLayerToPosition(
   }
 }
 
-async function moveLayerToTop(connection: PhotoshopConnection): Promise<ToolResult> {
+async function moveLayerToTop(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.moveLayerToTop();
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -138,13 +131,10 @@ async function moveLayerToTop(connection: PhotoshopConnection): Promise<ToolResu
   }
 }
 
-async function moveLayerToBottom(connection: PhotoshopConnection): Promise<ToolResult> {
+async function moveLayerToBottom(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.moveLayerToBottom();
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -167,13 +157,10 @@ async function moveLayerToBottom(connection: PhotoshopConnection): Promise<ToolR
   }
 }
 
-async function moveLayerUp(connection: PhotoshopConnection): Promise<ToolResult> {
+async function moveLayerUp(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.moveLayerUp();
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -196,13 +183,10 @@ async function moveLayerUp(connection: PhotoshopConnection): Promise<ToolResult>
   }
 }
 
-async function moveLayerDown(connection: PhotoshopConnection): Promise<ToolResult> {
+async function moveLayerDown(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.moveLayerDown();
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [

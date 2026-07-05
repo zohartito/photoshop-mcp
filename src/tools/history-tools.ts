@@ -1,9 +1,8 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 
-export function createHistoryTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createHistoryTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -21,7 +20,7 @@ export function createHistoryTools(connection: PhotoshopConnection): ToolDefinit
           },
         },
       },
-      handler: async (args) => undo(connection, args),
+      handler: async (args) => undo(transport, args),
     },
     {
       tool: {
@@ -39,7 +38,7 @@ export function createHistoryTools(connection: PhotoshopConnection): ToolDefinit
           },
         },
       },
-      handler: async (args) => redo(connection, args),
+      handler: async (args) => redo(transport, args),
     },
     {
       tool: {
@@ -50,23 +49,20 @@ export function createHistoryTools(connection: PhotoshopConnection): ToolDefinit
           properties: {},
         },
       },
-      handler: async () => getHistory(connection),
+      handler: async () => getHistory(transport),
     },
   ];
 }
 
 async function undo(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const steps = (args.steps as number) || 1;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.undo(steps);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -90,17 +86,14 @@ async function undo(
 }
 
 async function redo(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const steps = (args.steps as number) || 1;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.redo(steps);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -123,13 +116,10 @@ async function redo(
   }
 }
 
-async function getHistory(connection: PhotoshopConnection): Promise<ToolResult> {
+async function getHistory(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.getHistoryStates();
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [

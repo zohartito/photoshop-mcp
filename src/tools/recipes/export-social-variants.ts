@@ -1,6 +1,6 @@
 import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
 import { resolveExportPath } from '../../lib/export-paths.js';
-import { PhotoshopConnection } from '../../platform/connection.js';
+import type { TransportRouter } from '../../transport/index.js';
 import { clampInt, executeRecipe, jsString } from './_shared.js';
 
 const TOOL_NAME = 'photoshop_recipe_export_social_variants';
@@ -28,7 +28,7 @@ const PLATFORM_SPECS: Record<string, PlatformSpec> = {
 
 const DEFAULT_PLATFORMS = ['instagram_post', 'instagram_story', 'x_post'];
 
-export function bindExportSocialVariants(connection: PhotoshopConnection): ToolDefinition {
+export function bindExportSocialVariants(transport: TransportRouter): ToolDefinition {
   return {
     tool: {
       name: TOOL_NAME,
@@ -61,12 +61,12 @@ export function bindExportSocialVariants(connection: PhotoshopConnection): ToolD
         },
       },
     },
-    handler: async (args) => runExportSocialVariants(connection, args),
+    handler: async (args) => runExportSocialVariants(transport, args),
   };
 }
 
 async function runExportSocialVariants(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const platforms = parsePlatforms(args.platforms);
@@ -174,7 +174,7 @@ async function runExportSocialVariants(
     };
   `;
 
-  return executeRecipe(connection, 'Export Social Variants', body);
+  return executeRecipe(transport, 'Export Social Variants', body);
 }
 
 function parsePlatforms(raw: unknown): PlatformSpec[] {

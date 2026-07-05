@@ -1,9 +1,8 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 
-export function createLayerTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createLayerTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -24,7 +23,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           },
         },
       },
-      handler: async (args) => createLayer(connection, args),
+      handler: async (args) => createLayer(transport, args),
     },
     {
       tool: {
@@ -35,7 +34,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           properties: {},
         },
       },
-      handler: async () => deleteLayer(connection),
+      handler: async () => deleteLayer(transport),
     },
     {
       tool: {
@@ -78,7 +77,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           required: ['text'],
         },
       },
-      handler: async (args) => createTextLayer(connection, args),
+      handler: async (args) => createTextLayer(transport, args),
     },
     {
       tool: {
@@ -109,7 +108,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           required: ['red', 'green', 'blue'],
         },
       },
-      handler: async (args) => fillLayer(connection, args),
+      handler: async (args) => fillLayer(transport, args),
     },
     {
       tool: {
@@ -125,7 +124,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           properties: {},
         },
       },
-      handler: async () => getLayers(connection),
+      handler: async () => getLayers(transport),
     },
     {
       tool: {
@@ -148,23 +147,20 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           required: ['name'],
         },
       },
-      handler: async (args) => selectLayerByName(connection, args),
+      handler: async (args) => selectLayerByName(transport, args),
     },
   ];
 }
 
 async function createLayer(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const name = args.name as string | undefined;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.newLayer(name);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -187,13 +183,10 @@ async function createLayer(
   }
 }
 
-async function deleteLayer(connection: PhotoshopConnection): Promise<ToolResult> {
+async function deleteLayer(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.deleteLayer();
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -217,7 +210,7 @@ async function deleteLayer(connection: PhotoshopConnection): Promise<ToolResult>
 }
 
 async function createTextLayer(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const text = args.text as string;
@@ -227,11 +220,8 @@ async function createTextLayer(
   const fontName = args.fontName as string | undefined;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.createTextLayer(text, x, y, fontSize, fontName);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -255,7 +245,7 @@ async function createTextLayer(
 }
 
 async function fillLayer(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const red = args.red as number;
@@ -263,11 +253,8 @@ async function fillLayer(
   const blue = args.blue as number;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.fillLayer(red, green, blue);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -290,13 +277,10 @@ async function fillLayer(
   }
 }
 
-async function getLayers(connection: PhotoshopConnection): Promise<ToolResult> {
+async function getLayers(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.getLayerNames();
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -320,17 +304,14 @@ async function getLayers(connection: PhotoshopConnection): Promise<ToolResult> {
 }
 
 async function selectLayerByName(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const name = args.name as string;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.selectLayerByName(name);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [

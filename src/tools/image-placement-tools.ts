@@ -1,9 +1,8 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 
-export function createImagePlacementTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createImagePlacementTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -35,7 +34,7 @@ export function createImagePlacementTools(connection: PhotoshopConnection): Tool
           required: ['filePath'],
         },
       },
-      handler: async (args) => placeImage(connection, args),
+      handler: async (args) => placeImage(transport, args),
     },
     {
       tool: {
@@ -57,13 +56,13 @@ export function createImagePlacementTools(connection: PhotoshopConnection): Tool
           required: ['filePath'],
         },
       },
-      handler: async (args) => openImage(connection, args),
+      handler: async (args) => openImage(transport, args),
     },
   ];
 }
 
 async function placeImage(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const filePath = args.filePath as string;
@@ -71,11 +70,8 @@ async function placeImage(
   const y = (args.y as number) || 0;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.placeImage(filePath, x, y);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
@@ -99,17 +95,14 @@ async function placeImage(
 }
 
 async function openImage(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const filePath = args.filePath as string;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.openImage(filePath);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [

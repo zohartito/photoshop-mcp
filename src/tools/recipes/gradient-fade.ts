@@ -1,5 +1,5 @@
 import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
-import { PhotoshopConnection } from '../../platform/connection.js';
+import type { TransportRouter } from '../../transport/index.js';
 import type { GradientMaskDirection } from '../../api/extendscript.js';
 import {
   clampInt,
@@ -17,7 +17,7 @@ const GRADIENT_DIRECTIONS: GradientMaskDirection[] = [
   'right_to_left',
 ];
 
-export function bindGradientFade(connection: PhotoshopConnection): ToolDefinition {
+export function bindGradientFade(transport: TransportRouter): ToolDefinition {
   return {
     tool: {
       name: TOOL_NAME,
@@ -65,12 +65,12 @@ export function bindGradientFade(connection: PhotoshopConnection): ToolDefinitio
         },
       },
     },
-    handler: async (args) => runGradientFade(connection, args),
+    handler: async (args) => runGradientFade(transport, args),
   };
 }
 
 async function runGradientFade(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const direction = parseGradientDirection(args.direction);
@@ -129,7 +129,7 @@ async function runGradientFade(
     };
   `;
 
-  return executeRecipe(connection, 'Gradient Fade', body);
+  return executeRecipe(transport, 'Gradient Fade', body);
 }
 
 function parseGradientDirection(value: unknown): GradientMaskDirection {

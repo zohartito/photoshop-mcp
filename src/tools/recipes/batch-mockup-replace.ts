@@ -2,7 +2,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { extname, isAbsolute, join } from 'node:path';
 import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
 import { resolveExportPath } from '../../lib/export-paths.js';
-import { PhotoshopConnection } from '../../platform/connection.js';
+import type { TransportRouter } from '../../transport/index.js';
 import {
   clampInt,
   executeRecipe,
@@ -23,7 +23,7 @@ const SUPPORTED_ASSET_EXTS = new Set([
   '.webp',
 ]);
 
-export function bindBatchMockupReplace(connection: PhotoshopConnection): ToolDefinition {
+export function bindBatchMockupReplace(transport: TransportRouter): ToolDefinition {
   return {
     tool: {
       name: TOOL_NAME,
@@ -61,12 +61,12 @@ export function bindBatchMockupReplace(connection: PhotoshopConnection): ToolDef
         required: ['smart_object_layer_name', 'assets_dir'],
       },
     },
-    handler: async (args) => runBatchMockupReplace(connection, args),
+    handler: async (args) => runBatchMockupReplace(transport, args),
   };
 }
 
 async function runBatchMockupReplace(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const layerName =
@@ -198,7 +198,7 @@ async function runBatchMockupReplace(
     };
   `;
 
-  return executeRecipe(connection, 'Batch Mockup Replace', body);
+  return executeRecipe(transport, 'Batch Mockup Replace', body);
 }
 
 function baseNameWithoutExt(p: string): string {

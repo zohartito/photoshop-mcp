@@ -1,5 +1,5 @@
 import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
-import { PhotoshopConnection } from '../../platform/connection.js';
+import type { TransportRouter } from '../../transport/index.js';
 import { executeRecipe } from './_shared.js';
 
 const TOOL_NAME = 'photoshop_recipe_organize_layers';
@@ -7,7 +7,7 @@ const TOOL_NAME = 'photoshop_recipe_organize_layers';
 const NAMING_OPTIONS = ['type_index', 'content_summary', 'preserve'] as const;
 type NamingScheme = (typeof NAMING_OPTIONS)[number];
 
-export function bindOrganizeLayers(connection: PhotoshopConnection): ToolDefinition {
+export function bindOrganizeLayers(transport: TransportRouter): ToolDefinition {
   return {
     tool: {
       name: TOOL_NAME,
@@ -38,12 +38,12 @@ export function bindOrganizeLayers(connection: PhotoshopConnection): ToolDefinit
         },
       },
     },
-    handler: async (args) => runOrganizeLayers(connection, args),
+    handler: async (args) => runOrganizeLayers(transport, args),
   };
 }
 
 async function runOrganizeLayers(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const naming = parseNaming(args.naming_scheme);
@@ -158,7 +158,7 @@ async function runOrganizeLayers(
     };
   `;
 
-  return executeRecipe(connection, 'Organize Layers', body);
+  return executeRecipe(transport, 'Organize Layers', body);
 }
 
 function parseNaming(raw: unknown): NamingScheme {

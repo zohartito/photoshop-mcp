@@ -1,9 +1,8 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 
-export function createActionTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createActionTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -24,7 +23,7 @@ export function createActionTools(connection: PhotoshopConnection): ToolDefiniti
           required: ['actionName', 'actionSetName'],
         },
       },
-      handler: async (args) => playAction(connection, args),
+      handler: async (args) => playAction(transport, args),
     },
     {
       tool: {
@@ -49,24 +48,21 @@ export function createActionTools(connection: PhotoshopConnection): ToolDefiniti
           required: ['code'],
         },
       },
-      handler: async (args) => executeCustomScript(connection, args),
+      handler: async (args) => executeCustomScript(transport, args),
     },
   ];
 }
 
 async function playAction(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const actionName = args.actionName as string;
   const actionSetName = args.actionSetName as string;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.playAction(actionName, actionSetName);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -90,17 +86,14 @@ async function playAction(
 }
 
 async function executeCustomScript(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const code = args.code as string;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.executeCustomScript(code);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [

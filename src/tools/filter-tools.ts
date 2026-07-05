@@ -1,9 +1,8 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 
-export function createFilterTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createFilterTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -22,7 +21,7 @@ export function createFilterTools(connection: PhotoshopConnection): ToolDefiniti
           required: ['radius'],
         },
       },
-      handler: async (args) => applyGaussianBlur(connection, args),
+      handler: async (args) => applyGaussianBlur(transport, args),
     },
     {
       tool: {
@@ -54,7 +53,7 @@ export function createFilterTools(connection: PhotoshopConnection): ToolDefiniti
           required: ['amount', 'radius'],
         },
       },
-      handler: async (args) => applySharpen(connection, args),
+      handler: async (args) => applySharpen(transport, args),
     },
     {
       tool: {
@@ -84,7 +83,7 @@ export function createFilterTools(connection: PhotoshopConnection): ToolDefiniti
           required: ['amount'],
         },
       },
-      handler: async (args) => applyNoise(connection, args),
+      handler: async (args) => applyNoise(transport, args),
     },
     {
       tool: {
@@ -109,23 +108,20 @@ export function createFilterTools(connection: PhotoshopConnection): ToolDefiniti
           required: ['angle', 'radius'],
         },
       },
-      handler: async (args) => applyMotionBlur(connection, args),
+      handler: async (args) => applyMotionBlur(transport, args),
     },
   ];
 }
 
 async function applyGaussianBlur(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const radius = args.radius as number;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.applyGaussianBlur(radius);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -149,7 +145,7 @@ async function applyGaussianBlur(
 }
 
 async function applySharpen(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const amount = args.amount as number;
@@ -157,11 +153,8 @@ async function applySharpen(
   const threshold = (args.threshold as number) || 0;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.applyUnsharpMask(amount, radius, threshold);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -185,7 +178,7 @@ async function applySharpen(
 }
 
 async function applyNoise(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const amount = args.amount as number;
@@ -193,11 +186,8 @@ async function applyNoise(
   const monochromatic = (args.monochromatic as boolean) || false;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.applyAddNoise(amount, distribution, monochromatic);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -221,18 +211,15 @@ async function applyNoise(
 }
 
 async function applyMotionBlur(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const angle = args.angle as number;
   const radius = args.radius as number;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.applyMotionBlur(angle, radius);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [

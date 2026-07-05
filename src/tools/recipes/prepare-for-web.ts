@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
 import { resolveExportPath } from '../../lib/export-paths.js';
-import { PhotoshopConnection } from '../../platform/connection.js';
+import type { TransportRouter } from '../../transport/index.js';
 import { clampInt, executeRecipe, jsString } from './_shared.js';
 
 const TOOL_NAME = 'photoshop_recipe_prepare_for_web';
@@ -9,7 +9,7 @@ const TOOL_NAME = 'photoshop_recipe_prepare_for_web';
 const FORMAT_OPTIONS = ['jpeg', 'png'] as const;
 type WebFormat = (typeof FORMAT_OPTIONS)[number];
 
-export function bindPrepareForWeb(connection: PhotoshopConnection): ToolDefinition {
+export function bindPrepareForWeb(transport: TransportRouter): ToolDefinition {
   return {
     tool: {
       name: TOOL_NAME,
@@ -54,12 +54,12 @@ export function bindPrepareForWeb(connection: PhotoshopConnection): ToolDefiniti
         },
       },
     },
-    handler: async (args) => runPrepareForWeb(connection, args),
+    handler: async (args) => runPrepareForWeb(transport, args),
   };
 }
 
 async function runPrepareForWeb(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const maxDim = clampInt(args.max_dimension_px, 64, 8192, 2048);
@@ -131,7 +131,7 @@ async function runPrepareForWeb(
     }
   `;
 
-  return executeRecipe(connection, 'Prepare for Web', body);
+  return executeRecipe(transport, 'Prepare for Web', body);
 }
 
 function parseFormat(raw: unknown): WebFormat {

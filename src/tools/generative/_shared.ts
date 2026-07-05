@@ -2,8 +2,7 @@ import type { ToolResult } from '../../core/tool-registry.js';
 import type { PhotoshopErrorCode } from '../../errors/envelope.js';
 import { ExtendScriptSnippets } from '../../api/extendscript.js';
 import { getPhotoshopCapabilities } from '../../platform/capabilities.js';
-import type { PhotoshopConnection } from '../../platform/connection.js';
-import { PhotoshopAPIFactory } from '../../api/photoshop-api.js';
+import type { TransportRouter } from '../../transport/index.js';
 import {
   atomicFailure,
   atomicFailureFromError,
@@ -15,19 +14,17 @@ import {
 export const GENERATIVE_SCRIPT_TIMEOUT_MS = 120_000;
 
 export async function runGenerativeSnippet(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   script: string
 ): Promise<unknown> {
-  const apiFactory = new PhotoshopAPIFactory(connection);
-  const api = await apiFactory.createAPI();
-  return api.executeScript(script, GENERATIVE_SCRIPT_TIMEOUT_MS);
+  return transport.runScript(script, GENERATIVE_SCRIPT_TIMEOUT_MS);
 }
 
 export async function requireGenerativeCapability(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   feature: 'generative_fill' | 'generative_upscale'
 ): Promise<ToolResult | null> {
-  const version = await connection.getVersion();
+  const version = await transport.getVersion();
   const caps = getPhotoshopCapabilities(version);
   if (!caps.features[feature]) {
     return atomicFailure({

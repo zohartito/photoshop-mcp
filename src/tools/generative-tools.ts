@@ -3,7 +3,7 @@
  * See docs/plans/2026-07-03-1149-photoshop-ai-features/pai-phase-2.0-generative-core.md.
  */
 import type { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import type { PhotoshopConnection } from '../platform/connection.js';
+import type { TransportRouter } from '../transport/index.js';
 import {
   clampGenerativeScale,
   ExtendScriptSnippets,
@@ -19,7 +19,7 @@ function clampFeather(value: unknown): number {
   return Math.max(0, Math.min(20, Math.round(n)));
 }
 
-export function createGenerativeTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createGenerativeTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -40,7 +40,7 @@ export function createGenerativeTools(connection: PhotoshopConnection): ToolDefi
           required: ['prompt'],
         },
       },
-      handler: async (args) => generativeFill(connection, args),
+      handler: async (args) => generativeFill(transport, args),
     },
     {
       tool: {
@@ -70,7 +70,7 @@ export function createGenerativeTools(connection: PhotoshopConnection): ToolDefi
           },
         },
       },
-      handler: async (args) => generativeRemove(connection, args),
+      handler: async (args) => generativeRemove(transport, args),
     },
     {
       tool: {
@@ -98,7 +98,7 @@ export function createGenerativeTools(connection: PhotoshopConnection): ToolDefi
           },
         },
       },
-      handler: async (args) => generativeExpand(connection, args),
+      handler: async (args) => generativeExpand(transport, args),
     },
     {
       tool: {
@@ -121,7 +121,7 @@ export function createGenerativeTools(connection: PhotoshopConnection): ToolDefi
           },
         },
       },
-      handler: async (args) => generativeUpscale(connection, args),
+      handler: async (args) => generativeUpscale(transport, args),
     },
     {
       tool: {
@@ -142,7 +142,7 @@ export function createGenerativeTools(connection: PhotoshopConnection): ToolDefi
           },
         },
       },
-      handler: async (args) => skyReplacement(connection, args),
+      handler: async (args) => skyReplacement(transport, args),
     },
     {
       tool: {
@@ -162,16 +162,16 @@ export function createGenerativeTools(connection: PhotoshopConnection): ToolDefi
           required: ['prompt'],
         },
       },
-      handler: async (args) => generateImage(connection, args),
+      handler: async (args) => generateImage(transport, args),
     },
   ];
 }
 
 async function generativeFill(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
-  const blocked = await requireGenerativeCapability(connection, 'generative_fill');
+  const blocked = await requireGenerativeCapability(transport, 'generative_fill');
   if (blocked) return blocked;
 
   const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
@@ -183,32 +183,32 @@ async function generativeFill(
     });
   }
 
-  const raw = await runGenerativeSnippet(connection, ExtendScriptSnippets.generativeFill(prompt));
+  const raw = await runGenerativeSnippet(transport, ExtendScriptSnippets.generativeFill(prompt));
   return parseGenerativeResult(raw);
 }
 
 async function generativeRemove(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
-  const blocked = await requireGenerativeCapability(connection, 'generative_fill');
+  const blocked = await requireGenerativeCapability(transport, 'generative_fill');
   if (blocked) return blocked;
 
   const feather = clampFeather(args.feather_px);
   const autoSelect = args.auto_select_subject === true;
 
   const raw = await runGenerativeSnippet(
-    connection,
+    transport,
     ExtendScriptSnippets.generativeRemove(feather, autoSelect)
   );
   return parseGenerativeResult(raw);
 }
 
 async function generativeExpand(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
-  const blocked = await requireGenerativeCapability(connection, 'generative_fill');
+  const blocked = await requireGenerativeCapability(transport, 'generative_fill');
   if (blocked) return blocked;
 
   const prompt =
@@ -218,47 +218,47 @@ async function generativeExpand(
   const direction = normalizeExpandDirection(args.direction);
 
   const raw = await runGenerativeSnippet(
-    connection,
+    transport,
     ExtendScriptSnippets.generativeExpand(direction, prompt)
   );
   return parseGenerativeResult(raw);
 }
 
 async function generativeUpscale(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
-  const blocked = await requireGenerativeCapability(connection, 'generative_upscale');
+  const blocked = await requireGenerativeCapability(transport, 'generative_upscale');
   if (blocked) return blocked;
 
   const scale = clampGenerativeScale(args.target_scale);
   const raw = await runGenerativeSnippet(
-    connection,
+    transport,
     ExtendScriptSnippets.generativeUpscale(scale)
   );
   return parseGenerativeResult(raw);
 }
 
 async function skyReplacement(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
-  const blocked = await requireGenerativeCapability(connection, 'generative_fill');
+  const blocked = await requireGenerativeCapability(transport, 'generative_fill');
   if (blocked) return blocked;
 
   const skyPath = typeof args.sky_image_path === 'string' ? args.sky_image_path.trim() : '';
   const raw = await runGenerativeSnippet(
-    connection,
+    transport,
     ExtendScriptSnippets.skyReplacement(skyPath)
   );
   return parseGenerativeResult(raw);
 }
 
 async function generateImage(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
-  const blocked = await requireGenerativeCapability(connection, 'generative_fill');
+  const blocked = await requireGenerativeCapability(transport, 'generative_fill');
   if (blocked) return blocked;
 
   const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
@@ -280,7 +280,7 @@ async function generateImage(
       : 1024;
 
   const raw = await runGenerativeSnippet(
-    connection,
+    transport,
     ExtendScriptSnippets.generateImage(prompt, width, height)
   );
   return parseGenerativeResult(raw);
