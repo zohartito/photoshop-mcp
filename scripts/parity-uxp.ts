@@ -170,10 +170,41 @@ async function main(): Promise<void> {
 
   try {
     for (const cmd of PORTED_COMMANDS) {
-      log(`— ${cmd.name}: backend A…`);
-      const a = await backendA.run({ name: cmd.name, params: { script: cmd.snippet() } });
-      log(`— ${cmd.name}: backend B…`);
-      const b = await backendB.run({ name: cmd.name, params: {}, timeoutMs: 30_000 });
+      // Per-command isolation: one backend failure is recorded as a dirty result
+      // and the run continues — a single hang must not abort the whole matrix.
+      let a: unknown = null;
+      try {
+        log(`— ${cmd.name}: backend A…`);
+        a = await backendA.run({ name: cmd.name, params: { script: cmd.snippet() } });
+      } catch (err) {
+        results.push({
+          command: cmd.name,
+          clean: false,
+          diffs: [`backend A error: ${String(err)}`],
+          a: null,
+          b: null,
+        });
+        log(`   ${cmd.name}: BACKEND A ERROR — ${String(err)}`);
+        continue;
+      }
+      let b: unknown = null;
+      try {
+        log(`— ${cmd.name}: backend B…`);
+        b = await backendB.run({ name: cmd.name, params: {}, timeoutMs: 30_000 });
+      } catch (err) {
+        // Liveness at the moment of failure discriminates a hung/unloaded plugin
+        // (polls stopped) from a protocol/descriptor failure (still polling).
+        const stillPolling = await backendB.isAvailable();
+        results.push({
+          command: cmd.name,
+          clean: false,
+          diffs: [`backend B error: ${String(err)} (plugin still polling: ${stillPolling})`],
+          a,
+          b: null,
+        });
+        log(`   ${cmd.name}: BACKEND B ERROR — ${String(err)} | plugin still polling: ${stillPolling}`);
+        continue;
+      }
       const diffs = deepDiff(a, b);
       results.push({ command: cmd.name, clean: diffs.length === 0, diffs, a, b });
       log(

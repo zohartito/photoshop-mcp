@@ -18,8 +18,8 @@
  *     requeued on the next poll so another poll cycle re-delivers it.
  */
 import { createServer, type Server } from 'node:http';
-import { writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Logger } from '../utils/logger.js';
 
@@ -47,10 +47,12 @@ interface LeasedCommand {
 const DEFAULT_PORT = Number.parseInt(process.env.PHOTOSHOP_UXP_BRIDGE_PORT ?? '38452', 10);
 
 /**
- * Handshake-file path (§6.7). Fixed name in the OS temp dir so the plugin can find
- * it without configuration; the plugin resolves the same path via `os.tmpdir()`.
+ * Handshake-file path (§6.7). Under the user's HOME, not the OS temp dir: UXP's
+ * manifest-v5 `os` shim has no `tmpdir()` (macOS temp dirs are per-user randomized
+ * and unguessable without it — the v1.0 plugin crashed at load on exactly this),
+ * while `os.homedir()` survives in UXP. Both sides resolve the same fixed path.
  */
-const HANDSHAKE_FILE = join(tmpdir(), 'photoshop-mcp-bridge.json');
+const HANDSHAKE_FILE = join(homedir(), '.photoshop-mcp', 'bridge.json');
 
 /**
  * How long a leased-but-unacked command may sit before it is requeued (§6.9). The
@@ -103,6 +105,7 @@ export function getUxpBridgeHandshakePath(): string {
  */
 function writeHandshakeFile(): void {
   try {
+    mkdirSync(join(homedir(), '.photoshop-mcp'), { recursive: true });
     writeFileSync(
       HANDSHAKE_FILE,
       JSON.stringify({ port: listenPort, pid: process.pid, startedAt: Date.now() }),
