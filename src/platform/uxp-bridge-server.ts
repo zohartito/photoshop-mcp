@@ -27,6 +27,18 @@ let listenPort = DEFAULT_PORT;
 const pendingCommands: UxpBridgeCommand[] = [];
 const results = new Map<string, UxpBridgeResult>();
 
+/**
+ * Epoch-ms of the last time the UXP plugin hit `GET /poll`. Zero ⇒ never polled.
+ * The in-process HTTP server always answers `/health`, which proves the SERVER is
+ * up but says nothing about the plugin; a truthful "plugin connected" signal is a
+ * recent poll (docs/design/transport-layer.md §4.1, Codex finding #3).
+ */
+let lastPollAt = 0;
+
+export function getUxpBridgeLastPollAt(): number {
+  return lastPollAt;
+}
+
 function json(res: import('node:http').ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
@@ -53,6 +65,9 @@ export async function ensureUxpBridgeServer(): Promise<number> {
       }
 
       if (req.method === 'GET' && url.pathname === '/poll') {
+        // A poll is the plugin's liveness heartbeat — record it even when the
+        // queue is empty so isAvailable() reflects a connected-but-idle plugin.
+        lastPollAt = Date.now();
         const cmd = pendingCommands.shift();
         if (!cmd) {
           res.writeHead(204);
