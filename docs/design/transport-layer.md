@@ -1,0 +1,265 @@
+# Transport Layer Design — Swappable Backends
+
+- **Status:** proposed (M1 deliverable, 2026-07-05)
+- **Fork:** `zohartito/photoshop-mcp` ← upstream `alisaitteke/photoshop-mcp` v1.4.0 (`d76e822`)
+- **Context:** vault ADR `2026-07-05_photoshop-mcp-adopt-then-extend.md`, research note `2026-07-05_photoshop-mcp-landscape.md`
+- **Verified against:** Photoshop 27.8.0 (2026), macOS, Apple Silicon — see §10
+
+## 1. Goal
+
+Keep all **87 MCP tool signatures stable** while making HOW a command reaches Photoshop
+swappable:
+
+- **Backend A — ExtendScript** (today): AppleScript `do javascript` on macOS, COM on
+  Windows. Works now; Adobe retired ESTK and could retire the engine, so it is the
+  long-term-deprecation-risk path.
+- **Backend B — UXP batchPlay** (migration path): companion UXP plugin + local bridge.
+  UXP plugins can only dial **out** as clients — they can never listen — so any bridge is
+  "server on our side, plugin polls/connects in" (same constraint that shapes
+  mikechambers/adb-mcp's `ws://localhost:3001` proxy).
+
+Secondary goal (designed here, built later): a **headless batch mode** — queue N files
+through a recipe and export — which sits *above* the transport and works on either backend.
+
+## 2. What v1.4.0 already has (codebase map)
+
+The surprise of M1: upstream already runs **two transports**, ad-hoc.
+
+### Path A — ExtendScript (84 of 87 tools)
+
+```
+src/tools/*.ts            20 of 22 tool files generate ExtendScript strings
+                          (helpers + snippet library: src/api/extendscript.ts, 2,467 lines)
+        │  runSnippet(connection, script)          src/tools/atomic-shared.ts
+        ▼
+src/api/photoshop-api.ts  PhotoshopAPIFactory — determineAPIType() HARDCODES 'ExtendScript';
+                          ExtendScriptPhotoshopAPI.wrapInErrorHandling() adds:
+                          px/pt unit forcing, DialogModes.NO, alert/confirm/prompt shims,
+                          "ERROR:" string protocol, toSource() result serialization
+        ▼
+src/platform/connection.ts  PhotoshopConnection — detect / launch / delegate
+        ▼
+src/platform/script-executor.ts  interface ScriptExecutor { execute(script), … }
+        ├─ macos-executor.ts    temp .jsx + temp .scpt → osascript
+        │                       `tell app … do javascript $.evalFile(...)`;
+        │                       FIFO queue serializes all script execution
+        └─ windows-executor.ts  temp .jsx + temp .vbs → cscript → COM Photoshop.Application
+```
+
+### Path B — UXP bridge (3 tools: neural filters + part of enhance-portrait)
+
+```
+src/tools/neural-tools.ts / recipes/enhance-portrait.ts
+        ▼  invokeNeuralFilter()                    src/platform/uxp-bridge-client.ts
+src/platform/uxp-bridge-server.ts   in-process HTTP server on 127.0.0.1:38452
+                                    (env PHOTOSHOP_UXP_BRIDGE_PORT; EADDRINUSE → port+1)
+                                    command queue + result map; caller polls results @250ms
+        ▲  GET /poll (400ms loop) · POST /result
+uxp-plugin/ (manifest minVersion 24.0, panel with manual Connect button)
+        main.js: hardcoded per-filter switch → batchPlay(neuralDescriptors)
+```
+
+### Dead / aspirational code (evidence the author wants this too)
+
+| File | State |
+|---|---|
+| `src/api/batch-play.ts` | descriptor helpers + `generateBatchPlayScript()` — **imported by nothing** |
+| `photoshop-api.ts` `UXPPhotoshopAPI` | stub, falls back to ExtendScript, "kept for future plugin-based implementation" |
+| `macos-executor.ts` `executeViaDoShellScript` | unused alternate delivery |
+
+### The injection point
+
+`src/core/server.ts:113` — one `PhotoshopConnection` from `Session` is passed into all 18
+`create*Tools(connection)` factories. **Single choke point**: swap what flows through here
+and every tool follows.
+
+## 3. Why the existing seam is at the wrong altitude
+
+`ScriptExecutor` abstracts *delivery of an ExtendScript string* (osascript vs COM). A UXP
+backend cannot execute ExtendScript at all — batchPlay consumes ActionDescriptor JSON.
+Two concerns are conflated today:
+
+| Concern | Backend A | Backend B |
+|---|---|---|
+| **Payload language** | ExtendScript source string | batchPlay descriptors / UXP JS |
+| **Delivery channel** | osascript / COM, temp files | localhost HTTP poll (or WS) to plugin |
+
+The swappable seam must sit at the **command** level — above payload generation — not at
+the script-string level. `ScriptExecutor` survives unchanged as an internal detail *inside*
+the ExtendScript backend; the HTTP bridge survives as the channel *inside* the UXP backend.
+
+## 4. Proposed design
+
+### 4.1 Interfaces
+
+```ts
+// src/transport/types.ts
+export interface PsCommand {
+  name: string;                    // e.g. 'create_layer_mask'
+  params: Record<string, unknown>; // validated with zod (already a dep, ^4.4.3)
+  timeoutMs?: number;
+}
+
+export interface PhotoshopTransport {
+  readonly id: 'extendscript' | 'uxp';       // room for 'firefly' later
+  isAvailable(): Promise<boolean>;            // PS detected / plugin connected
+  capabilities(): Promise<TransportCapabilities>;
+  run(command: PsCommand): Promise<unknown>;  // parsed JSON result — never raw strings
+}
+```
+
+Result normalization moves inside each transport: the ExtendScript backend keeps the
+`"ERROR:"` protocol, `toSource()` parsing (`parseExtendScriptPayload`) and unit-forcing
+wrapper internal; the UXP backend keeps bridge JSON envelopes internal. Tools stop
+knowing which they got.
+
+### 4.2 Command registry
+
+Each command registers per-backend implementations. The existing 2,467-line snippet
+library and per-tool script generation are **reused verbatim** as the `extendscript`
+implementations — no rewrite:
+
+```ts
+// src/transport/commands/create-layer-mask.ts
+registerCommand({
+  name: 'create_layer_mask',
+  meta: { mutatesActiveLayer: false, requiresSelection: true,
+          requiresNonBackgroundLayer: true },              // see §6
+  extendscript: (p) => ExtendScriptSnippets.createLayerMask(p),  // today's code, moved
+  uxp:          (p) => ({ action: 'batch_play', descriptors: makeMaskDescriptors(p) }),
+});
+```
+
+The UXP plugin gains **one generic `batch_play` action** (execute a descriptor array via
+`executeAsModal`, return the result) replacing the hardcoded per-filter switch. Porting a
+command to backend B then means writing descriptors on the server side only — no plugin
+release per command.
+
+### 4.3 Router
+
+```
+PHOTOSHOP_MCP_TRANSPORT = extendscript | uxp | auto   (default: auto)
+```
+
+- **auto:** per-command preferred backend → `isAvailable()` check → fall back to the other.
+- **Pinned commands:** `execute_script` and preview/export (binary temp-file dance) stay
+  `extendscript`-only; neural filters and future generative APIs stay `uxp`-only. Pins are
+  command-registry metadata, which is exactly why routing must be per-command, not a
+  global switch.
+- Global env override exists for the side-by-side verification harness (§5).
+
+### 4.4 Tool-factory migration
+
+`create*Tools(connection: PhotoshopConnection)` →
+`create*Tools(transport: TransportRouter)`. One mechanical sweep; tool names, schemas,
+descriptions, and error envelopes are untouched. MCP clients cannot tell the difference.
+
+## 5. Phasing
+
+| Milestone | Content | Verification |
+|---|---|---|
+| **M1 (done)** | fork, map, live-verify A, this doc | §10 matrix |
+| **M2** | `src/transport/` interfaces + `ExtendScriptTransport` wrapping existing code + router; move neural bridge behind `UxpTransport`; routing table 100% extendscript except neural | `scripts/test-all-mcp-tools.ts` passes unchanged (zero behavior change) |
+| **M3** | generic `batch_play` plugin action; port read-only commands first (`get_state`, `get_layers`, `get_document_info`) then mutating families | same tool calls, `PHOTOSHOP_MCP_TRANSPORT=extendscript` vs `uxp`, diff JSON outputs |
+| **M4** | batch mode (§8) | recipe over 10 files, count exports, spot-check pixels |
+| **M5** | plugin distribution as signed `.ccx` (double-click install) to kill the UXP-Developer-Tool manual-load tax; until then backend B is opt-in | fresh-machine install test |
+
+Upstream strategy: upstream is active (v1.4.0 July 2026). Build on branches, keep `master`
+tracking upstream, and offer the transport layer as a PR series once M3 proves parity —
+Zohar's call when the time comes.
+
+## 6. Contracts the transport must pin (found in M1 live testing)
+
+These are cross-tool semantics that must hold **identically on both backends**, encoded as
+command-registry metadata (`meta` in §4.2) so the router, batch mode, and docs all consume
+one source of truth:
+
+1. **Active-layer coupling (live bug found today):** DOM `layer.duplicate()` does *not*
+   activate the duplicate. In the M1 test, `duplicate_layer` → `select_subject` →
+   `create_layer_mask` silently masked the auto-converted Background ("Layer 0"), not the
+   duplicate — the composite looked unchanged because the unmasked copy sat on top.
+   Candidate upstream fix: `duplicate_layer` should activate the copy. Until then the
+   metadata (`mutatesActiveLayer`, `requiresNonBackgroundLayer`, `requiresSelection`)
+   makes the coupling machine-checkable.
+2. **Serialization:** `MacOSExecutor`'s FIFO queue is today's only concurrency guard. The
+   transport interface guarantees serialized execution per backend (UXP side:
+   `executeAsModal` provides it naturally).
+3. **Single-undo recipes:** recipes rely on ExtendScript `doc.suspendHistory()`
+   (`recipes/_shared.ts:194`). batchPlay ports must wrap in `executeAsModal` + history
+   suspension to preserve the one-undo guarantee — this is a *capability*, so it lives in
+   `TransportCapabilities`.
+4. **Units:** backend A forces px/pt around every script; batchPlay descriptors must carry
+   explicit `_unit: 'pixelsUnit'` etc. Pixel semantics are part of the command contract.
+5. **Dialog suppression:** `DialogModes.NO` ↔ batchPlay `modalBehavior`/dialog options.
+6. **Observability gap:** `get_layers` does not report mask presence — invisible state for
+   an agent (made today's bug hard to see). Add `hasMask` when porting the command.
+7. **Bridge port drift (latent bug):** the server auto-increments its port on
+   `EADDRINUSE`, but `uxp-plugin/main.js` hardcodes `38452` → silent disconnect. Fix in
+   M3 (handshake file or fail-loud), or at minimum document.
+
+## 7. Backend B channel: keep the HTTP long-poll, don't adopt ws://3001
+
+Both designs respect "UXP dials out only". Comparison against the adb-mcp reference
+(`~/adb-mcp`, local checkout):
+
+| | upstream bridge (have) | adb-mcp proxy (reference) |
+|---|---|---|
+| Channel | HTTP poll, 400ms plugin loop + 250ms result poll | WebSocket `ws://localhost:3001` (hardcoded) |
+| Processes | **in-process** with the MCP server | separate `node proxy.js` (session-bound, the #1 support pain per research note) |
+| Deps | zero | ws stack both sides |
+| Latency | ≤ ~650ms overhead/command | ~ms |
+
+Interactive tools tolerate sub-second overhead; batch amortizes it. **Decision: keep the
+poll bridge**, tighten the plugin loop when a command is pending, and revisit WebSocket
+only if M3 measurements hurt. What adb-mcp *is* the reference for: its `uxp/ps/` command
+handlers are a proven catalog of batchPlay descriptor shapes to crib per command, and its
+manual ritual (UXP Developer Tool load per PS restart + Connect click) is the UX we must
+escape via M5 `.ccx` packaging — until then backend A stays the default.
+
+## 8. Headless batch mode (design sketch — build in M4)
+
+Verified gap: no existing server has it (landscape research). Sits **above** the
+transport; backend-agnostic by construction.
+
+- **Recipe** = JSON: ordered list of `{ name, params }` using the *same* command names and
+  schemas as the MCP tools, plus input glob / output template
+  (`{stem}`, `{index}` substitution).
+- **Surfaces:** `photoshop_batch_run` MCP tool *and* `photoshop-mcp batch recipe.json`
+  CLI subcommand (bin entry exists already; add a subcommand).
+- **Execution:** serial per file (PS is single-instance; the queue enforces it anyway):
+  open → commands → export → close(no-save). Error policy `skip | abort`; per-file JSON
+  report; progress on stdout/MCP notifications.
+- **"Headless" means agentless, not Photoshop-less** — the PS GUI must be running; macOS
+  PS has no true headless mode. True headless = Firefly Services cloud (enterprise-gated),
+  which the `PhotoshopTransport` string-union id deliberately leaves room for as a
+  hypothetical backend C. Out of scope now.
+- **Python angle:** recipes are plain JSON — authorable from Python; a thin Python driver
+  (stdio MCP client looping files) is the natural place for Zohar-side orchestration.
+
+## 9. TypeScript comfort verdict (flag requested in the brief)
+
+**Stay in TypeScript — no Python wrapper.** The codebase is clean and small-file
+(registry + factory + error-envelope patterns, strict tsc, 1.6s builds, zod v4 already
+in); the fork work is interface extraction and call-site migration, not algorithm work. A
+Python wrapper would add a second process and a protocol hop, duplicate 87 schemas, and
+still leave the actual hairy part — ExtendScript/batchPlay payload generation — exactly
+where it is. Python enters where it pays: batch-recipe authoring and an optional batch
+driver (§8).
+
+## 10. M1 verification record (2026-07-05)
+
+Environment: Photoshop **27.8.0 (2026)**, macOS, fork at `d76e822` (= npm v1.4.0).
+
+| Check | Result |
+|---|---|
+| `npm install && tsc` | clean build |
+| Fork `dist/index.js` over stdio | `initialize` OK, `tools/list` = **87 tools**, `tools/call get_state` reached live PS |
+| `photoshop_open_image` (4032×3024 JPEG) | ✅ doc id 59 |
+| `photoshop_select_subject` | ✅ `autoCutout`, clean subject isolation (verified visually via `get_preview`) |
+| `photoshop_create_layer_mask` | ✅ mask created — **on the wrong layer** (§6.1); mask itself correct |
+| `photoshop_save_document` PNG export | ✅ 4032×3024 RGBA, real alpha channel (header-verified) |
+| Also exercised | ping, get_version, get_state, get_layers, duplicate_layer, select_layer_by_name, set_layer_visibility, get_preview, close_document |
+
+Live tool calls ran through the registered `photoshop-local` server (same v1.4.0 code as
+the fork) plus one `get_state` through the fork's own build; both reach the same PS 2026
+instance by the same osascript path.
