@@ -178,7 +178,7 @@ descriptions, and error envelopes are untouched. MCP clients cannot tell the dif
 |---|---|---|
 | **M1 (done)** | fork, map, live-verify A, this doc | §10 matrix |
 | **M2** | `src/transport/` interfaces + `ExtendScriptTransport` wrapping existing code + router with **one global queue**; truthful UXP `isAvailable()`; move neural bridge behind `UxpTransport`; routing table 100% extendscript except neural. **Precondition for M3 parity testing (Codex #4):** normalize tool results to stable JSON envelopes — several tools still emit ad-hoc prose+JSON | `scripts/test-all-mcp-tools.ts` passes unchanged (zero behavior change) |
-| **M3** | generic `batch_play` plugin action + poll lease/ack; port read-only commands first (`get_state`, `get_layers`, `get_document_info`) then mutating families | same tool calls, `PHOTOSHOP_MCP_TRANSPORT=extendscript` vs `uxp`, diff normalized JSON |
+| **M3 (code-half done)** | generic `batch_play` plugin action + poll lease/ack + handshake-file port fix (§6.7); `hasMask` in `get_layers` (§6.6); §6.8 layer-family target-identity groundwork (layerId in descriptors); port read-only commands first (`get_state`, `get_layers`, `get_document_info`) then mutating families | **Backend-A gate (done, this run):** `build:server` strict clean + `scripts/test-all-mcp-tools.ts` reproduces the M2 baseline **118 pass / 2 fail / 11 skip** exactly; `hasMask` live-verified on PS 27.8.0; normalizer unit-checked (`test:uxp-normalize`). **Backend-B parity (deferred):** same tool calls, `PHOTOSHOP_MCP_TRANSPORT=extendscript` vs `uxp`, diff normalized JSON — needs the plugin loaded via UXP Developer Tool + Connect |
 | **M4** | batch mode (§8) | recipe over 10 files, count exports, spot-check pixels |
 | **M5** | plugin distribution as signed `.ccx` (double-click install) to kill the UXP-Developer-Tool manual-load tax; until then backend B is opt-in | fresh-machine install test |
 
@@ -217,20 +217,54 @@ one source of truth:
    silent options to *every* descriptor, not assume a global exists.
 6. **Observability gap:** `get_layers` does not report mask presence — invisible state for
    an agent (made today's bug hard to see). Add `hasMask` when porting the command.
+   **M3 (done, backend A):** each layer entry now carries `hasMask`. Detection uses an
+   Action Manager `UsrM`-by-id probe, *not* the DOM `layer.hasLayerMask` property — live
+   testing on PS 27.8.0 found `hasLayerMask` returns `undefined` even for masks made via
+   Action Manager, so the DOM property gives false negatives. UXP twin normalizes the
+   `hasUserMask` batchPlay key to the same field.
 7. **Bridge port drift (latent bug):** the server auto-increments its port on
    `EADDRINUSE`, but `uxp-plugin/main.js` hardcodes `38452` → silent disconnect. Fix in
    M3 (handshake file or fail-loud), or at minimum document.
+   **M3 (done): handshake file chosen over fail-loud.** On listen the server writes the
+   real bound port to `${os.tmpdir()}/photoshop-mcp-bridge.json`; the plugin reads it each
+   poll cycle and retargets. Rationale: fail-loud (refuse to increment, exit on
+   `EADDRINUSE`) would take the whole in-process MCP server — and backend A, the default
+   live-verified path — down whenever a stale process holds 38452, violating the
+   "backend A must not regress" gate. The handshake file keeps the auto-increment
+   resilience *and* lets the plugin follow a port change without a reload.
 8. **Target identity, not just activity flags (Codex #2):** the §6.1 metadata *detects*
    active-layer coupling but doesn't *prevent* the bug class. batchPlay targets layers by
    ID natively; the ExtendScript DOM leans on `activeLayer`. Contract: mutating commands
    **return the affected `layerId`**, and layer-targeting commands **accept an optional
    `layerId` param** (resolved per backend), so chains like duplicate → select-subject →
    mask can bind to the layer they mean instead of whatever happens to be active.
+   **M3 groundwork (done, backend B descriptors + registry metadata; live-verify deferred):**
+   the layer family gets `layerId`-aware batchPlay descriptor builders in
+   `src/transport/uxp-commands/descriptors.ts`, each resolving `layerId` via a native
+   `{ _ref:'layer', _id }` reference (falling back to the active layer when absent):
+   - **`duplicate_layer`** — `duplicateLayerDescriptor(layerId?, newName?)`; batchPlay
+     returns the new layer's `layerID` (the affected-id the contract requires).
+   - **`select_layer`** — `selectLayerByIdDescriptor(layerId)` (the resolve-and-target
+     primitive the others compose).
+   - **`create_layer_mask`** — `addLayerMaskDescriptor(layerId?, reveal)`; selects by id
+     first so the mask lands on the intended layer.
+   - **`set_layer_properties`** — `setLayerPropertiesDescriptor({ layerId?, opacity?,
+     blendMode? })`.
+   Registered in `COMMAND_REGISTRY` with §6.1 metadata. Not yet routed through
+   `UxpTransport.run()` — that waits on a plugin-connected session to verify result
+   parsing (especially reading the returned `layerID`). The tool-signature side (mutating
+   tools returning `layerId`, layer-targeting tools accepting it) is the remaining
+   backend-agnostic work once parsing is confirmed.
 9. **Bridge delivery needs ack/lease semantics (Codex #6):** `GET /poll` dequeues the
    command before the plugin acknowledges execution (`uxp-bridge-server.ts:55`) — a plugin
    crash after fetch silently loses the command and the caller burns the full timeout.
    Cheap fix in M3: lease on poll, requeue on missing ack. This doesn't reopen the
    WebSocket question (§7) — reliability is orthogonal to the channel.
+   **M3 (done):** `GET /poll` now *leases* the command (moves it to a `leased` map with a
+   timestamp) instead of dropping it; the plugin's `POST /result` is the ack and clears
+   the lease. A lease with no result older than `LEASE_TTL_MS` (10s) is requeued on the
+   next poll. Caller timeout purges the command from pending/leased/results. Same HTTP
+   long-poll channel — no WebSocket.
 
 ## 7. Backend B channel: keep the HTTP long-poll, don't adopt ws://3001
 
