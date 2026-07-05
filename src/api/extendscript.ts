@@ -569,9 +569,26 @@ export const ExtendScriptSnippets = {
    */
   getLayerNames: () => `
     ${getContextInfo}
-    
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
+    }
+    // §6.6 — the DOM property layer.hasLayerMask is unreliable in PS 2026 (returns
+    // undefined even for masks created via Action Manager). Probe the layer's
+    // user-mask channel by its stable id instead: an AM getd on a layer reference
+    // keyed by id exposes the 'UsrM' property only when a user mask exists.
+    function __mcp_layerHasMaskById(layerId) {
+      try {
+        var ref = new ActionReference();
+        ref.putProperty(charIDToTypeID('Prpr'), charIDToTypeID('UsrM'));
+        ref.putIdentifier(charIDToTypeID('Lyr '), layerId);
+        var args = new ActionDescriptor();
+        args.putReference(charIDToTypeID('null'), ref);
+        var resultDesc = executeAction(charIDToTypeID('getd'), args, DialogModes.NO);
+        return resultDesc.hasKey(charIDToTypeID('UsrM'));
+      } catch (e) {
+        return false;
+      }
     }
     var doc = app.activeDocument;
     var layers = [];
@@ -579,12 +596,15 @@ export const ExtendScriptSnippets = {
       for (var i = 0; i < container.layers.length; i++) {
         var layer = container.layers[i];
         try {
+          var layerHasMask = false;
+          try { layerHasMask = __mcp_layerHasMaskById(layer.id); } catch (eMask) { layerHasMask = false; }
           layers.push({
             name: layer.name,
             kind: String(layer.kind),
             visible: layer.visible,
             opacity: layer.opacity,
-            blendMode: String(layer.blendMode)
+            blendMode: String(layer.blendMode),
+            hasMask: layerHasMask
           });
         } catch (e) {
           var layerName = 'layer_' + layers.length;
