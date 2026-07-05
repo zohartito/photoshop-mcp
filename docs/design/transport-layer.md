@@ -353,3 +353,96 @@ replacement:
 | 6 | `/poll` dequeues pre-ack → lost commands on plugin crash | Accepted → §6.9 lease/ack in M3; doesn't reopen WebSocket call |
 | 7 | `executeAsModal` ≠ transport serialization; one-undo is operation-scoped | Accepted → `runOperation()` in §4.1, §6.3 rewritten |
 | 8 | `DialogModes.NO` global ≠ per-call `modalBehavior`; raw batchPlay results need normalization | Accepted → §6.5 rewritten, §4.2 normalization note |
+
+## 12. Parity verification record (2026-07-05)
+
+**Environment**
+
+| Item | Value |
+|---|---|
+| Photoshop | 27.8.0 (2026), macOS, Apple Silicon (pid live during run) |
+| Fork / branch | `zohartito/photoshop-mcp` @ `feat/transport-m3` |
+| `npm run build:server` (`tsc` strict) | ✅ clean (exit 0) |
+| `npm run test:uxp-normalize` | ✅ 9/9 normalization checks pass (offline; no plugin) |
+| UXP Developer Tools | running (pid live); plugin load user-confirmed via screenshot |
+| Bridge | in-process, bound `127.0.0.1:38452`, handshake file written to `${os.tmpdir()}/photoshop-mcp-bridge.json` |
+| Harness | `scripts/parity-uxp.ts` (now builds its own fixture — see below) |
+
+**Connectivity outcome — BLOCKED (single manual step needed).**
+
+Instrumented probe: bound the real bridge, wrote a fresh handshake file, watched
+`getUxpBridgeLastPollAt()` for 25 s → **0 plugin polls**, `isAvailable()` = `false`.
+Re-confirmed via the harness wait-loop (a prior run sat 22 min at "waiting for
+plugin" and never unblocked). Evidence gathered: handshake file present and
+correct; bridge answered `/health` (`pending:0, leased:0`); `/poll` returned `204`;
+`lastPollAt` never advanced.
+
+Root cause (matches §7): the plugin's poll loop is bound to the panel's `show()`
+lifecycle (`uxp-plugin/main.js` `entrypoints.setup(... bridgePanel.show → pollLoop)`),
+and the manifest exposes only a **panel** entrypoint (no menu-command). A loaded-but-
+never-shown panel does not dial out. **The one manual step:** in Photoshop open the
+panel once — **Plugins → Photoshop MCP UXP Bridge → MCP Bridge**. Polling starts on
+panel show; `isAvailable()` then flips true within ~2 s and the harness proceeds.
+
+Because backend B never came live, the `extendscript` vs `uxp` envelope diff could
+not be executed this session. Per the run's guardrails no UXP descriptor/normalizer
+code was changed on an unverified basis (ExtendScript remains the untouched
+reference). The matrix below is therefore a **checklist for the plugin-connected
+follow-up**, with a static-analysis prediction from reading `normalize.ts` /
+`descriptors.ts` against the backend-A reference (`src/api/extendscript.ts`
+`getContextInfo` / `getLayerNames`). Status legend: `match` (predicted identical),
+`open` (unverified — needs live diff), `gap` (known to differ; fix owed on the UXP
+path).
+
+**`get_state` / `get_document_info`** (shared `getContextInfo` envelope)
+
+| Field | Status | Note |
+|---|---|---|
+| `hasDocument` | open | trivial; both derive from document presence |
+| `document.name` | open | A: `doc.name`; B: descriptor `title` — verify B strips no extension |
+| `document.width` / `.height` | open | A: `.as('px')`; B: `unitValue()` unwrap — verify same rounding |
+| `document.resolution` | open | A: `doc.resolution`; B: `unitValue(resolution)` |
+| `document.colorMode` | open | A: `String(doc.mode)`; B: `normalizeDocumentMode(mode)` token map |
+| `document.layerCount` | open | A: `doc.layers.length` (top-level only); B: `numberOfLayers` (may count nested) — **watch for mismatch** |
+| `document.hasSelection` | **gap** | UXP path passes `false` unconditionally; needs a selection-bounds probe descriptor. Fixture makes this a positive case, so it WILL diff until implemented |
+| `activeLayer.name` | open | direct |
+| `activeLayer.kind` | open | A: `String(layer.kind)`; B: `normalizeLayerKind(int)` map (masked pixel layer ⇒ `LayerKind.NORMAL`) |
+| `activeLayer.opacity` | open | A: `layer.opacity` (0–100 int); B: `unitValue(opacity)` — verify units match |
+| `activeLayer.blendMode` | open | A: `String(layer.blendMode)`; B: `normalizeBlendMode(mode)` |
+| `activeLayer.visible` | open | direct boolean |
+| `activeLayer.locked` | open | A: `layer.allLocked`; B: `typeof layerLocking === 'object'` heuristic — **verify semantics match** (allLocked vs any-lock) |
+| `activeLayer.isBackground` | open | A: `layer.isBackgroundLayer`; B: descriptor `background` |
+| `activeLayer.bounds.{left,top,right,bottom}` | open | A: `bounds[n].as('px')`; B: `unitValue(bounds.*)` |
+
+**`get_layers`** (`{ layerCount, layers[], context }`)
+
+| Field | Status | Note |
+|---|---|---|
+| `context` | open | same `getContextInfo` as above (inherits `hasSelection` gap) |
+| `layerCount` | **gap** | UXP embeds only the active-layer descriptor ⇒ `1`; reference recurses all layers/groups. Fixture has 2 layers, so this diffs until the recursive get is implemented |
+| `layers[]` (array) | **gap** | UXP emits a single active-layer entry; reference emits document-ordered entries incl. Background. Needs the recursive multi-layer descriptor get |
+| `layers[].name` | open | per-entry; verify once multi-get lands |
+| `layers[].kind` | open | `normalizeLayerKind` |
+| `layers[].visible` | open | direct |
+| `layers[].opacity` | open | `unitValue` |
+| `layers[].blendMode` | open | `normalizeBlendMode` |
+| `layers[].hasMask` | open | A: Action-Manager `UsrM`-by-id probe; B: `hasUserMask` key. Fixture masks one layer ⇒ positive case exists to diff |
+
+**Known M3 gaps carried forward (both confirmed still open this run):**
+
+1. **`hasSelection` on the UXP path** — hard-coded `false` (`uxp-transport.ts` `getState`/`getDocumentInfo`/`getLayers`). Fix: a selection-bounds `get` descriptor (`{ _obj:'get', _target:[{ _ref:'property', _property:'selection' }, ACTIVE_DOCUMENT] }` or equivalent), normalized to a boolean. Deferred here — unverifiable without a live plugin to confirm the returned key.
+2. **Recursive `get_layers` multi-layer get** — UXP embeds only the active-layer descriptor (`uxp-transport.ts` `getLayers`). Fix: enumerate `numberOfLayers` and issue a per-index layer `get` (adb-mcp `getLayers` pattern), flattening groups to match `collectLayers` order. Deferred for the same reason.
+
+**Harness change (committed):** `scripts/parity-uxp.ts` now constructs its OWN
+uniquely-named fixture via backend A — new RGB doc → filled non-background pixel
+layer → rectangular selection consumed into a layer mask (positive `hasMask`) →
+fresh selection left active (positive `hasSelection`) — then diffs all three
+commands across both backends and closes the fixture no-save. It never opens or
+mutates the user's document. This is the artifact the follow-up runs once the panel
+is opened.
+
+**Verdict:** the live diff is one panel-open away. On reconnect, run
+`npx tsx scripts/parity-uxp.ts`; expect `get_state`/`get_document_info` to differ
+only on `hasSelection` and `get_layers` to differ on `layerCount`/`layers[]` (plus
+`hasSelection` via `context`), then implement the two gaps above on the UXP path and
+re-diff to clean.
