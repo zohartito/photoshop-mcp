@@ -9,9 +9,9 @@
  * `get`/`make`/`delete` idioms; per §6.4 every unit value carries an explicit
  * `_unit` so pixel semantics are part of the command contract.
  *
- * NOT LIVE-VERIFIED in the M3 code-half run — the UXP plugin is not loaded. Live
- * parity diffing (PHOTOSHOP_MCP_TRANSPORT=uxp vs extendscript) is deferred to a
- * follow-up session where the plugin is connected via UXP Developer Tool.
+ * LIVE-VERIFIED 2026-07-05 on PS 27.8 (parity 3/3 CLEAN, transport-layer.md §12).
+ * The read-only descriptors below ran against the live plugin; the mutating-family
+ * builders (§6.8) remain staged pending their own fixture-verified port.
  */
 import type { ActionDescriptor } from '../../api/batch-play.js';
 
@@ -42,6 +42,27 @@ export function getDocumentDescriptor(): ActionDescriptor[] {
  */
 export function getActiveLayerDescriptor(): ActionDescriptor[] {
   return [{ _obj: 'get', _target: [ACTIVE_LAYER] }];
+}
+
+/**
+ * A batchPlay `get` of the document's `selection` property. When no selection
+ * exists the get THROWS (whole-call failure under continueOnError:false) — the
+ * transport catches that and maps it to hasSelection=false, which is why this is
+ * probed as its own bridge command rather than batched with the document get.
+ */
+export function getSelectionDescriptor(): ActionDescriptor[] {
+  return [{ _obj: 'get', _target: [{ _property: 'selection' }, ACTIVE_DOCUMENT] }];
+}
+
+/**
+ * A batchPlay `get` of one layer by Action Manager item index, for the get_layers
+ * walk. AM indexing quirk (live-verified on PS 27.8): `numberOfLayers` EXCLUDES a
+ * Background layer, and the `_index` space puts the background at 0 with
+ * non-background layers at 1..N bottom→top (an index past N errors the whole sync
+ * batchPlay). The transport iterates N..1 then 0 for top-first order.
+ */
+export function getLayerByIndexDescriptor(index: number): ActionDescriptor {
+  return { _obj: 'get', _target: [{ _ref: 'layer', _index: index }] };
 }
 
 /**

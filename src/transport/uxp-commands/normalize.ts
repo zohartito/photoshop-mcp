@@ -15,9 +15,10 @@
  * numbers, enum tokens, integer layerKind). These functions translate one to the
  * other so an MCP client cannot tell which backend answered.
  *
- * NOT LIVE-VERIFIED in the M3 code-half run (plugin not loaded). Field mappings
- * follow Adobe's documented ActionDescriptor keys and the adb-mcp reference; exact
- * value diffing against the plugin is deferred to a plugin-connected follow-up.
+ * LIVE-VERIFIED 2026-07-05 on PS 27.8 (parity 3/3 CLEAN, transport-layer.md §12).
+ * The value-level mappings here were corrected against live diffs: AM opacity is
+ * raw 0–255 (DOM: percent), locked ⇔ layerLocking.protectAll, and numberOfLayers
+ * excludes a Background layer.
  */
 
 /** ExtendScript exposes layer.kind as e.g. "LayerKind.NORMAL". */
@@ -117,6 +118,25 @@ function enumValue(v: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * AM layer `opacity` is raw 0–255; the DOM (and backend A) speak percent 0–100.
+ * Live-verified on PS 27.8: raw 255 ↔ DOM 100.
+ */
+function opacityPercent(v: unknown): number | undefined {
+  const raw = unitValue(v);
+  return raw === undefined ? undefined : Math.round((raw / 255) * 100);
+}
+
+/**
+ * AM `layerLocking` is an object that ALWAYS exists ({ protectNone: true } on an
+ * unlocked layer) — its mere presence means nothing. Backend A reports DOM
+ * `allLocked`, whose AM twin is `protectAll`.
+ */
+function lockedFromLayerLocking(v: unknown): boolean {
+  if (!v || typeof v !== 'object') return false;
+  return (v as Descriptor).protectAll === true;
+}
+
 export function normalizeBlendMode(token: string | undefined): string {
   if (!token) return 'BlendMode.NORMAL';
   const mapped = BLEND_MODE_TOKEN[token];
@@ -164,7 +184,11 @@ export function normalizeContextInfo(
   const resolution = unitValue(docDesc.resolution);
   if (resolution !== undefined) document.resolution = resolution;
   document.colorMode = normalizeDocumentMode(enumValue(docDesc.mode));
-  if (typeof docDesc.numberOfLayers === 'number') document.layerCount = docDesc.numberOfLayers;
+  // AM numberOfLayers EXCLUDES a Background layer; the DOM layerCount includes it.
+  if (typeof docDesc.numberOfLayers === 'number') {
+    document.layerCount =
+      docDesc.numberOfLayers + (docDesc.hasBackgroundLayer === true ? 1 : 0);
+  }
   document.hasSelection = hasSelection;
 
   const context: ContextInfo = { hasDocument: true, document };
@@ -175,10 +199,10 @@ export function normalizeContextInfo(
       kind: normalizeLayerKind(
         typeof layerDesc.layerKind === 'number' ? layerDesc.layerKind : undefined
       ),
-      opacity: unitValue(layerDesc.opacity),
+      opacity: opacityPercent(layerDesc.opacity),
       blendMode: normalizeBlendMode(enumValue(layerDesc.mode)),
       visible: typeof layerDesc.visible === 'boolean' ? layerDesc.visible : undefined,
-      locked: typeof layerDesc.layerLocking === 'object' ? true : false,
+      locked: lockedFromLayerLocking(layerDesc.layerLocking),
       isBackground: typeof layerDesc.background === 'boolean' ? layerDesc.background : false,
     };
     const bounds = layerDesc.bounds as Descriptor | undefined;
@@ -225,7 +249,7 @@ export function normalizeGetLayers(
     name: d.name,
     kind: normalizeLayerKind(typeof d.layerKind === 'number' ? d.layerKind : undefined),
     visible: typeof d.visible === 'boolean' ? d.visible : undefined,
-    opacity: unitValue(d.opacity),
+    opacity: opacityPercent(d.opacity),
     blendMode: normalizeBlendMode(enumValue(d.mode)),
     hasMask: typeof d.hasUserMask === 'boolean' ? d.hasUserMask : false,
   }));

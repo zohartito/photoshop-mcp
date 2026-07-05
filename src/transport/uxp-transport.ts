@@ -11,8 +11,10 @@
  * parsed result, never the raw bridge envelope (§4.1).
  *
  * PORTED IN M3 (read-only first, per §5): get_state, get_layers, get_document_info.
- * NOT LIVE-VERIFIED this run — the plugin is not loaded; PHOTOSHOP_MCP_TRANSPORT=uxp
- * vs extendscript parity diffing is deferred to a plugin-connected follow-up.
+ * LIVE-VERIFIED 2026-07-05 on PS 27.8 — scripts/parity-uxp.ts reports 3/3 CLEAN
+ * against the ExtendScript twins (masked-layer + active-selection fixture). See
+ * docs/design/transport-layer.md §12 for the verification record and the
+ * Action Manager quirk catalog these implementations encode.
  */
 import {
   ensureUxpBridgeServer,
@@ -23,6 +25,8 @@ import type { ActionDescriptor } from '../api/batch-play.js';
 import {
   getActiveLayerDescriptor,
   getDocumentDescriptor,
+  getLayerByIndexDescriptor,
+  getSelectionDescriptor,
 } from './uxp-commands/descriptors.js';
 import {
   normalizeGetDocumentInfo,
@@ -127,25 +131,61 @@ export class UxpTransport implements PhotoshopTransport {
 
   // --- ported read-only commands (§4.2, §5) ---
 
+  /**
+   * hasSelection probe: a `get` of the document's selection property THROWS when
+   * no selection exists, so it runs as its own bridge command and maps failure →
+   * false. Separate round-trip by design (the shared batch would fail wholesale
+   * under continueOnError:false); merge once the plugin gains continueOnError.
+   */
+  private async probeSelection(timeoutMs?: number): Promise<boolean> {
+    try {
+      const raw = await this.runBatchPlay(getSelectionDescriptor(), 'probe_selection', timeoutMs);
+      const selection = raw[0]?.selection;
+      return !!selection && typeof selection === 'object';
+    } catch {
+      return false;
+    }
+  }
+
   private async getState(timeoutMs?: number): Promise<unknown> {
     const { docDesc, layerDesc } = await this.readDocumentAndLayer(timeoutMs);
-    // hasSelection defaults false; a dedicated selection-bounds probe is added
-    // when this path is live-verified (the ExtendScript twin reads it inline).
-    return normalizeGetState(docDesc, layerDesc, false);
+    const hasSelection = docDesc ? await this.probeSelection(timeoutMs) : false;
+    return normalizeGetState(docDesc, layerDesc, hasSelection);
   }
 
   private async getDocumentInfo(timeoutMs?: number): Promise<unknown> {
     const { docDesc, layerDesc } = await this.readDocumentAndLayer(timeoutMs);
-    return normalizeGetDocumentInfo(docDesc, layerDesc, false);
+    const hasSelection = docDesc ? await this.probeSelection(timeoutMs) : false;
+    return normalizeGetDocumentInfo(docDesc, layerDesc, hasSelection);
   }
 
+  /**
+   * Full layer walk (live-verified on PS 27.8): AM `numberOfLayers` excludes a
+   * Background layer, and the `_index` space puts the background at index 0 with
+   * non-background layers at 1..N (bottom→top). Requesting an index past N errors
+   * the whole sync batchPlay — the first walk attempt proved the model. Iterate
+   * N..1 then 0 to match the top-first order of the ExtendScript twin.
+   */
   private async getLayers(timeoutMs?: number): Promise<unknown> {
     const { docDesc, layerDesc } = await this.readDocumentAndLayer(timeoutMs);
-    const context = normalizeGetState(docDesc, layerDesc, false);
-    // A full recursive multi-layer get is built when this path is live-verified;
-    // M3 embeds the active-layer descriptor so the envelope shape is correct and
-    // the normalizer is exercised. See ./uxp-commands/descriptors.ts.
-    const layerDescs = layerDesc ? [layerDesc] : [];
+    const hasSelection = docDesc ? await this.probeSelection(timeoutMs) : false;
+    const context = normalizeGetState(docDesc, layerDesc, hasSelection);
+
+    const numberOfLayers =
+      docDesc && typeof docDesc.numberOfLayers === 'number' ? docDesc.numberOfLayers : 0;
+    const hasBackground = docDesc?.hasBackgroundLayer === true;
+
+    let layerDescs: Record<string, unknown>[] = [];
+    if (numberOfLayers > 0 || hasBackground) {
+      const gets = [];
+      for (let index = numberOfLayers; index >= 1; index--) {
+        gets.push(getLayerByIndexDescriptor(index));
+      }
+      if (hasBackground) {
+        gets.push(getLayerByIndexDescriptor(0));
+      }
+      layerDescs = await this.runBatchPlay(gets, 'walk_layers', timeoutMs);
+    }
     return normalizeGetLayers(layerDescs, context);
   }
 
