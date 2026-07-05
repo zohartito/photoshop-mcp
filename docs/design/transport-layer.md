@@ -102,11 +102,20 @@ export interface PsCommand {
 
 export interface PhotoshopTransport {
   readonly id: 'extendscript' | 'uxp';       // room for 'firefly' later
-  isAvailable(): Promise<boolean>;            // PS detected / plugin connected
+  isAvailable(): Promise<boolean>;            // PS detected / plugin connected — see caveat below
   capabilities(): Promise<TransportCapabilities>;
   run(command: PsCommand): Promise<unknown>;  // parsed JSON result — never raw strings
+  // One-undo recipes need a boundary ABOVE single commands: the whole sequence runs
+  // inside one history scope (ExtendScript: suspendHistory around the full script;
+  // UXP: one executeAsModal + history suspension around all descriptors).
+  runOperation(name: string, commands: PsCommand[]): Promise<unknown>;
 }
 ```
+
+**`isAvailable()` must be truthful (Codex finding #3):** the bridge HTTP server is
+in-process and always answers `/health` — that proves nothing about the plugin. UXP
+availability = "plugin hit `/poll` within the last ~2s" (track last-poll timestamp
+server-side), not "server is up".
 
 Result normalization moves inside each transport: the ExtendScript backend keeps the
 `"ERROR:"` protocol, `toSource()` parsing (`parseExtendScriptPayload`) and unit-forcing
@@ -130,10 +139,19 @@ registerCommand({
 });
 ```
 
+**Where command specs live (revised per Codex finding #1):** per-backend implementations
+are **co-located with the tool files** that own them — the ExtendScript generator is
+already there — not authored in a parallel `src/transport/commands/` tree. The registry is
+*derived* at registration time, avoiding a second 87-entry taxonomy to keep in sync. The
+central router stays (that part of the seam is non-negotiable: env override, pins, and
+capability gating need one place to live).
+
 The UXP plugin gains **one generic `batch_play` action** (execute a descriptor array via
 `executeAsModal`, return the result) replacing the hardcoded per-filter switch. Porting a
 command to backend B then means writing descriptors on the server side only — no plugin
-release per command.
+release per command. Raw batchPlay results do **not** match today's friendly outputs
+(`get_state`, `get_layers`, …); every UXP implementation owes a normalization step to the
+same result shape as its ExtendScript twin.
 
 ### 4.3 Router
 
@@ -159,8 +177,8 @@ descriptions, and error envelopes are untouched. MCP clients cannot tell the dif
 | Milestone | Content | Verification |
 |---|---|---|
 | **M1 (done)** | fork, map, live-verify A, this doc | §10 matrix |
-| **M2** | `src/transport/` interfaces + `ExtendScriptTransport` wrapping existing code + router; move neural bridge behind `UxpTransport`; routing table 100% extendscript except neural | `scripts/test-all-mcp-tools.ts` passes unchanged (zero behavior change) |
-| **M3** | generic `batch_play` plugin action; port read-only commands first (`get_state`, `get_layers`, `get_document_info`) then mutating families | same tool calls, `PHOTOSHOP_MCP_TRANSPORT=extendscript` vs `uxp`, diff JSON outputs |
+| **M2** | `src/transport/` interfaces + `ExtendScriptTransport` wrapping existing code + router with **one global queue**; truthful UXP `isAvailable()`; move neural bridge behind `UxpTransport`; routing table 100% extendscript except neural. **Precondition for M3 parity testing (Codex #4):** normalize tool results to stable JSON envelopes — several tools still emit ad-hoc prose+JSON | `scripts/test-all-mcp-tools.ts` passes unchanged (zero behavior change) |
+| **M3** | generic `batch_play` plugin action + poll lease/ack; port read-only commands first (`get_state`, `get_layers`, `get_document_info`) then mutating families | same tool calls, `PHOTOSHOP_MCP_TRANSPORT=extendscript` vs `uxp`, diff normalized JSON |
 | **M4** | batch mode (§8) | recipe over 10 files, count exports, spot-check pixels |
 | **M5** | plugin distribution as signed `.ccx` (double-click install) to kill the UXP-Developer-Tool manual-load tax; until then backend B is opt-in | fresh-machine install test |
 
@@ -181,21 +199,38 @@ one source of truth:
    Candidate upstream fix: `duplicate_layer` should activate the copy. Until then the
    metadata (`mutatesActiveLayer`, `requiresNonBackgroundLayer`, `requiresSelection`)
    makes the coupling machine-checkable.
-2. **Serialization:** `MacOSExecutor`'s FIFO queue is today's only concurrency guard. The
-   transport interface guarantees serialized execution per backend (UXP side:
-   `executeAsModal` provides it naturally).
-3. **Single-undo recipes:** recipes rely on ExtendScript `doc.suspendHistory()`
-   (`recipes/_shared.ts:194`). batchPlay ports must wrap in `executeAsModal` + history
-   suspension to preserve the one-undo guarantee — this is a *capability*, so it lives in
-   `TransportCapabilities`.
+2. **Serialization is ROUTER-level, not backend-level (revised per Codex #5/#7):**
+   `MacOSExecutor`'s FIFO queue only serializes the ExtendScript channel, and
+   `executeAsModal` only serializes within one UXP call. With two channels driving one PS
+   instance, mixed-backend sequences (a UXP mutation followed by an ExtendScript export)
+   can reorder. The router owns **one global command queue** across both backends.
+3. **Single-undo recipes:** recipes rely on ExtendScript `doc.suspendHistory()` around the
+   *whole multi-step script* (`recipes/_shared.ts:194`) — one-undo is an **operation-scoped
+   boundary, not a per-command capability**. Hence `runOperation()` in §4.1: the UXP twin
+   is one `executeAsModal` + history suspension around the full descriptor sequence. An
+   operation cannot span backends.
 4. **Units:** backend A forces px/pt around every script; batchPlay descriptors must carry
    explicit `_unit: 'pixelsUnit'` etc. Pixel semantics are part of the command contract.
-5. **Dialog suppression:** `DialogModes.NO` ↔ batchPlay `modalBehavior`/dialog options.
+5. **Dialog suppression:** not symmetric today — backend A sets `DialogModes.NO` as a
+   whole-script global; batchPlay only takes per-call options (`modalBehavior`,
+   `dialogOptions: 'silent'` on descriptors). The UXP `batch_play` action must apply
+   silent options to *every* descriptor, not assume a global exists.
 6. **Observability gap:** `get_layers` does not report mask presence — invisible state for
    an agent (made today's bug hard to see). Add `hasMask` when porting the command.
 7. **Bridge port drift (latent bug):** the server auto-increments its port on
    `EADDRINUSE`, but `uxp-plugin/main.js` hardcodes `38452` → silent disconnect. Fix in
    M3 (handshake file or fail-loud), or at minimum document.
+8. **Target identity, not just activity flags (Codex #2):** the §6.1 metadata *detects*
+   active-layer coupling but doesn't *prevent* the bug class. batchPlay targets layers by
+   ID natively; the ExtendScript DOM leans on `activeLayer`. Contract: mutating commands
+   **return the affected `layerId`**, and layer-targeting commands **accept an optional
+   `layerId` param** (resolved per backend), so chains like duplicate → select-subject →
+   mask can bind to the layer they mean instead of whatever happens to be active.
+9. **Bridge delivery needs ack/lease semantics (Codex #6):** `GET /poll` dequeues the
+   command before the plugin acknowledges execution (`uxp-bridge-server.ts:55`) — a plugin
+   crash after fetch silently loses the command and the caller burns the full timeout.
+   Cheap fix in M3: lease on poll, requeue on missing ack. This doesn't reopen the
+   WebSocket question (§7) — reliability is orthogonal to the channel.
 
 ## 7. Backend B channel: keep the HTTP long-poll, don't adopt ws://3001
 
@@ -226,9 +261,14 @@ transport; backend-agnostic by construction.
   (`{stem}`, `{index}` substitution).
 - **Surfaces:** `photoshop_batch_run` MCP tool *and* `photoshop-mcp batch recipe.json`
   CLI subcommand (bin entry exists already; add a subcommand).
-- **Execution:** serial per file (PS is single-instance; the queue enforces it anyway):
-  open → commands → export → close(no-save). Error policy `skip | abort`; per-file JSON
-  report; progress on stdout/MCP notifications.
+- **Execution:** serial per file (PS is single-instance; the router's global queue
+  enforces it): open → commands → export → close(no-save). Error policy `skip | abort`;
+  per-file JSON report; progress on stdout/MCP notifications.
+- **Mixed-backend honesty (Codex #5):** with open/export/preview pinned to ExtendScript,
+  a batch run over backend B is a *mixed-backend transaction*, not a pure-UXP one. This is
+  safe only because of the router-level global queue (§6.2) and because state lives in the
+  one PS instance — but a recipe step sequence is NOT a single operation across backends
+  (§6.3), so batch mode's unit of undo is the *file*, not the recipe step.
 - **"Headless" means agentless, not Photoshop-less** — the PS GUI must be running; macOS
   PS has no true headless mode. True headless = Firefly Services cloud (enterprise-gated),
   which the `PhotoshopTransport` string-union id deliberately leaves room for as a
@@ -263,3 +303,19 @@ Environment: Photoshop **27.8.0 (2026)**, macOS, fork at `d76e822` (= npm v1.4.0
 Live tool calls ran through the registered `photoshop-local` server (same v1.4.0 code as
 the fork) plus one `get_state` through the fork's own build; both reach the same PS 2026
 instance by the same osascript path.
+
+## 11. Codex cross-review disposition (2026-07-05, gpt-5.4 @ high, read-only)
+
+8 findings; 7 accepted and folded in above, 1 accepted as amendment rather than
+replacement:
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | Registry duplicative; prefer `runJsx`/`runBatchPlay` channel seam, migrate tools in place | **Amended, not replaced** — impls now co-located with tool files, registry derived (§4.2); central router kept: a pure channel seam pushes routing/pins/env-override into 87 call sites |
+| 2 | `meta` booleans detect but don't prevent the active-layer bug class | Accepted → §6.8 target-identity contract (layerId in results/params) |
+| 3 | `isUxpBridgeReachable()` lies — `/health` proves server, not plugin | Accepted → §4.1 truthful availability (last-poll timestamp), M2 scope |
+| 4 | Parity diffing noisy while outputs are ad-hoc prose+JSON | Accepted → M2 precondition: normalized envelopes |
+| 5 | Batch over backend B is a mixed-backend transaction; semantics undefined | Accepted → §6.2 router-level global queue + §8 honesty note |
+| 6 | `/poll` dequeues pre-ack → lost commands on plugin crash | Accepted → §6.9 lease/ack in M3; doesn't reopen WebSocket call |
+| 7 | `executeAsModal` ≠ transport serialization; one-undo is operation-scoped | Accepted → `runOperation()` in §4.1, §6.3 rewritten |
+| 8 | `DialogModes.NO` global ≠ per-call `modalBehavior`; raw batchPlay results need normalization | Accepted → §6.5 rewritten, §4.2 normalization note |
