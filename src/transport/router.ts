@@ -43,6 +43,22 @@ const COMMAND_REGISTRY: Record<string, CommandMeta> = {
   get_preview: { pin: 'extendscript' },
   export_preview: { pin: 'extendscript' },
   save_document: { pin: 'extendscript' },
+
+  // M3 read-only ports (§4.2, §5): no pin — auto-routable to whichever backend is
+  // live. Registered so the routing table documents that backend B can serve them.
+  get_state: {},
+  get_document_info: {},
+  get_layers: {},
+
+  // §6.8 target-identity metadata for the layer family. These carry descriptor
+  // builders in ../transport/uxp-commands/descriptors.ts and accept an optional
+  // layerId (resolved per backend) / return the affected layerId. The metadata is
+  // the machine-checkable source of truth the router, batch mode, and docs share
+  // (§6.1). Not pinned — auto-routable once the mutating-family port is verified.
+  duplicate_layer: { mutatesActiveLayer: true },
+  select_layer: { mutatesActiveLayer: true },
+  create_layer_mask: { requiresSelection: true, requiresNonBackgroundLayer: true },
+  set_layer_properties: { mutatesActiveLayer: true },
 };
 
 function readPreference(): TransportPreference {
