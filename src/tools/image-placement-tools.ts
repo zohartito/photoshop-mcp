@@ -77,7 +77,7 @@ async function placeImage(
       content: [
         {
           type: 'text' as const,
-          text: `Image placed successfully: ${filePath}\nPosition: (${x}, ${y})\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Image placed successfully: ${filePath}\nPosition: (${x}, ${y})`, details: result }, null, 2),
         },
       ],
     };
@@ -108,7 +108,7 @@ async function openImage(
       content: [
         {
           type: 'text' as const,
-          text: `Image opened as new document: ${filePath}\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Image opened as new document: ${filePath}`, details: result }, null, 2),
         },
       ],
     };

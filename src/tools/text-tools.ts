@@ -141,7 +141,7 @@ async function listFonts(
       content: [
         {
           type: 'text' as const,
-          text: `Fonts listed${query ? ` (query: "${query}")` : ''}\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Fonts listed${query ? ` (query: "${query}")` : ''}`, details: result }, null, 2),
         },
       ],
     };
@@ -173,7 +173,7 @@ async function setTextFont(
       content: [
         {
           type: 'text' as const,
-          text: `Text font set to ${fontName}${fontSize ? `, size ${fontSize}pt` : ''}\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Text font set to ${fontName}${fontSize ? `, size ${fontSize}pt` : ''}`, details: result }, null, 2),
         },
       ],
     };

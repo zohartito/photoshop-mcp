@@ -101,7 +101,7 @@ async function fitLayerToDocument(
       content: [
         {
           type: 'text' as const,
-          text: `Layer ${fillDocument ? 'filled' : 'fitted'} to document\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer ${fillDocument ? 'filled' : 'fitted'} to document`, details: result }, null, 2),
         },
       ],
     };
@@ -133,7 +133,7 @@ async function scaleLayer(
       content: [
         {
           type: 'text' as const,
-          text: `Layer scaled to ${scalePercent}%\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer scaled to ${scalePercent}%`, details: result }, null, 2),
         },
       ],
     };
@@ -165,7 +165,7 @@ async function moveLayer(
       content: [
         {
           type: 'text' as const,
-          text: `Layer moved by (${deltaX}, ${deltaY})px\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer moved by (${deltaX}, ${deltaY})px`, details: result }, null, 2),
         },
       ],
     };
@@ -196,7 +196,7 @@ async function rotateLayer(
       content: [
         {
           type: 'text' as const,
-          text: `Layer rotated ${degrees} degrees\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer rotated ${degrees} degrees`, details: result }, null, 2),
         },
       ],
     };

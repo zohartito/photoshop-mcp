@@ -310,7 +310,7 @@ async function renameLayer(
       content: [
         {
           type: 'text' as const,
-          text: `Layer renamed to: ${name}\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer renamed to: ${name}`, details: result }, null, 2),
         },
       ],
     };
@@ -341,7 +341,7 @@ async function duplicateLayer(
       content: [
         {
           type: 'text' as const,
-          text: `Layer duplicated\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer duplicated`, details: result }, null, 2),
         },
       ],
     };
@@ -419,7 +419,7 @@ async function rasterizeLayer(transport: TransportRouter): Promise<ToolResult> {
       content: [
         {
           type: 'text' as const,
-          text: `Layer rasterized\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer rasterized`, details: result }, null, 2),
         },
       ],
     };

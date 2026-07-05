@@ -99,7 +99,7 @@ async function executeCustomScript(
       content: [
         {
           type: 'text' as const,
-          text: `Custom script executed\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Custom script executed`, details: result }, null, 2),
         },
       ],
     };

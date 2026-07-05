@@ -88,7 +88,7 @@ async function moveLayerToPosition(
       content: [
         {
           type: 'text' as const,
-          text: `Layer moved ${position} "${targetLayerName}"\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer moved ${position} "${targetLayerName}"`, details: result }, null, 2),
         },
       ],
     };
@@ -114,7 +114,7 @@ async function moveLayerToTop(transport: TransportRouter): Promise<ToolResult> {
       content: [
         {
           type: 'text' as const,
-          text: `Layer moved to top\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer moved to top`, details: result }, null, 2),
         },
       ],
     };
@@ -140,7 +140,7 @@ async function moveLayerToBottom(transport: TransportRouter): Promise<ToolResult
       content: [
         {
           type: 'text' as const,
-          text: `Layer moved to bottom\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer moved to bottom`, details: result }, null, 2),
         },
       ],
     };
@@ -166,7 +166,7 @@ async function moveLayerUp(transport: TransportRouter): Promise<ToolResult> {
       content: [
         {
           type: 'text' as const,
-          text: `Layer moved up\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer moved up`, details: result }, null, 2),
         },
       ],
     };
@@ -192,7 +192,7 @@ async function moveLayerDown(transport: TransportRouter): Promise<ToolResult> {
       content: [
         {
           type: 'text' as const,
-          text: `Layer moved down\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer moved down`, details: result }, null, 2),
         },
       ],
     };

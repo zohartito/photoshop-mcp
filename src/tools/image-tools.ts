@@ -112,7 +112,7 @@ async function cropDocument(
       content: [
         {
           type: 'text' as const,
-          text: `Document cropped\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Document cropped`, details: result }, null, 2),
         },
       ],
     };

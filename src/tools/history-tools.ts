@@ -68,7 +68,7 @@ async function undo(
       content: [
         {
           type: 'text' as const,
-          text: `Undo successful (${steps} step${steps > 1 ? 's' : ''})\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Undo successful (${steps} step${steps > 1 ? 's' : ''})`, details: result }, null, 2),
         },
       ],
     };
@@ -99,7 +99,7 @@ async function redo(
       content: [
         {
           type: 'text' as const,
-          text: `Redo successful (${steps} step${steps > 1 ? 's' : ''})\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Redo successful (${steps} step${steps > 1 ? 's' : ''})`, details: result }, null, 2),
         },
       ],
     };
