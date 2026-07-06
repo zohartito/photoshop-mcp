@@ -149,6 +149,37 @@ function __mcp_c2t(s) { return cTID(s); }
 `;
 
 /**
+ * §6.8 target-identity helpers (docs/design/transport-layer.md §6.8). Backend A
+ * leans on doc.activeLayer, so to let layer-targeting commands bind to the layer
+ * they MEAN — not whatever happens to be active — these resolve/activate a layer
+ * by its native id (the same stable id the mutating snippets read back and return).
+ *
+ * __mcp_layerIdSafe(layer): read layer.id, returning null if unavailable so a
+ * snippet can still succeed on a PS build where the property throws (defensive; the
+ * property is reliable on PS 2026, used by getLayerNames' mask probe).
+ *
+ * __mcp_selectLayerById(id): make the layer with this id the active layer via an AM
+ * 'slct' by identifier (the DOM has no getByID for layers). Mirrors the UXP
+ * selectLayerByIdDescriptor so both backends resolve identity the same way. Throws
+ * if the id does not resolve, so a bad id fails loud rather than mutating the wrong
+ * layer — which is the entire point of the target-identity contract.
+ */
+const MCP_LAYER_IDENTITY_HELPERS = `
+function __mcp_layerIdSafe(layer) {
+  try { return layer.id; } catch (e) { return null; }
+}
+function __mcp_selectLayerById(layerId) {
+  var ref = new ActionReference();
+  ref.putIdentifier(charIDToTypeID('Lyr '), layerId);
+  var desc = new ActionDescriptor();
+  desc.putReference(charIDToTypeID('null'), ref);
+  desc.putBoolean(charIDToTypeID('MkVs'), false);
+  executeAction(charIDToTypeID('slct'), desc, DialogModes.NO);
+  return app.activeDocument.activeLayer;
+}
+`;
+
+/**
  * Layer mask helpers — Adobe Community / StackSupport.jsx patterns.
  * @see https://community.adobe.com/t5/photoshop-ecosystem-discussions/is-it-possible-to-make-a-layer-mask-with-the-current-selection-using-extendscript/td-p/10872052
  * @see https://github.com/LeZuse/photoshop-scripts/blob/master/default/Stack%20Scripts%20Only/StackSupport.jsx
@@ -627,17 +658,25 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Select layer by name (recursive search including layer groups)
+   * Select layer by name (recursive search including layer groups).
+   * §6.8: when layerId is supplied it targets by native id instead of by name,
+   * so a chain can re-bind to the exact layer a prior step returned. Returns the
+   * resolved layerId (the target-identity contract: layer-targeting commands
+   * accept an optional layerId and report the affected id).
    */
-  selectLayerByName: (name: string) => `
+  selectLayerByName: (name: string, layerId?: number) => `
     ${getContextInfo}
-    
+    ${MCP_LAYER_IDENTITY_HELPERS}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var targetName = "${jsString(name)}";
     var target = null;
+    ${
+      typeof layerId === 'number'
+        ? `target = __mcp_selectLayerById(${layerId});`
+        : `var targetName = "${jsString(name)}";
     function findLayer(container, name) {
       for (var i = 0; i < container.layers.length; i++) {
         var l = container.layers[i];
@@ -653,10 +692,12 @@ export const ExtendScriptSnippets = {
     if (!target) {
       throw new Error('Layer not found: ' + targetName);
     }
-    doc.activeLayer = target;
+    doc.activeLayer = target;`
+    }
     var result = {
       selected: true,
       layerName: target.name,
+      layerId: __mcp_layerIdSafe(target),
       kind: String(target.kind),
       context: getContextInfo()
     };
@@ -809,46 +850,51 @@ export const ExtendScriptSnippets = {
   /**
    * Set layer opacity
    */
-  setLayerOpacity: (opacity: number) => `
+  setLayerOpacity: (opacity: number, layerId?: number) => `
     ${getContextInfo}
-    
+    ${MCP_LAYER_IDENTITY_HELPERS}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
-    
+    var layer = ${typeof layerId === 'number' ? `__mcp_selectLayerById(${layerId})` : 'doc.activeLayer'};
+
     layer.opacity = ${opacity};
-    
-    var result = { 
+
+    var result = {
       updated: true,
       property: 'opacity',
       value: layer.opacity,
       layerName: layer.name,
+      layerId: __mcp_layerIdSafe(layer),
       context: getContextInfo()
     };
     return result;
   `,
 
   /**
-   * Set layer blend mode
+   * Set layer blend mode. §6.8: optional layerId targets a specific layer and the
+   * result carries the affected layerId.
    */
-  setLayerBlendMode: (blendMode: string) => `
+  setLayerBlendMode: (blendMode: string, layerId?: number) => `
     ${getContextInfo}
-    
+    ${MCP_LAYER_IDENTITY_HELPERS}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
-    
+    var layer = ${typeof layerId === 'number' ? `__mcp_selectLayerById(${layerId})` : 'doc.activeLayer'};
+
     layer.blendMode = BlendMode.${blendMode};
-    
-    var result = { 
+
+    var result = {
       updated: true,
       property: 'blendMode',
       value: String(layer.blendMode),
       layerName: layer.name,
+      layerId: __mcp_layerIdSafe(layer),
       context: getContextInfo()
     };
     return result;
@@ -910,21 +956,30 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Duplicate active layer
+   * Duplicate a layer (the active layer by default, or the layer with `layerId`).
+   * §6.8: returns the NEW layer's id as `layerId` — the affected-id the contract
+   * requires so a follow-up (mask/select) binds to the copy, not whatever is
+   * active. DOM layer.duplicate() does NOT reliably activate the copy (§6.1), so
+   * the id is read straight off the returned duplicate rather than from
+   * activeLayer.
    */
-  duplicateLayer: (newName?: string) => `
+  duplicateLayer: (newName?: string, layerId?: number) => `
+    ${MCP_LAYER_IDENTITY_HELPERS}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
-    
+    var layer = ${typeof layerId === 'number' ? `__mcp_selectLayerById(${layerId})` : 'doc.activeLayer'};
+
     var duplicated = layer.duplicate();
     ${newName ? `duplicated.name = "${jsString(newName)}";` : ''}
-    
-    return { 
+
+    return {
       originalName: layer.name,
-      newName: duplicated.name
+      originalLayerId: __mcp_layerIdSafe(layer),
+      newName: duplicated.name,
+      layerId: __mcp_layerIdSafe(duplicated)
     };
   `,
 
@@ -1591,18 +1646,28 @@ export const ExtendScriptSnippets = {
   /**
    * Create layer mask from selection
    */
-  createLayerMask: () => `
+  createLayerMask: (layerId?: number) => `
     ${helperFunctions}
     ${MCP_LAYER_MASK_HELPERS}
+    ${MCP_LAYER_IDENTITY_HELPERS}
 
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
+    ${
+      typeof layerId === 'number'
+        ? `// §6.8 — bind to the intended layer FIRST so the mask lands on it, not
+    // whatever happens to be active (the §6.1 mask-the-wrong-layer bug fix).
+    __mcp_selectLayerById(${layerId});`
+        : ''
+    }
+    var __mcp_maskLayerId = __mcp_layerIdSafe(app.activeDocument.activeLayer);
 
     if (__mcp_hasLayerMaskAM()) {
       return {
         maskCreated: false,
         fromSelection: false,
+        layerId: __mcp_maskLayerId,
         message: 'Layer already has a mask'
       };
     }
@@ -1615,7 +1680,8 @@ export const ExtendScriptSnippets = {
 
     return {
       maskCreated: true,
-      fromSelection: hasSelection
+      fromSelection: hasSelection,
+      layerId: __mcp_maskLayerId
     };
   `,
 
