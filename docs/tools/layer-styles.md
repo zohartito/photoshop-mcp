@@ -11,7 +11,7 @@ Dedicated, parameterized tools that apply Photoshop **layer effects (FX)** — d
 - **One undo each.** Every call is wrapped in a single `suspendHistory` step, so a single undo reverts the whole effect. `details.undo_history_states_consumed` is always `1`.
 - **RGB only.** Layer effects require an RGB document. If the active document is CMYK/Grayscale/etc., the tool throws a clear error ("Layer effects require an RGB document…"). Convert with Image > Mode > RGB Color first.
 - **Return envelope:** `{ ok, summary, undo_history_states_consumed, next_suggested_tool, details }`. On failure: `{ ok: false, code, message }`.
-- **Units:** `angle` is degrees (-180..180), `distance`/`size` are pixels, `opacity`/`spread` are percent (0-100). Colors are 0-255 RGB.
+- **Units:** `angle` is degrees (-180..180), `distance`/`size` are pixels, `opacity` is percent (0-100). `spread`/choke takes a 0-100 value (shown as a percentage in Photoshop's UI, stored as a pixel-unit number in the effect descriptor). Colors are 0-255 RGB.
 - **Blend modes:** friendly names — `NORMAL`, `MULTIPLY`, `SCREEN`, `OVERLAY`, `SOFTLIGHT`, `COLORDODGE`, `LINEARDODGE`, `DARKEN`, `LIGHTEN`, `DIFFERENCE`, `HUE`, `SATURATION`, `COLOR`, `LUMINOSITY`, and the rest of Photoshop's set (same vocabulary as `photoshop_set_layer_blend_mode`).
 
 ---
