@@ -170,6 +170,15 @@ function bindDistortCorners(transport: TransportRouter): ToolDefinition {
         });
       }
       const [tl, tr, br, bl] = corners as Array<{ x: number; y: number }>;
+      if (quadIsDegenerate(tl, tr, br, bl)) {
+        return toolFailure({
+          ok: false,
+          code: 'degenerate_quad',
+          message:
+            'The four corners form a degenerate quad (near-zero area or duplicate points). ' +
+            'Provide corners in topLeft, topRight, bottomRight, bottomLeft order that enclose a real area.',
+        });
+      }
       const body = `
         ${ENSURE_RASTER}
         __mcp_transformCorners(
@@ -448,4 +457,32 @@ function readPoint(value: unknown): { x: number; y: number } | null {
   if (typeof rec.x !== 'number' || typeof rec.y !== 'number') return null;
   if (!Number.isFinite(rec.x) || !Number.isFinite(rec.y)) return null;
   return { x: rec.x, y: rec.y };
+}
+
+type Pt = { x: number; y: number };
+
+/**
+ * Reject a corner quad that Photoshop can't distort onto: duplicate corners, or a polygon
+ * whose area is negligible relative to its bounding box (collinear / collapsed). Ordered
+ * TL, TR, BR, BL; area via the shoelace formula.
+ */
+function quadIsDegenerate(tl: Pt, tr: Pt, br: Pt, bl: Pt): boolean {
+  const pts = [tl, tr, br, bl];
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      if (pts[i].x === pts[j].x && pts[i].y === pts[j].y) return true;
+    }
+  }
+  const area =
+    Math.abs(
+      tl.x * tr.y - tr.x * tl.y +
+      tr.x * br.y - br.x * tr.y +
+      br.x * bl.y - bl.x * br.y +
+      bl.x * tl.y - tl.x * bl.y
+    ) / 2;
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const bboxArea = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+  // Collapsed if the polygon covers < 1% of its bounding box (near-collinear corners).
+  return bboxArea <= 0 || area < bboxArea * 0.01;
 }

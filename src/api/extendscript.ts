@@ -601,66 +601,19 @@ function __mcp_filterAction(eventStr, desc) {
   executeAction(__mcp_s2t(eventStr), desc, DialogModes.NO);
 }
 
-/** Distort > Shear — AM only (no DOM). Vertical shear from a straight line to an offset line. */
-function __mcp_applyShear(offset) {
-  var d = new ActionDescriptor();
-  var pts = new ActionList();
-  var p1 = new ActionDescriptor();
-  p1.putDouble(__mcp_s2t('horizontal'), 0);
-  p1.putDouble(__mcp_s2t('vertical'), 0);
-  pts.putObject(__mcp_s2t('point'), p1);
-  var p2 = new ActionDescriptor();
-  p2.putDouble(__mcp_s2t('horizontal'), offset);
-  p2.putDouble(__mcp_s2t('vertical'), 255);
-  pts.putObject(__mcp_s2t('point'), p2);
-  d.putList(__mcp_s2t('curve'), pts);
-  d.putEnumerated(__mcp_s2t('shearEdges'), __mcp_s2t('shearEdges'), __mcp_s2t('repeatEdgePixels'));
-  __mcp_filterAction('shear', d);
-}
+// Distort > Shear, Wave, Ocean Ripple, Glass and Blur > Lens Blur all HAVE ArtLayer DOM
+// methods (verified against the Photoshop ExtendScript reference), so they are called
+// directly in __mcp_applyFilter below rather than via hand-built descriptors. Only
+// Box / Surface / Shape Blur lack a DOM method and keep an executeAction descriptor here.
 
-/** Distort > Wave — AM only (no clean DOM signature). */
-function __mcp_applyWave(generators, minWavelength, maxWavelength, minAmplitude, maxAmplitude, waveType) {
-  var d = new ActionDescriptor();
-  d.putInteger(__mcp_s2t('numberOfGenerators'), generators);
-  d.putInteger(__mcp_s2t('minimumWavelength'), minWavelength);
-  d.putInteger(__mcp_s2t('maximumWavelength'), maxWavelength);
-  d.putInteger(__mcp_s2t('minimumAmplitude'), minAmplitude);
-  d.putInteger(__mcp_s2t('maximumAmplitude'), maxAmplitude);
-  d.putInteger(__mcp_s2t('horizontalScale'), 100);
-  d.putInteger(__mcp_s2t('verticalScale'), 100);
-  var typeEnum = (waveType === 'triangle') ? 'triangle' : (waveType === 'square') ? 'square' : 'sine';
-  d.putEnumerated(__mcp_s2t('waveType'), __mcp_s2t('waveType'), __mcp_s2t(typeEnum));
-  d.putEnumerated(__mcp_s2t('undefinedArea'), __mcp_s2t('undefinedArea'), __mcp_s2t('wrapAround'));
-  d.putInteger(__mcp_s2t('randomSeed'), 1);
-  __mcp_filterAction('wave', d);
-}
-
-/** Distort > Ocean Ripple — AM only. */
-function __mcp_applyOceanRipple(size, magnitude) {
-  var d = new ActionDescriptor();
-  d.putInteger(__mcp_s2t('rippleSize'), size);
-  d.putInteger(__mcp_s2t('rippleMagnitude'), magnitude);
-  __mcp_filterAction('oceanRipple', d);
-}
-
-/** Distort > Glass — AM only. */
-function __mcp_applyGlass(distortion, smoothness) {
-  var d = new ActionDescriptor();
-  d.putInteger(__mcp_s2t('distortion'), distortion);
-  d.putInteger(__mcp_s2t('smoothness'), smoothness);
-  d.putEnumerated(__mcp_s2t('textureType'), __mcp_s2t('textureType'), __mcp_s2t('frosted'));
-  d.putInteger(__mcp_s2t('scaleFactor'), 100);
-  __mcp_filterAction('glass', d);
-}
-
-/** Blur > Box Blur — AM only. */
+/** Blur > Box Blur — no DOM method; AM descriptor. */
 function __mcp_applyBoxBlur(radius) {
   var d = new ActionDescriptor();
   d.putUnitDouble(__mcp_s2t('radius'), __mcp_s2t('pixelsUnit'), radius);
   __mcp_filterAction('boxBlur', d);
 }
 
-/** Blur > Surface Blur — AM only. */
+/** Blur > Surface Blur — no DOM method; AM descriptor. */
 function __mcp_applySurfaceBlur(radius, threshold) {
   var d = new ActionDescriptor();
   d.putUnitDouble(__mcp_s2t('radius'), __mcp_s2t('pixelsUnit'), radius);
@@ -668,31 +621,18 @@ function __mcp_applySurfaceBlur(radius, threshold) {
   __mcp_filterAction('surfaceBlur', d);
 }
 
-/** Blur > Shape Blur — AM only. Uses a filled ellipse as the kernel shape. */
+/**
+ * Blur > Shape Blur — no DOM method; AM descriptor. Uses the built-in "Ellipse 1" custom
+ * shape as the kernel. NOTE: the exact shape descriptor is unverified without a
+ * ScriptingListener capture; if the named preset is absent this throws and the
+ * suspendHistory scope rolls back cleanly. Flagged for live verification.
+ */
 function __mcp_applyShapeBlur(radius) {
   var d = new ActionDescriptor();
   d.putUnitDouble(__mcp_s2t('radius'), __mcp_s2t('pixelsUnit'), radius);
   d.putString(__mcp_s2t('name'), 'Ellipse 1');
   d.putBoolean(__mcp_s2t('custom'), false);
   __mcp_filterAction('shapeBlur', d);
-}
-
-/** Blur > Lens Blur — AM only (rich descriptor; expose iris radius + specular). */
-function __mcp_applyLensBlur(radius, brightness, threshold) {
-  var d = new ActionDescriptor();
-  d.putEnumerated(__mcp_s2t('lensBlurDepthMapSource'), __mcp_s2t('lensBlurSourceType'), __mcp_s2t('lensBlurSourceTypeNone'));
-  d.putInteger(__mcp_s2t('lensBlurFocalDistance'), 0);
-  d.putBoolean(__mcp_s2t('lensBlurInvertDepthMap'), false);
-  d.putEnumerated(__mcp_s2t('lensBlurGeometricDistortionShapeType'), __mcp_s2t('lensBlurGeometricDistortionShapeType'), __mcp_s2t('lensBlurGeometricDistortionShapeTypeHexagon'));
-  d.putUnitDouble(__mcp_s2t('lensBlurGeometricDistortionRadius'), __mcp_s2t('pixelsUnit'), radius);
-  d.putInteger(__mcp_s2t('lensBlurGeometricDistortionBladeCurvature'), 0);
-  d.putInteger(__mcp_s2t('lensBlurGeometricDistortionRotation'), 0);
-  d.putInteger(__mcp_s2t('lensBlurSpecularBrightness'), brightness);
-  d.putInteger(__mcp_s2t('lensBlurSpecularThreshold'), threshold);
-  d.putInteger(__mcp_s2t('lensBlurAmount'), 0);
-  d.putInteger(__mcp_s2t('lensBlurDistribution'), 1);
-  d.putBoolean(__mcp_s2t('lensBlurMonochromatic'), false);
-  __mcp_filterAction('lensBlur', d);
 }
 
 /** Map a friendly spherize mode to the DOM SpherizeMode enum. */
@@ -726,6 +666,20 @@ function __mcp_lensType(lensType) {
   return LensType.ZOOMLENS; // 'zoom' default (50-300mm zoom)
 }
 
+function __mcp_waveType(waveType) {
+  if (waveType === 'triangle') return WaveType.TRIANGULAR;
+  if (waveType === 'square') return WaveType.SQUARE;
+  return WaveType.SINE;
+}
+
+/** The active layer's geometric center as a [UnitValue, UnitValue] point (for radial blur). */
+function __mcp_layerCenterUnitPoint() {
+  var b = app.activeDocument.activeLayer.bounds;
+  var cx = (b[0].as('px') + b[2].as('px')) / 2;
+  var cy = (b[1].as('px') + b[3].as('px')) / 2;
+  return [new UnitValue(cx, 'px'), new UnitValue(cy, 'px')];
+}
+
 /**
  * Apply a filter by friendly name. \`p\` is a plain object of already-validated
  * numeric/string params. Returns the (post-rasterize) layer name.
@@ -740,10 +694,17 @@ function __mcp_applyFilter(name, p) {
     case 'spherize': layer.applySpherize(p.amount, __mcp_spherizeMode(p.mode)); break;
     case 'polar_coordinates': layer.applyPolarCoordinates(__mcp_polarConversion(p.conversion)); break;
     case 'zigzag': layer.applyZigZag(p.amount, p.ridges, __mcp_zigZagType(p.style)); break;
-    case 'wave': __mcp_applyWave(p.generators, p.minWavelength, p.maxWavelength, p.minAmplitude, p.maxAmplitude, p.waveType); break;
-    case 'ocean_ripple': __mcp_applyOceanRipple(p.size, p.magnitude); break;
-    case 'glass': __mcp_applyGlass(p.distortion, p.smoothness); break;
-    case 'shear': __mcp_applyShear(p.offset); break;
+    case 'wave':
+      layer.applyWave(p.generators, p.minWavelength, p.maxWavelength, p.minAmplitude, p.maxAmplitude,
+        100, 100, __mcp_waveType(p.waveType), UndefinedAreas.WRAPAROUND, 1);
+      break;
+    case 'ocean_ripple': layer.applyOceanRipple(p.size, p.magnitude); break;
+    case 'glass':
+      layer.applyGlassEffect(p.distortion, p.smoothness, 100, false, TextureType.FROSTED, undefined);
+      break;
+    case 'shear':
+      layer.applyShear([[0, 0], [p.offset, 255]], UndefinedAreas.WRAPAROUND);
+      break;
 
     // --- Stylize ---
     case 'glowing_edges': layer.applyGlowingEdges(p.edgeWidth, p.edgeBrightness, p.smoothness); break;
@@ -770,8 +731,11 @@ function __mcp_applyFilter(name, p) {
 
     // --- Blur (variants not already tooled) ---
     case 'smart_blur': layer.applySmartBlur(p.radius, p.threshold, SmartBlurQuality.HIGH, SmartBlurMode.NORMAL); break;
-    case 'radial_blur': layer.applyRadialBlur(p.amount, __mcp_radialBlurMethod(p.method), RadialBlurQuality.GOOD); break;
-    case 'lens_blur': __mcp_applyLensBlur(p.radius, p.brightness, p.threshold); break;
+    case 'radial_blur': layer.applyRadialBlur(p.amount, __mcp_radialBlurMethod(p.method), RadialBlurQuality.GOOD, __mcp_layerCenterUnitPoint()); break;
+    case 'lens_blur':
+      layer.applyLensBlur(DepthMapSource.NONE, 0, false, Geometry.HEXAGON, p.radius, 0, 0,
+        p.brightness, p.threshold, 0, NoiseDistribution.UNIFORM, false);
+      break;
     case 'surface_blur': __mcp_applySurfaceBlur(p.radius, p.threshold); break;
     case 'box_blur': __mcp_applyBoxBlur(p.radius); break;
     case 'shape_blur': __mcp_applyShapeBlur(p.radius); break;
