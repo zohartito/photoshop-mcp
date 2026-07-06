@@ -483,6 +483,10 @@ Invert colors of the layer.
 photoshop_invert()
 ```
 
+#### Non-destructive adjustment layers
+
+The tools above modify the active layer's pixels in place. For the richer, **non-destructive adjustment-layer** set — `photoshop_apply_curves` (arbitrary points), `photoshop_apply_levels`, `photoshop_add_gradient_map`, `photoshop_add_selective_color`, `photoshop_add_photo_filter`, `photoshop_add_color_balance`, `photoshop_add_vibrance`, `photoshop_add_black_white` — see **[Adjustment-Layer Tools](tools/adjustments.md)**. Each adds one adjustment layer above the active layer (one undo, RGB only).
+
 ### Text Formatting
 
 #### `photoshop_list_fonts`
