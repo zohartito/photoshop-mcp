@@ -140,7 +140,7 @@ Warp the text layer with a preset style, or remove the warp. Sets `TextItem.warp
 - `horizontalDistortion` (number): `-100..100`. Default `0`.
 - `verticalDistortion` (number): `-100..100`. Default `0`.
 
-> The `-100..100` percent values you pass map to Photoshop's internal `-1..1` warp range — you use the same numbers shown in the Warp Text dialog.
+> `bend` and the distortions are percentages (`-100..100`) — the same numbers shown in Photoshop's Warp Text dialog, passed straight through to the `TextItem` DOM (which also uses `-100..100`).
 
 ```javascript
 photoshop_warp_text({ style: "arc", bend: 40 })          // gentle arc

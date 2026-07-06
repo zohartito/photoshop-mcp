@@ -171,20 +171,26 @@ function bindReplaceSmartObjectContents(transport: TransportRouter): ToolDefinit
           isError: true,
         };
       }
+      // The path is bound once to a var via a double-quoted JSX literal (jsString escapes
+      // backslash/quote/newlines — safe in double quotes). All later uses reference the var
+      // by concatenation so the raw path never lands in a single-quoted context (jsString does
+      // not escape single quotes).
       const body = `
         ${SMART_OBJECT_HELPERS}
         var __layer = __mcp_so_assertSmartObject('Replace Smart Object contents');
-        var __file = new File("${jsString(filePath)}");
+        app.activeDocument.activeLayer = __layer;
+        var __path = "${jsString(filePath)}";
+        var __file = new File(__path);
         if (!__file.exists) {
           return {
             ok: false,
             code: 'file_not_found',
-            message: 'Replacement file not found: ${jsString(filePath)}'
+            message: 'Replacement file not found: ' + __path
           };
         }
         var __desc = new ActionDescriptor();
         __desc.putPath(__mcp_so_s2t('null'), __file);
-        __desc.putInteger(__mcp_so_s2t('layerID'), __layer.id);
+        __desc.putInteger(__mcp_so_s2t('PgNm'), 1);
         executeAction(__mcp_so_s2t('placedLayerReplaceContents'), __desc, DialogModes.NO);
         var __result = app.activeDocument.activeLayer;
         return {
@@ -194,7 +200,7 @@ function bindReplaceSmartObjectContents(transport: TransportRouter): ToolDefinit
           next_suggested_tool: 'photoshop_get_preview',
           details: {
             layer_name: __result.name,
-            file_path: "${jsString(filePath)}"
+            file_path: __path
           }
         };
       `;
@@ -256,22 +262,26 @@ function bindExportSmartObjectContents(transport: TransportRouter): ToolDefiniti
       // Export is a pure disk write (no document mutation), but we still route it through the
       // recipe executor for a uniform {ok,summary,...} envelope and the global operation queue.
       // undo_history_states_consumed is reported as 0.
+      // Path is bound once via a double-quoted literal and referenced by concatenation
+      // thereafter (see the replace tool for the same escaping rationale). The export event
+      // targets the active layer, so no layerID key is passed.
       const body = `
         ${SMART_OBJECT_HELPERS}
         var __layer = __mcp_so_assertSmartObject('Export Smart Object contents');
-        var __out = new File("${jsString(outputPath)}");
+        app.activeDocument.activeLayer = __layer;
+        var __path = "${jsString(outputPath)}";
+        var __out = new File(__path);
         var __desc = new ActionDescriptor();
         __desc.putPath(__mcp_so_s2t('null'), __out);
-        __desc.putInteger(__mcp_so_s2t('layerID'), __layer.id);
         executeAction(__mcp_so_s2t('placedLayerExportContents'), __desc, DialogModes.NO);
         return {
           ok: true,
-          summary: 'Exported contents of "' + __layer.name + '" to ${jsString(outputPath)}',
+          summary: 'Exported contents of "' + __layer.name + '" to ' + __path,
           undo_history_states_consumed: 0,
-          output_paths: ["${jsString(outputPath)}"],
+          output_paths: [__path],
           details: {
             layer_name: __layer.name,
-            output_path: "${jsString(outputPath)}"
+            output_path: __path
           }
         };
       `;

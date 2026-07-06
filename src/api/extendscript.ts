@@ -1848,13 +1848,13 @@ export const ExtendScriptSnippets = {
     }
     ${
       auto
-        ? `layer.textItem.autoLeading = true;`
-        : `layer.textItem.autoLeading = false;
+        ? `layer.textItem.useAutoLeading = true;`
+        : `layer.textItem.useAutoLeading = false;
     layer.textItem.leading = ${leadingPoints};`
     }
     return {
-      autoLeading: layer.textItem.autoLeading,
-      leading: (layer.textItem.autoLeading ? null : layer.textItem.leading)
+      autoLeading: layer.textItem.useAutoLeading,
+      leading: (layer.textItem.useAutoLeading ? null : layer.textItem.leading)
     };
   `,
 
@@ -1914,7 +1914,8 @@ export const ExtendScriptSnippets = {
 
   /**
    * Warp the active text layer (TextItem.warpStyle + bend + distortions). style 'none'
-   * removes the warp. bend / horizontalDistortion / verticalDistortion are -100..100.
+   * removes the warp. bend / horizontalDistortion / verticalDistortion are -100..100
+   * percentages passed straight through to the DOM (which also uses -100..100).
    */
   warpText: (
     style: string,
@@ -1933,9 +1934,9 @@ export const ExtendScriptSnippets = {
     ${
       style === 'NONE'
         ? ''
-        : `layer.textItem.warpBend = ${bend} / 100.0;
-    layer.textItem.warpHorizontalDistortion = ${horizontalDistortion} / 100.0;
-    layer.textItem.warpVerticalDistortion = ${verticalDistortion} / 100.0;`
+        : `layer.textItem.warpBend = ${bend};
+    layer.textItem.warpHorizontalDistortion = ${horizontalDistortion};
+    layer.textItem.warpVerticalDistortion = ${verticalDistortion};`
     }
     return {
       warpStyle: String(layer.textItem.warpStyle),
