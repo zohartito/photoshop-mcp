@@ -2456,9 +2456,138 @@ export const ExtendScriptSnippets = {
     }
     
     layer.textItem.contents = "${jsString(newText)}";
-    
-    return { 
+
+    return {
       text: layer.textItem.contents
+    };
+  `,
+
+  /**
+   * Set character tracking (letter-spacing) on the active text layer.
+   * Photoshop tracking is in 1/1000 em; range -1000..10000.
+   */
+  setTextTracking: (tracking: number) => `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var layer = app.activeDocument.activeLayer;
+    if (layer.kind !== LayerKind.TEXT) {
+      throw new Error('Active layer is not a text layer');
+    }
+    layer.textItem.tracking = ${tracking};
+    return {
+      tracking: layer.textItem.tracking
+    };
+  `,
+
+  /**
+   * Set leading (line spacing) in points on the active text layer, or turn on auto-leading.
+   */
+  setTextLeading: (leadingPoints: number | undefined, auto: boolean) => `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var layer = app.activeDocument.activeLayer;
+    if (layer.kind !== LayerKind.TEXT) {
+      throw new Error('Active layer is not a text layer');
+    }
+    ${
+      auto
+        ? `layer.textItem.useAutoLeading = true;`
+        : `layer.textItem.useAutoLeading = false;
+    layer.textItem.leading = ${leadingPoints};`
+    }
+    return {
+      autoLeading: layer.textItem.useAutoLeading,
+      leading: (layer.textItem.useAutoLeading ? null : layer.textItem.leading)
+    };
+  `,
+
+  /**
+   * Set kerning mode (metrics / optical / manual) on the active text layer via
+   * TextItem.autoKerning (AutoKernType). "manual" turns auto-kerning off so per-pair
+   * manual kerning applies.
+   */
+  setTextKerning: (mode: 'metrics' | 'optical' | 'manual') => `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var layer = app.activeDocument.activeLayer;
+    if (layer.kind !== LayerKind.TEXT) {
+      throw new Error('Active layer is not a text layer');
+    }
+    layer.textItem.autoKerning = AutoKernType.${
+      mode === 'metrics' ? 'METRICS' : mode === 'optical' ? 'OPTICAL' : 'MANUAL'
+    };
+    return {
+      kerning: '${mode}',
+      autoKerning: String(layer.textItem.autoKerning)
+    };
+  `,
+
+  /**
+   * Set letter case (all caps / small caps / normal) and toggle faux bold / faux italic
+   * on the active text layer. Any argument left undefined is not touched.
+   */
+  setTextCase: (
+    caseMode: 'allCaps' | 'smallCaps' | 'normal' | undefined,
+    fauxBold: boolean | undefined,
+    fauxItalic: boolean | undefined
+  ) => `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var layer = app.activeDocument.activeLayer;
+    if (layer.kind !== LayerKind.TEXT) {
+      throw new Error('Active layer is not a text layer');
+    }
+    ${
+      caseMode !== undefined
+        ? `layer.textItem.capitalization = Case.${
+            caseMode === 'allCaps' ? 'ALLCAPS' : caseMode === 'smallCaps' ? 'SMALLCAPS' : 'NORMAL'
+          };`
+        : ''
+    }
+    ${fauxBold !== undefined ? `layer.textItem.fauxBold = ${fauxBold};` : ''}
+    ${fauxItalic !== undefined ? `layer.textItem.fauxItalic = ${fauxItalic};` : ''}
+    return {
+      capitalization: String(layer.textItem.capitalization),
+      fauxBold: layer.textItem.fauxBold,
+      fauxItalic: layer.textItem.fauxItalic
+    };
+  `,
+
+  /**
+   * Warp the active text layer (TextItem.warpStyle + bend + distortions). style 'none'
+   * removes the warp. bend / horizontalDistortion / verticalDistortion are -100..100
+   * percentages passed straight through to the DOM (which also uses -100..100).
+   */
+  warpText: (
+    style: string,
+    bend: number,
+    horizontalDistortion: number,
+    verticalDistortion: number
+  ) => `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var layer = app.activeDocument.activeLayer;
+    if (layer.kind !== LayerKind.TEXT) {
+      throw new Error('Active layer is not a text layer');
+    }
+    layer.textItem.warpStyle = WarpStyle.${style};
+    ${
+      style === 'NONE'
+        ? ''
+        : `layer.textItem.warpBend = ${bend};
+    layer.textItem.warpHorizontalDistortion = ${horizontalDistortion};
+    layer.textItem.warpVerticalDistortion = ${verticalDistortion};`
+    }
+    return {
+      warpStyle: String(layer.textItem.warpStyle),
+      warpBend: layer.textItem.warpBend,
+      warpHorizontalDistortion: layer.textItem.warpHorizontalDistortion,
+      warpVerticalDistortion: layer.textItem.warpVerticalDistortion
     };
   `,
 
