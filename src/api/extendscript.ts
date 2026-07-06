@@ -2613,7 +2613,7 @@ export const ExtendScriptSnippets = {
     }
     ${
       caseMode !== undefined
-        ? `layer.textItem.capitalization = Case.${
+        ? `layer.textItem.capitalization = TextCase.${
             caseMode === 'allCaps' ? 'ALLCAPS' : caseMode === 'smallCaps' ? 'SMALLCAPS' : 'NORMAL'
           };`
         : ''
