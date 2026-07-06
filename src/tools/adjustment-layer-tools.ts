@@ -629,7 +629,7 @@ function bindBlackWhite(transport: TransportRouter): ToolDefinition {
         var __layerName = __mcp_makeBlackWhiteLayer(__colors, ${hasTint}, ${tint.r}, ${tint.g}, ${tint.b});
         return {
           ok: true,
-          summary: 'Black & white adjustment layer${''}' + (${hasTint} ? ' (tinted)' : '') + ' added above ' + __layerName,
+          summary: 'Black & white adjustment layer' + (${hasTint} ? ' (tinted)' : '') + ' added above ' + __layerName,
           undo_history_states_consumed: 1,
           next_suggested_tool: 'photoshop_get_preview',
           details: {

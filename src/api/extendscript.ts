@@ -805,13 +805,33 @@ function __mcp_makePhotoFilterLayer(useColor, red, green, blue, density, preserv
 
 /**
  * Vibrance adjustment layer. vibrance/saturation are -100..100.
- * Crib: adb-mcp addAdjustmentLayerVibrance.
+ * Crib: adb-mcp addAdjustmentLayerVibrance — this one uses the two-step
+ * make(empty vibrance class) + set(values) path (the reference's proven shape),
+ * unlike the other adjustments which populate values in the make descriptor.
  */
 function __mcp_makeVibranceLayer(vibrance, saturation) {
-  var typeDesc = new ActionDescriptor();
-  typeDesc.putInteger(sTID('vibrance'), vibrance);
-  typeDesc.putInteger(sTID('saturation'), saturation);
-  return __mcp_makeAdjustmentLayer('vibrance', typeDesc);
+  // Step 1: make an empty Vibrance adjustment layer (type is a bare class ref).
+  var makeDesc = new ActionDescriptor();
+  var ref = new ActionReference();
+  ref.putClass(sTID('adjustmentLayer'));
+  makeDesc.putReference(sTID('null'), ref);
+  var using = new ActionDescriptor();
+  using.putClass(sTID('type'), sTID('vibrance'));
+  makeDesc.putObject(sTID('using'), sTID('adjustmentLayer'), using);
+  executeAction(sTID('make'), makeDesc, DialogModes.NO);
+  var layerName = app.activeDocument.activeLayer.name;
+
+  // Step 2: set the vibrance/saturation values on the new adjustment layer.
+  var setDesc = new ActionDescriptor();
+  var setRef = new ActionReference();
+  setRef.putEnumerated(sTID('adjustmentLayer'), sTID('ordinal'), sTID('targetEnum'));
+  setDesc.putReference(sTID('null'), setRef);
+  var valuesDesc = new ActionDescriptor();
+  valuesDesc.putInteger(sTID('vibrance'), vibrance);
+  valuesDesc.putInteger(sTID('saturation'), saturation);
+  setDesc.putObject(sTID('to'), sTID('vibrance'), valuesDesc);
+  executeAction(sTID('set'), setDesc, DialogModes.NO);
+  return layerName;
 }
 
 /**
