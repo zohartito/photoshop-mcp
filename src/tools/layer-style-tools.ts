@@ -81,12 +81,19 @@ const RGB_COLOR_PROPS = {
 } as const;
 
 export function createLayerStyleTools(transport: TransportRouter): ToolDefinition[] {
-  return [bindDropShadow(transport), bindStroke(transport)];
+  return [
+    bindDropShadow(transport),
+    bindStroke(transport),
+    bindOuterGlow(transport),
+    bindColorOverlay(transport),
+  ];
 }
 
 export const PHOTOSHOP_LAYER_STYLE_TOOL_NAMES = [
   'photoshop_add_drop_shadow',
   'photoshop_add_stroke',
+  'photoshop_add_outer_glow',
+  'photoshop_add_color_overlay',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -201,6 +208,111 @@ function bindStroke(transport: TransportRouter): ToolDefinition {
         };
       `;
       return executeLayerStyle(transport, 'Add Stroke', body);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Outer glow
+// ---------------------------------------------------------------------------
+
+function bindOuterGlow(transport: TransportRouter): ToolDefinition {
+  return {
+    tool: {
+      name: 'photoshop_add_outer_glow',
+      description:
+        'Add an Outer Glow layer effect to the ACTIVE LAYER.\n\n' +
+        'Users often say: add a glow, make it glow, neon edge.\n\n' +
+        'Default color is a warm white (255,255,190) on SCREEN blend. Merges with existing effects; re-applying replaces only the outer glow. One undo reverts it.\n' +
+        'Requires an RGB document and a non-group active layer.\n\n' +
+        'Returns: { ok, summary, details: { layer_name, color, opacity, size, spread, blend_mode } }.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          red: { type: 'number', description: 'Red component (0-255, default 255)', minimum: 0, maximum: 255, default: 255 },
+          green: { type: 'number', description: 'Green component (0-255, default 255)', minimum: 0, maximum: 255, default: 255 },
+          blue: { type: 'number', description: 'Blue component (0-255, default 190)', minimum: 0, maximum: 255, default: 190 },
+          opacity: { type: 'number', description: 'Glow opacity 0-100 (default 50)', minimum: 0, maximum: 100, default: 50 },
+          size: { type: 'number', description: 'Glow size in px (default 15)', minimum: 0, default: 15 },
+          spread: { type: 'number', description: 'Spread 0-100 (default 0)', minimum: 0, maximum: 100, default: 0 },
+          blendMode: { type: 'string', description: 'Blend mode (default SCREEN)', enum: BLEND_MODES as unknown as string[], default: 'SCREEN' },
+        },
+      },
+    },
+    handler: async (args) => {
+      const color = rgb(args, 255, 255, 190);
+      const opacity = clampInt(args.opacity, 0, 100, 50);
+      const size = clampInt(args.size, 0, 250, 15);
+      const spread = clampInt(args.spread, 0, 100, 0);
+      const mode = blendMode(args.blendMode, 'SCREEN');
+      const body = `
+        var __layerName = __mcp_applyLayerEffect('outerGlow', __mcp_buildOuterGlow({
+          red: ${color.r}, green: ${color.g}, blue: ${color.b},
+          opacity: ${opacity}, size: ${size}, spread: ${spread}, blendMode: '${mode}'
+        }));
+        return {
+          ok: true,
+          summary: 'Outer glow applied to ' + __layerName,
+          undo_history_states_consumed: 1,
+          next_suggested_tool: 'photoshop_get_preview',
+          details: {
+            layer_name: __layerName,
+            color: { red: ${color.r}, green: ${color.g}, blue: ${color.b} },
+            opacity: ${opacity}, size: ${size}, spread: ${spread}, blend_mode: '${mode}'
+          }
+        };
+      `;
+      return executeLayerStyle(transport, 'Add Outer Glow', body);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Color overlay
+// ---------------------------------------------------------------------------
+
+function bindColorOverlay(transport: TransportRouter): ToolDefinition {
+  return {
+    tool: {
+      name: 'photoshop_add_color_overlay',
+      description:
+        'Add a Color Overlay layer effect to the ACTIVE LAYER (recolor content non-destructively).\n\n' +
+        'Users often say: recolor this, tint the layer, fill it with a color.\n\n' +
+        'Color (red/green/blue) is required. Merges with existing effects; re-applying replaces only the color overlay. One undo reverts it.\n' +
+        'Requires an RGB document and a non-group active layer.\n\n' +
+        'Returns: { ok, summary, details: { layer_name, color, opacity, blend_mode } }.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ...RGB_COLOR_PROPS,
+          opacity: { type: 'number', description: 'Overlay opacity 0-100 (default 100)', minimum: 0, maximum: 100, default: 100 },
+          blendMode: { type: 'string', description: 'Blend mode (default NORMAL)', enum: BLEND_MODES as unknown as string[], default: 'NORMAL' },
+        },
+        required: ['red', 'green', 'blue'],
+      },
+    },
+    handler: async (args) => {
+      const color = rgb(args, 0, 0, 0);
+      const opacity = clampInt(args.opacity, 0, 100, 100);
+      const mode = blendMode(args.blendMode, 'NORMAL');
+      const body = `
+        var __layerName = __mcp_applyLayerEffect('solidFill', __mcp_buildColorOverlay({
+          red: ${color.r}, green: ${color.g}, blue: ${color.b},
+          opacity: ${opacity}, blendMode: '${mode}'
+        }));
+        return {
+          ok: true,
+          summary: 'Color overlay applied to ' + __layerName,
+          undo_history_states_consumed: 1,
+          next_suggested_tool: 'photoshop_get_preview',
+          details: {
+            layer_name: __layerName,
+            color: { red: ${color.r}, green: ${color.g}, blue: ${color.b} },
+            opacity: ${opacity}, blend_mode: '${mode}'
+          }
+        };
+      `;
+      return executeLayerStyle(transport, 'Add Color Overlay', body);
     },
   };
 }
