@@ -382,7 +382,7 @@ function __mcp_buildDropShadow(opts) {
   d.putUnitDouble(sTID('localLightingAngle'), sTID('angleUnit'), opts.angle);
   d.putBoolean(sTID('useGlobalAngle'), false);
   d.putUnitDouble(sTID('distance'), sTID('pixelsUnit'), Math.max(0, opts.distance));
-  d.putUnitDouble(sTID('chokeMatte'), sTID('percentUnit'), __mcp_clampNum(opts.spread, 0, 100));
+  d.putUnitDouble(sTID('chokeMatte'), sTID('pixelsUnit'), __mcp_clampNum(opts.spread, 0, 100));
   d.putUnitDouble(sTID('blur'), sTID('pixelsUnit'), Math.max(0, opts.size));
   d.putUnitDouble(sTID('noise'), sTID('percentUnit'), 0.0);
   d.putBoolean(sTID('antiAlias'), false);
@@ -405,7 +405,7 @@ function __mcp_buildInnerShadow(opts) {
   d.putUnitDouble(sTID('localLightingAngle'), sTID('angleUnit'), opts.angle);
   d.putBoolean(sTID('useGlobalAngle'), false);
   d.putUnitDouble(sTID('distance'), sTID('pixelsUnit'), Math.max(0, opts.distance));
-  d.putUnitDouble(sTID('chokeMatte'), sTID('percentUnit'), __mcp_clampNum(opts.spread, 0, 100));
+  d.putUnitDouble(sTID('chokeMatte'), sTID('pixelsUnit'), __mcp_clampNum(opts.spread, 0, 100));
   d.putUnitDouble(sTID('blur'), sTID('pixelsUnit'), Math.max(0, opts.size));
   d.putUnitDouble(sTID('noise'), sTID('percentUnit'), 0.0);
   d.putBoolean(sTID('antiAlias'), false);
@@ -447,7 +447,7 @@ function __mcp_buildOuterGlow(opts) {
   d.putUnitDouble(sTID('noise'), sTID('percentUnit'), 0.0);
   d.putEnumerated(sTID('glowTechnique'), sTID('matteTechnique'), sTID('softMatte'));
   d.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.red, opts.green, opts.blue));
-  d.putUnitDouble(sTID('chokeMatte'), sTID('percentUnit'), __mcp_clampNum(opts.spread, 0, 100));
+  d.putUnitDouble(sTID('chokeMatte'), sTID('pixelsUnit'), __mcp_clampNum(opts.spread, 0, 100));
   d.putUnitDouble(sTID('blur'), sTID('pixelsUnit'), Math.max(0, opts.size));
   d.putUnitDouble(sTID('inputRange'), sTID('percentUnit'), 50.0);
   d.putUnitDouble(sTID('shadingNoise'), sTID('percentUnit'), 0.0);
@@ -484,7 +484,7 @@ function __mcp_buildBevelEmboss(opts) {
   d.putEnumerated(sTID('bevelStyle'), sTID('bevelEmbossStyle'), sTID(bevelStyle));
   d.putEnumerated(sTID('bevelTechnique'), sTID('bevelEmbossTechnique'), sTID('softMatte'));
   d.putUnitDouble(sTID('strengthRatio'), sTID('percentUnit'), __mcp_clampNum(opts.depth, 1, 1000));
-  d.putEnumerated(sTID('bevelDirection'), sTID('bevelEmbossStampStyle'), sTID('stampIn'));
+  d.putEnumerated(sTID('bevelDirection'), sTID('bevelEmbossStampStyle'), sTID('in'));
   d.putUnitDouble(sTID('blur'), sTID('pixelsUnit'), Math.max(0, opts.size));
   d.putUnitDouble(sTID('softness'), sTID('pixelsUnit'), Math.max(0, opts.soften));
   d.putBoolean(sTID('useGlobalAngle'), false);
@@ -567,7 +567,11 @@ function __mcp_applyLayerEffect(effectKey, subDesc, globalAngle) {
   __mcp_assertRgbForEffects();
   var layer = __mcp_assertEffectableLayer();
   var fx = __mcp_readLayerEffectsDesc();
-  fx.putObject(sTID(effectKey), sTID(effectKey === 'frameFX' ? 'frameFX' : (effectKey === 'solidFill' ? 'solidFill' : (effectKey === 'gradientFill' ? 'gradientLayer' : effectKey))), subDesc);
+  // Sub-effect object type equals the effect key for every layer effect (dropShadow,
+  // innerShadow, outerGlow, bevelEmboss, frameFX, solidFill, gradientFill). Note:
+  // the Gradient OVERLAY effect is 'gradientFill' — NOT 'gradientLayer', which is the
+  // separate content-layer gradient-fill class.
+  fx.putObject(sTID(effectKey), sTID(effectKey), subDesc);
   if (typeof globalAngle === 'number') {
     fx.putUnitDouble(sTID('globalLightingAngle'), sTID('angleUnit'), globalAngle);
   }
