@@ -69,7 +69,7 @@ function getContextInfo() {
           var layer = doc.activeLayer;
           context.activeLayer = {
             name: layer.name,
-            kind: String(layer.kind),
+            kind: (layer.typename === 'LayerSet' ? 'LayerKind.GROUP' : String(layer.kind)),
             opacity: layer.opacity,
             blendMode: String(layer.blendMode),
             visible: layer.visible,
@@ -302,7 +302,15 @@ export const ExtendScriptSnippets = {
   /**
    * Create a text layer
    */
-  createTextLayer: (text: string, x = 100, y = 100, fontSize = 24, fontName?: string) => `
+  createTextLayer: (
+    text: string,
+    x = 100,
+    y = 100,
+    fontSize = 24,
+    fontName?: string,
+    center?: 'horizontal' | 'vertical' | 'both',
+    color?: { red: number; green: number; blue: number }
+  ) => `
     ${getContextInfo}
     ${resolveFontPostScriptName}
     
@@ -322,13 +330,38 @@ export const ExtendScriptSnippets = {
     }
     textLayer.textItem.font = __psFont;
     ` : ''}
-    
+    ${color ? `
+    var __textColor = new SolidColor();
+    __textColor.rgb.red = ${color.red};
+    __textColor.rgb.green = ${color.green};
+    __textColor.rgb.blue = ${color.blue};
+    textLayer.textItem.color = __textColor;
+    ` : ''}
+    ${center ? `
+    // Center the text layer on the canvas by translating its bounding box.
+    var __b = textLayer.bounds;
+    var __layerCx = (__b[0].as('px') + __b[2].as('px')) / 2;
+    var __layerCy = (__b[1].as('px') + __b[3].as('px')) / 2;
+    var __dx = ${center === 'horizontal' || center === 'both' ? '(doc.width.as("px") / 2) - __layerCx' : '0'};
+    var __dy = ${center === 'vertical' || center === 'both' ? '(doc.height.as("px") / 2) - __layerCy' : '0'};
+    if (__dx !== 0 || __dy !== 0) { textLayer.translate(__dx, __dy); }
+    ` : ''}
+
+    var __finalBounds = textLayer.bounds;
     var result = {
       created: true,
       layerName: textLayer.name,
       text: "${jsString(text)}",
       position: { x: ${x}, y: ${y} },
+      centered: ${center ? `"${center}"` : 'false'},
+      bounds: {
+        left: __finalBounds[0].as('px'),
+        top: __finalBounds[1].as('px'),
+        right: __finalBounds[2].as('px'),
+        bottom: __finalBounds[3].as('px')
+      },
       fontSize: ${fontSize},
+      ${color ? `color: 'RGB(${color.red}, ${color.green}, ${color.blue})',` : ''}
       ${fontName ? `font: textLayer.textItem.font,` : ''}
       context: getContextInfo()
     };
@@ -600,7 +633,7 @@ export const ExtendScriptSnippets = {
           try { layerHasMask = __mcp_layerHasMaskById(layer.id); } catch (eMask) { layerHasMask = false; }
           layers.push({
             name: layer.name,
-            kind: String(layer.kind),
+            kind: (layer.typename === 'LayerSet' ? 'LayerKind.GROUP' : String(layer.kind)),
             visible: layer.visible,
             opacity: layer.opacity,
             blendMode: String(layer.blendMode),
@@ -657,7 +690,7 @@ export const ExtendScriptSnippets = {
     var result = {
       selected: true,
       layerName: target.name,
-      kind: String(target.kind),
+      kind: (target.typename === 'LayerSet' ? 'LayerKind.GROUP' : String(target.kind)),
       context: getContextInfo()
     };
     try {
