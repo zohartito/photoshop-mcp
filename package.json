@@ -34,6 +34,9 @@
     "test:mcp-local": "tsx scripts/test-mcp-local.ts",
     "test:mcp-all": "tsx scripts/test-all-mcp-tools.ts",
     "test:uxp-normalize": "tsx scripts/test-uxp-normalize.ts",
+    "test:mutport-static": "tsx scripts/test-mutport-static.ts",
+    "test:mutport-trace": "tsx scripts/test-mutport-trace.ts",
+    "parity:uxp": "tsx scripts/parity-uxp.ts",
     "test:intent-expansion": "tsx scripts/test-intent-expansion-local.ts",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build"

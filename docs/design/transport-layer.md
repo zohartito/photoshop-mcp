@@ -417,3 +417,149 @@ through the batchPlay bridge end-to-end.
 - **Next:** mutating-family port (§6.8) — route `duplicate_layer` / `select_layer` /
   `create_layer_mask` / `set_layer_properties` through `run()` with the layerID read-back,
   verified by the parity harness extended with mutation fixtures.
+
+## 14. Mutating-family port (§6.8 target identity — the last transport milestone)
+
+Closes the transport track pending one live run. The four §6.8 layer-family commands
+now flow through `transport.run({ name, params })` on both backends, and the
+target-identity contract (return the affected `layerId`; accept an optional `layerId`)
+is implemented end-to-end. This is what kills the §6.1 duplicate → mask-the-wrong-layer
+bug class for real, not just detects it.
+
+### 14.1 What flipped
+
+Four registry commands, realized across six tool handlers (the `set_layer_properties`
+command is exposed as the separate opacity/blend-mode tools; `select_layer` is
+`photoshop_select_layer_by_name`):
+
+| Registry command | Tool handler(s) | Old call | New call |
+|---|---|---|---|
+| `duplicate_layer` | `duplicateLayer` (`layer-properties-tools.ts`) | `runScript(script)` | `run({ name:'duplicate_layer', params:{ script, layerId?, newName? } })` |
+| `select_layer` | `selectLayerByName` (`layer-tools.ts`) | `runScript(script)` | `run({ name:'select_layer', params:{ script, layerId? } })` |
+| `create_layer_mask` | `createLayerMask` (`selection-tools.ts`) | `runScript(script)` | `run({ name:'create_layer_mask', params:{ script, layerId? } })` |
+| `set_layer_properties` | `setLayerOpacity`, `setLayerBlendMode` (`layer-properties-tools.ts`) | `runScript(script)` | `run({ name:'set_layer_properties', params:{ script, layerId?, opacity?/blendMode? } })` |
+
+`params.script` still carries the ExtendScript snippet built exactly as before, so
+backend A stays byte-identical (see 14.3). The UXP switch keys on the command **name**
+and the structured params (`layerId`, `opacity`, `blendMode`, `newName`), ignoring
+`script`. Tool names, schemas (other than the additive optional `layerId`),
+descriptions, and error envelopes are otherwise unchanged. `setLayerVisibility` /
+`setLayerLocked` were deliberately left on `runScript` — they are not part of the
+`set_layer_properties` descriptor (§6.8 scopes it to opacity + blend mode), so touching
+them would be scope creep with no UXP twin behind it.
+
+### 14.2 The `layerId` read-back mechanism, per backend
+
+The affected `layerId` is surfaced as a **top-level number** on the result of every
+mutating command, read uniformly by `tools/atomic-shared.ts` `layerIdFrom()` regardless
+of which backend answered:
+
+- **Backend A (ExtendScript).** New shared helpers `MCP_LAYER_IDENTITY_HELPERS`
+  (`src/api/extendscript.ts`): `__mcp_layerIdSafe(layer)` reads `layer.id` (the same
+  stable id the §6.6 mask probe already relies on) and `__mcp_selectLayerById(id)`
+  activates a layer via an Action Manager `'slct'` by `putIdentifier('Lyr ', id)` — the
+  DOM has no `getByID` for layers. Each snippet:
+  - `duplicateLayer` returns `layerId` = **the new copy's** id (read straight off the
+    `duplicate()` return value, since the DOM does not reliably activate the copy, §6.1),
+    plus `originalLayerId`.
+  - `selectLayerByName` / `createLayerMask` / `setLayerOpacity` / `setLayerBlendMode`
+    return `layerId` = the targeted layer's id. When the optional `layerId` param is
+    present the snippet calls `__mcp_selectLayerById(id)` FIRST so the mutation lands on
+    the intended layer; when absent the pre-flip active-layer path is used verbatim.
+  - **`create_layer_mask` is the money case:** with `layerId` it binds to that layer
+    *before* the mask `make`, so the mask can no longer land on whatever happened to be
+    active — the exact §6.1 failure.
+- **Backend B (UXP).** Descriptor builders in `uxp-commands/descriptors.ts` target by
+  `{ _ref:'layer', _id }` (falling back to `targetEnum`), and each ported method in
+  `UxpTransport` **appends `getActiveLayerIdDescriptor()`** (`get` of the active layer's
+  `layerID` property) as the last descriptor in the batch, so the raw batchPlay result
+  carries the affected id. `uxp-commands/normalize.ts`
+  `normalizeDuplicateLayer/SelectLayer/CreateLayerMask/SetLayerProperties` translate that
+  to the same `{ layerId, … }` envelope shape as the ExtendScript twin.
+  `layerIdFromDescriptor()` reads `layerID` whether plain or `{ _value }`-wrapped. Blend
+  mode is converted from the tool's ExtendScript-uppercase token to the batchPlay enum
+  token via `blendModeToBatchPlayToken()` (inverse of the existing `BLEND_MODE_TOKEN`
+  map, so the two directions cannot drift).
+
+### 14.3 Offline verification done (this run)
+
+- **`npm run build:server` — strict `tsc` clean.**
+- **`npm run test:mutport-static`** (`scripts/test-mutport-static.ts`, 21 checks): each
+  ExtendScript snippet returns `layerId` in both forms and only calls
+  `__mcp_selectLayerById` in the id-form (the active/name path is unchanged);
+  `create_layer_mask` selects the target *before* masking; the UXP descriptors have the
+  right target/`_unit`/enum shapes; and all four UXP normalizers surface the same
+  top-level `layerId` that `layerIdFrom` reads on backend A.
+- **`npm run test:mutport-trace`** (`scripts/test-mutport-trace.ts`, 5 checks): on the
+  default `auto` preference, `run({ name, params:{ script } })` delivers the **identical
+  wrapped script in exactly one `executeScript` call** as the legacy `runScript(script)`
+  — proven by capturing both against a fake `PhotoshopConnection` (no live PS) and
+  deep-equal-diffing the delivered payloads. The id-targeted variant still routes to
+  ExtendScript (no pin steals it to UXP). This is the zero-behavior-change gate for the
+  default path, established statically.
+- **`npm run test:uxp-normalize`** — the additive mutating normalizers do not disturb the
+  existing read-only checks. (Note: this suite has **one pre-existing failure unrelated to
+  this port** — the opacity fixture at `test-uxp-normalize.ts:64` sends a
+  `percentUnit`-wrapped 0–100 value while live AM sends raw 0–255, so `opacityPercent`'s
+  documented `/255` (§12) yields 33 ≠ 85. The live parity run was 3/3 CLEAN on opacity,
+  which proves the normalizer is right and the fixture is stale. Flagged for a separate
+  test-only fix; not touched here.)
+
+### 14.4 LIVE VERIFICATION PENDING (run when Photoshop is free)
+
+The batchPlay result parsing — **especially reading the returned `layerID` on both
+backends** (§6.8) — needs a plugin-connected session. Not run in this session because
+Photoshop is in active interactive use. The staged commands, in order:
+
+```
+# 0. Build (already clean, but rebuild in the review checkout)
+npm run build:server
+
+# 1. Offline re-confirm (no PS needed)
+npm run test:mutport-static
+npm run test:mutport-trace
+
+# 2. Load the UXP plugin once (UXP Developer Tool → Load uxp-plugin/, then open its
+#    panel: Plugins → Photoshop MCP UXP Bridge → MCP Bridge). One harness at a time.
+
+# 3. Mutating-family parity + target-identity contract (the §6.8 live gate):
+npm run parity:uxp -- --mutate
+#   Builds its OWN fixtures (user docs untouched), runs
+#   duplicate → select-the-copy-by-returned-id → mask-that-id → set-props-on-that-id on
+#   each backend, and asserts (a) both backends return a numeric top-level layerId and
+#   (b) the final get_layers shows hasMask=true ONLY on the 'parity-dupe' layer — i.e.
+#   the §6.1 bug is gone. Report: scripts/output/parity-uxp-report.json.
+
+# 4. Full backend-A no-regression gate (must reproduce the M3 baseline exactly):
+npm run test:mcp-all
+#   Expect 118 pass / 2 fail / 11 skip (the 2 fails are the pre-existing
+#   synthetic-canvas recipes). This confirms the default ExtendScript path is unchanged
+#   with the new layerId read-back scripts in place.
+```
+
+**Open item to confirm live (flagged):** backend A reading `layer.id` back after
+`duplicate()` and after an AM `slct`-by-id is implemented and unit-traced, but the id
+VALUE round-trip (that the number returned by `duplicate_layer` actually resolves the
+copy when passed back into `select_layer` / `create_layer_mask`) is only *proven* by step
+3 above. The mechanism is sound (`layer.id` and `putIdentifier('Lyr ', id)` are the same
+primitives §6.6's mask probe already uses live), but the end-to-end value round-trip is
+the one thing offline testing cannot close.
+
+**Transport track status:** with build + both offline suites green and the mutating
+family wired on both backends, this **closes the transport track pending the single live
+`parity:uxp --mutate` run** (plus the `test:mcp-all` regression re-confirm). No code work
+remains for the mutating family; only live confirmation.
+
+### 14.5 Codex cross-review disposition (gpt-5.5 @ xhigh, read-only)
+
+Two findings, both folded in:
+
+| Sev | Finding | Disposition |
+|---|---|---|
+| MED | UXP `select_layer` was advertised in `capabilities().commands` but throws without a `layerId` → under `PHOTOSHOP_MCP_TRANSPORT=uxp` a default by-name `photoshop_select_layer_by_name({ name })` would regress | **Fixed** — `select_layer` removed from the advertised `UXP_COMMANDS` (backend B can only select by native id; by-name needs the DOM, which the generic `batch_play` action doesn't expose). `run()` still handles the id-carrying chain case (duplicate → select-the-copy) and throws a clear message on a no-id UXP invocation. The default `auto` path is unaffected — `select_layer` is unpinned, so it routes to ExtendScript where the name walk works. |
+| LOW | UXP `duplicate` read-back assumes the `duplicate` action leaves the copy active before the appended `get layerID`; wrong id if it doesn't (esp. `_id`-targeting a non-active layer) | **Hardened** — `normalizeDuplicateLayer` now takes BOTH the appended read-back AND the `duplicate` action's own result descriptor (the adb-mcp `o[0].layerID` pattern), preferring the read-back and falling back to the action result. Still flagged for the live `--mutate` run as the definitive confirmation. |
+
+Codex found no behavior change on the default no-`layerId` ExtendScript path beyond the
+intended returned `layerId`, confirmed the `putIdentifier('Lyr ', id)` + `slct` targeting
+and the `duplicated.id` DOM read are correct, and confirmed the blend-mode inverse map has
+no token collisions.

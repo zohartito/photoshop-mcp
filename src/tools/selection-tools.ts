@@ -6,6 +6,7 @@ import {
   atomicFailure,
   atomicFailureFromError,
   atomicSuccess,
+  layerIdFrom,
   parseSnippetResult,
   runSnippet,
 } from './atomic-shared.js';
@@ -83,18 +84,24 @@ export function createSelectionTools(transport: TransportRouter): ToolDefinition
       tool: {
         name: 'photoshop_create_layer_mask',
         description:
-          'Create a layer mask on the active layer from the current selection (reveal selection).\n\n' +
+          'Create a layer mask on the active layer (or the layer given by layerId) from the current selection (reveal selection).\n\n' +
           'Users often say: mask this, hide the background, non-destructive cutout (after selection).\n\n' +
           'Use when: non-destructive hide/show after a selection exists.\n' +
           'Do NOT use when: no selection exists — create selection first or use remove_background recipe.\n\n' +
-          'Returns: maskCreated confirmation.\n' +
-          'Preconditions: active document and active selection. Side effects: adds mask to active layer.',
+          'Returns: maskCreated confirmation and the masked layerId.\n' +
+          'Preconditions: active document and active selection. Side effects: adds mask to the targeted layer.',
         inputSchema: {
           type: 'object',
-          properties: {},
+          properties: {
+            layerId: {
+              type: 'number',
+              description:
+                'Optional native layer id to mask instead of the active layer (from a prior tool result, e.g. duplicate_layer). Prevents masking the wrong layer.',
+            },
+          },
         },
       },
-      handler: async () => createLayerMask(transport),
+      handler: async (args) => createLayerMask(transport, args),
     },
     {
       tool: {
@@ -276,16 +283,27 @@ async function invertSelection(transport: TransportRouter): Promise<ToolResult> 
   }
 }
 
-async function createLayerMask(transport: TransportRouter): Promise<ToolResult> {
+async function createLayerMask(
+  transport: TransportRouter,
+  args: Record<string, unknown> = {}
+): Promise<ToolResult> {
+  const layerId = typeof args.layerId === 'number' ? args.layerId : undefined;
+
   try {
-    const script = ExtendScriptSnippets.createLayerMask();
-    await transport.runScript(script);
+    const result = await transport.run({
+      name: 'create_layer_mask',
+      params: {
+        script: ExtendScriptSnippets.createLayerMask(layerId),
+        layerId,
+      },
+    });
+    const maskedId = layerIdFrom(result);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: 'Layer mask created from selection',
+          text: `Layer mask created from selection${maskedId !== undefined ? ` (layerId ${maskedId})` : ''}`,
         },
       ],
     };

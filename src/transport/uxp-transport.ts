@@ -23,15 +23,24 @@ import {
 } from '../platform/uxp-bridge-server.js';
 import type { ActionDescriptor } from '../api/batch-play.js';
 import {
+  addLayerMaskDescriptor,
+  duplicateLayerDescriptor,
   getActiveLayerDescriptor,
+  getActiveLayerIdDescriptor,
   getDocumentDescriptor,
   getLayerByIndexDescriptor,
   getSelectionDescriptor,
+  selectLayerByIdDescriptor,
+  setLayerPropertiesDescriptor,
 } from './uxp-commands/descriptors.js';
 import {
+  normalizeCreateLayerMask,
+  normalizeDuplicateLayer,
   normalizeGetDocumentInfo,
   normalizeGetLayers,
   normalizeGetState,
+  normalizeSelectLayer,
+  normalizeSetLayerProperties,
 } from './uxp-commands/normalize.js';
 import type {
   PhotoshopTransport,
@@ -47,17 +56,28 @@ import type {
 const POLL_FRESHNESS_MS = 2_000;
 
 /**
- * Commands the UXP backend serves in M3. neural_filter is the original path;
- * the three read-only commands are the first descriptor ports (§5). Mutating
- * layer-family commands (duplicate/select/mask/properties) have descriptor
- * builders in ./uxp-commands/descriptors.ts (§6.8 groundwork) but are not routed
- * through run() until a plugin-connected session verifies their result parsing.
+ * Commands the UXP backend ADVERTISES as servable (feeds capabilities().commands).
+ * neural_filter is the original path; the three read-only commands are the first
+ * descriptor ports (§5); the mutating layer-family is the §6.8 target-identity port
+ * — descriptors + read-back are wired, pending live verification of the returned
+ * layerID (transport-layer.md §6.8, §14).
+ *
+ * `select_layer` is deliberately NOT advertised here even though run() handles it:
+ * backend B can only select by native id ({ _ref:'layer', _id }); it has no generic
+ * batchPlay way to resolve the tool's default by-NAME selection (that needs the
+ * plugin's DOM, which the generic batch_play action does not expose). So UXP
+ * select_layer is only meaningful inside a layerId-carrying chain (duplicate → mask)
+ * — advertising it as a general capability would over-promise (Codex MED). run()
+ * throws loud if it is invoked without a layerId.
  */
 const UXP_COMMANDS = [
   'neural_filter',
   'get_state',
   'get_layers',
   'get_document_info',
+  'duplicate_layer',
+  'create_layer_mask',
+  'set_layer_properties',
 ] as const;
 
 /** A raw batchPlay result is an array of ActionDescriptor objects. */
@@ -98,6 +118,8 @@ export class UxpTransport implements PhotoshopTransport {
    * the router/tool sees a normal Error, never a leaked `{ ok:false }`.
    */
   async run(command: PsCommand): Promise<unknown> {
+    const params = command.params ?? {};
+    const layerId = typeof params.layerId === 'number' ? params.layerId : undefined;
     switch (command.name) {
       case 'get_state':
         return this.getState(command.timeoutMs);
@@ -105,8 +127,25 @@ export class UxpTransport implements PhotoshopTransport {
         return this.getDocumentInfo(command.timeoutMs);
       case 'get_layers':
         return this.getLayers(command.timeoutMs);
+      case 'duplicate_layer':
+        return this.duplicateLayer(
+          layerId,
+          typeof params.newName === 'string' ? params.newName : undefined,
+          command.timeoutMs
+        );
+      case 'select_layer':
+        return this.selectLayer(layerId, command.timeoutMs);
+      case 'create_layer_mask':
+        return this.createLayerMask(layerId, command.timeoutMs);
+      case 'set_layer_properties':
+        return this.setLayerProperties(
+          layerId,
+          typeof params.opacity === 'number' ? params.opacity : undefined,
+          typeof params.blendMode === 'string' ? params.blendMode : undefined,
+          command.timeoutMs
+        );
       case 'neural_filter':
-        return this.invokeRaw(command.name, command.params ?? {}, command.timeoutMs ?? 90_000);
+        return this.invokeRaw(command.name, params, command.timeoutMs ?? 90_000);
       default:
         throw new Error(`UxpTransport: command "${command.name}" is not ported to backend B`);
     }
@@ -187,6 +226,75 @@ export class UxpTransport implements PhotoshopTransport {
       layerDescs = await this.runBatchPlay(gets, 'walk_layers', timeoutMs);
     }
     return normalizeGetLayers(layerDescs, context);
+  }
+
+  // --- ported mutating commands (§6.8 target identity) ---
+  //
+  // Each builds its descriptor(s) (targeting by layerId when supplied, else the
+  // active layer), APPENDS a `get` of the resulting active layer's layerID, runs
+  // the whole array in one batch_play, and normalizes to the ExtendScript twin's
+  // shape — crucially surfacing the affected `layerId` (the read-back the §6.8
+  // contract requires). Live verification of the returned layerID is pending a
+  // plugin-connected session (transport-layer.md §6.8, §14).
+
+  private async duplicateLayer(
+    layerId: number | undefined,
+    newName: string | undefined,
+    timeoutMs?: number
+  ): Promise<unknown> {
+    const dupDescriptors = duplicateLayerDescriptor(layerId, newName);
+    const descriptors = [...dupDescriptors, getActiveLayerIdDescriptor()];
+    const raw = await this.runBatchPlay(descriptors, 'duplicate_layer', timeoutMs);
+    // Last element = the appended `get` of the active layer's id (the copy, which
+    // duplicate leaves active); first element = the duplicate action's own result
+    // (adb-mcp reads `o[0].layerID`). Pass both so the normalizer can fall back.
+    return normalizeDuplicateLayer(raw[raw.length - 1], raw[dupDescriptors.length - 1]);
+  }
+
+  private async selectLayer(
+    layerId: number | undefined,
+    timeoutMs?: number
+  ): Promise<unknown> {
+    if (typeof layerId !== 'number') {
+      // By-name selection is backend-A only (needs the DOM layer walk); backend B
+      // selects strictly by native id. Under PHOTOSHOP_MCP_TRANSPORT=uxp a no-id
+      // name-select cannot be served — fail loud rather than select the wrong layer.
+      throw new Error(
+        'select_layer via UXP requires a layerId; by-name selection is only available on the ExtendScript backend'
+      );
+    }
+    const descriptors = [...selectLayerByIdDescriptor(layerId), getActiveLayerIdDescriptor()];
+    const raw = await this.runBatchPlay(descriptors, 'select_layer', timeoutMs);
+    return normalizeSelectLayer(raw[raw.length - 1]);
+  }
+
+  private async createLayerMask(
+    layerId: number | undefined,
+    timeoutMs?: number
+  ): Promise<unknown> {
+    // Match the ExtendScript twin: reveal the current selection when one exists,
+    // else reveal all. The selection probe is the same one the read-only path uses.
+    const fromSelection = await this.probeSelection(timeoutMs);
+    const descriptors = [
+      ...addLayerMaskDescriptor(layerId, fromSelection ? 'revealSelection' : 'revealAll'),
+      getActiveLayerIdDescriptor(),
+    ];
+    const raw = await this.runBatchPlay(descriptors, 'create_layer_mask', timeoutMs);
+    return normalizeCreateLayerMask(raw[raw.length - 1], fromSelection);
+  }
+
+  private async setLayerProperties(
+    layerId: number | undefined,
+    opacity: number | undefined,
+    blendMode: string | undefined,
+    timeoutMs?: number
+  ): Promise<unknown> {
+    const descriptors = [
+      ...setLayerPropertiesDescriptor({ layerId, opacity, blendMode }),
+      getActiveLayerIdDescriptor(),
+    ];
+    const raw = await this.runBatchPlay(descriptors, 'set_layer_properties', timeoutMs);
+    return normalizeSetLayerProperties(raw[raw.length - 1], { opacity, blendMode });
   }
 
   // --- bridge plumbing ---

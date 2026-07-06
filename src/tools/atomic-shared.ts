@@ -25,6 +25,19 @@ export function parseSnippetResult(raw: unknown): Record<string, unknown> | null
   return payload as Record<string, unknown>;
 }
 
+/**
+ * §6.8 target-identity read-back: pull the affected `layerId` out of a transport
+ * result. Works on both backends — the ExtendScript snippets and the UXP
+ * normalizers both surface `layerId` as a top-level number — so a tool can report
+ * (and a chain can reuse) the id of the layer it actually touched. Returns
+ * undefined when absent (e.g. a PS build where layer.id was unreadable → null).
+ */
+export function layerIdFrom(result: unknown): number | undefined {
+  const payload = parseSnippetResult(result);
+  const id = payload?.layerId;
+  return typeof id === 'number' ? id : undefined;
+}
+
 export function atomicSuccess(
   summary: string,
   details?: Record<string, unknown>,

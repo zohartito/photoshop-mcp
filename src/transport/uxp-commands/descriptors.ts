@@ -14,6 +14,7 @@
  * builders (§6.8) remain staged pending their own fixture-verified port.
  */
 import type { ActionDescriptor } from '../../api/batch-play.js';
+import { blendModeToBatchPlayToken } from './normalize.js';
 
 /** Target the active document by ordinal (targetEnum). */
 const ACTIVE_DOCUMENT = { _ref: 'document', _enum: 'ordinal', _value: 'targetEnum' } as const;
@@ -82,6 +83,18 @@ export function selectLayerByIdDescriptor(layerId: number): ActionDescriptor[] {
 }
 
 /**
+ * §6.8 read-back — `get` just the active layer's `layerID` property. Appended
+ * after a mutation so the raw batchPlay result carries the affected id (the
+ * duplicate/select/mask/set commands each end with the intended layer active), which
+ * normalizeDuplicateLayer/normalizeSelectLayer/etc. surface as the `layerId` the
+ * target-identity contract requires. This is the field flagged for live
+ * verification (transport-layer.md §6.8).
+ */
+export function getActiveLayerIdDescriptor(): ActionDescriptor {
+  return { _obj: 'get', _target: [{ _property: 'layerID' }, ACTIVE_LAYER] };
+}
+
+/**
  * §6.8 — duplicate a layer by id and (optionally) name the copy. batchPlay returns
  * the new layer's `layerID` so the mutating command can report the affected
  * `layerId` (contract: mutating layer commands return layerId). When `layerId` is
@@ -139,7 +152,9 @@ export function setLayerPropertiesDescriptor(params: {
     to.opacity = { _unit: 'percentUnit', _value: params.opacity };
   }
   if (typeof params.blendMode === 'string') {
-    to.mode = { _enum: 'blendMode', _value: params.blendMode };
+    // The tool passes the ExtendScript-uppercase token (e.g. "MULTIPLY"); batchPlay
+    // needs the Adobe enum token (e.g. "multiply"). Convert at the boundary (§6.5).
+    to.mode = { _enum: 'blendMode', _value: blendModeToBatchPlayToken(params.blendMode) };
   }
   descriptors.push({
     _obj: 'set',

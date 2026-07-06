@@ -144,6 +144,21 @@ export function normalizeBlendMode(token: string | undefined): string {
   return `BlendMode.${suffix}`;
 }
 
+/**
+ * Inverse of BLEND_MODE_TOKEN: the ExtendScript/tool uppercase token (e.g.
+ * "MULTIPLY", or a "BlendMode.MULTIPLY" string) → the Adobe batchPlay enum token
+ * (e.g. "multiply") a `set` descriptor needs (§6.8, §6.5). Built from the same map
+ * so the two directions cannot drift. Unknown tokens lower-case as a best effort.
+ */
+const BATCHPLAY_BLEND_TOKEN: Record<string, string> = Object.fromEntries(
+  Object.entries(BLEND_MODE_TOKEN).map(([batchPlay, upper]) => [upper, batchPlay])
+);
+
+export function blendModeToBatchPlayToken(token: string): string {
+  const upper = token.replace(/^BlendMode\./, '').toUpperCase();
+  return BATCHPLAY_BLEND_TOKEN[upper] ?? upper.toLowerCase();
+}
+
 export function normalizeLayerKind(kindInt: number | undefined): LayerKindString {
   if (typeof kindInt !== 'number') return 'LayerKind.NORMAL';
   return LAYER_KIND_BY_INT[kindInt] ?? 'LayerKind.NORMAL';
@@ -255,4 +270,91 @@ export function normalizeGetLayers(
   }));
 
   return { layerCount: layers.length, layers, context };
+}
+
+// --- §6.8 mutating-family read-back normalizers ---
+//
+// batchPlay mutating actions echo their target/result descriptor(s). The
+// load-bearing field per the target-identity contract is the affected `layerId`,
+// which these pull out so a UXP result carries the SAME top-level `layerId` the
+// ExtendScript twin returns (read by tools/atomic-shared.ts `layerIdFrom`). The
+// mutating commands are not yet routed through UxpTransport.run() on a live plugin
+// — these translate the raw results once that session verifies the batchPlay keys
+// (transport-layer.md §6.8: "reading the returned layerID" is the thing to verify).
+
+/**
+ * Extract a native layer id from a batchPlay result descriptor. A layer `get`/
+ * `select`/`make`/`duplicate` result exposes the id as `layerID` (Action Manager)
+ * — accept a plain number or a `{ _value }` wrapper, and fall back to `layerId`.
+ */
+export function layerIdFromDescriptor(desc: Descriptor | null | undefined): number | undefined {
+  if (!desc || typeof desc !== 'object') return undefined;
+  const direct = desc.layerID ?? desc.layerId;
+  const value = unitValue(direct);
+  return typeof value === 'number' ? value : undefined;
+}
+
+/**
+ * duplicate_layer twin: report the NEW copy's `layerID`. Mirrors the ExtendScript
+ * snippet's `{ layerId, newName }`.
+ *
+ * Two candidate reads (either can be the source of truth depending on the live
+ * batchPlay result shape — resolved by the §6.8 live run): `readBackDesc` is the
+ * appended `get` of the active layer's layerID (a `duplicate` leaves the copy
+ * active), and `duplicateResultDesc` is the `duplicate` action's own result, which
+ * the adb-mcp reference reads as `o[0].layerID`. Prefer the read-back, fall back to
+ * the action result, so a wrong active-layer assumption on one build still yields a
+ * usable id.
+ */
+export function normalizeDuplicateLayer(
+  readBackDesc: Descriptor | null | undefined,
+  duplicateResultDesc?: Descriptor | null | undefined
+): { layerId: number | undefined; newName: unknown } {
+  const layerId = layerIdFromDescriptor(readBackDesc) ?? layerIdFromDescriptor(duplicateResultDesc);
+  const nameSource =
+    readBackDesc && typeof readBackDesc.name === 'string'
+      ? readBackDesc
+      : duplicateResultDesc && typeof duplicateResultDesc.name === 'string'
+        ? duplicateResultDesc
+        : undefined;
+  return {
+    layerId,
+    newName: nameSource ? (nameSource.name as string) : undefined,
+  };
+}
+
+/** select_layer twin: report the id of the now-active (selected) layer. */
+export function normalizeSelectLayer(
+  layerDesc: Descriptor | null | undefined
+): { selected: true; layerId: number | undefined; layerName: unknown } {
+  return {
+    selected: true,
+    layerId: layerIdFromDescriptor(layerDesc),
+    layerName: layerDesc && typeof layerDesc.name === 'string' ? layerDesc.name : undefined,
+  };
+}
+
+/** create_layer_mask twin: confirm creation and report the masked layer id. */
+export function normalizeCreateLayerMask(
+  layerDesc: Descriptor | null | undefined,
+  fromSelection: boolean
+): { maskCreated: true; fromSelection: boolean; layerId: number | undefined } {
+  return {
+    maskCreated: true,
+    fromSelection,
+    layerId: layerIdFromDescriptor(layerDesc),
+  };
+}
+
+/** set_layer_properties twin: report the affected layer id and applied values. */
+export function normalizeSetLayerProperties(
+  layerDesc: Descriptor | null | undefined,
+  applied: { opacity?: number; blendMode?: string }
+): { updated: true; layerId: number | undefined; opacity?: number; blendMode?: string } {
+  return {
+    updated: true,
+    layerId: layerIdFromDescriptor(layerDesc),
+    ...(applied.opacity !== undefined ? { opacity: applied.opacity } : {}),
+    ...(applied.blendMode !== undefined ? { blendMode: applied.blendMode } : {}),
+  };
 }

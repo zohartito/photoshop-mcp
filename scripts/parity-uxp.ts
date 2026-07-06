@@ -16,14 +16,26 @@
  * command on both backends against the identical fixture state, deep-diffs the
  * payloads, closes the fixture without saving, and writes a JSON report.
  *
- * Fixture (Task 2): a fresh uniquely-named RGB doc → one filled non-background
+ * Read-only fixture: a fresh uniquely-named RGB doc → one filled non-background
  * pixel layer → a rectangular selection consumed into a layer MASK (positive
  * hasMask case) → a fresh rectangular selection left active (positive hasSelection
  * case). So at read time: 2 layers (Background + masked pixel layer), the active
  * layer has a mask, and a selection exists.
  *
- * Usage: npx tsx scripts/parity-uxp.ts [--wait-min 20]
- * Exit codes: 0 = all commands parity-clean, 1 = diffs found, 2 = setup failure.
+ * MUTATING PHASE (§6.8 target identity, §14) — runs when --mutate is passed. Because
+ * mutations are stateful and destructive, each backend gets its OWN fresh fixture and
+ * runs the SAME chain independently, then the harness checks two things:
+ *   (a) result-shape parity — both backends return a numeric top-level `layerId` from
+ *       duplicate_layer / select_layer / create_layer_mask / set_layer_properties;
+ *   (b) the target-identity CONTRACT — the classic duplicate→select-the-copy→mask bug
+ *       class (§6.1) is gone: duplicate_layer returns the NEW layer's id, we select
+ *       and mask THAT id, and a final get_layers must show hasMask=true on the layer
+ *       whose name is the duplicate (never the Background/original). This is the
+ *       live confirmation §6.8 flags — especially that backend A can read the
+ *       returned layerID back.
+ *
+ * Usage: npx tsx scripts/parity-uxp.ts [--wait-min 20] [--mutate]
+ * Exit codes: 0 = all checks clean, 1 = diffs/contract failure, 2 = setup failure.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -40,6 +52,7 @@ function argValue(flag: string, fallback: string): string {
 }
 
 const WAIT_MINUTES = Number.parseFloat(argValue('--wait-min', '20'));
+const RUN_MUTATIONS = argv.includes('--mutate');
 const FIXTURE_NAME = `mcp-parity-${Date.now()}`;
 const REPORT_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -128,6 +141,115 @@ async function buildFixture(backendA: ExtendScriptTransport): Promise<void> {
   log('Fixture ready: 2 layers (Background + masked pixel layer), selection active.');
 }
 
+/** Pull a numeric top-level layerId out of a (possibly string) transport result. */
+function layerIdOf(result: unknown): number | undefined {
+  let value: unknown = result;
+  if (typeof value === 'string') {
+    try {
+      value = new Function(`return ${value}`)();
+    } catch {
+      return undefined;
+    }
+  }
+  const id = (value as { layerId?: unknown } | null)?.layerId;
+  return typeof id === 'number' ? id : undefined;
+}
+
+/**
+ * Build a minimal MUTATION fixture on `backend` (its own fresh doc) and run the
+ * §6.8 chain: create doc → duplicate the pixel layer (capture the NEW layerId) →
+ * select that id → mask that id (selection present) → set opacity+blend on that id.
+ * Returns the per-command results plus a final get_layers snapshot so the caller can
+ * assert the mask landed on the duplicate, not the original (the §6.1 bug class).
+ *
+ * `runCmd(name, params)` abstracts the backend: for A, params carries the built
+ * ExtendScript `script` (+ the structured params the tool would pass); for B, only
+ * the structured params (the UXP switch keys on name). This mirrors exactly what the
+ * flipped tool handlers now send through the router.
+ */
+async function runMutationChain(
+  label: string,
+  runCmd: (name: string, params: Record<string, unknown>) => Promise<unknown>,
+  buildDupSelMaskSetFixture: () => Promise<void>
+): Promise<{
+  label: string;
+  duplicate: unknown;
+  select: unknown;
+  mask: unknown;
+  setProps: unknown;
+  newLayerId: number | undefined;
+  finalLayers: unknown;
+  contract: { ok: boolean; detail: string };
+}> {
+  await buildDupSelMaskSetFixture();
+
+  // 1) duplicate the (active) pixel layer, name the copy so we can find it later.
+  const duplicate = await runCmd('duplicate_layer', {
+    script: ExtendScriptSnippets.duplicateLayer('parity-dupe'),
+    newName: 'parity-dupe',
+  });
+  const newLayerId = layerIdOf(duplicate);
+  log(`   ${label} duplicate_layer → layerId=${String(newLayerId)}`);
+
+  // 2) select the duplicate BY ITS RETURNED ID (the target-identity primitive).
+  const select = await runCmd('select_layer', {
+    script: ExtendScriptSnippets.selectLayerByName('parity-dupe', newLayerId),
+    layerId: newLayerId,
+  });
+
+  // 3) fresh selection, then mask THAT id — must land on the duplicate.
+  await runCmd('select_rectangle', {
+    script: ExtendScriptSnippets.selectRectangle(120, 120, 480, 380),
+  });
+  const mask = await runCmd('create_layer_mask', {
+    script: ExtendScriptSnippets.createLayerMask(newLayerId),
+    layerId: newLayerId,
+  });
+
+  // 4) set opacity + blend mode on that id.
+  const setProps = await runCmd('set_layer_properties', {
+    script: ExtendScriptSnippets.setLayerOpacity(60, newLayerId),
+    layerId: newLayerId,
+    opacity: 60,
+  });
+
+  // Snapshot layers via backend A (ground truth) to check WHERE the mask landed.
+  const finalLayers = await runCmd('get_layers', {
+    script: ExtendScriptSnippets.getLayerNames(),
+  });
+
+  // Contract: the layer named 'parity-dupe' must be the one carrying hasMask.
+  let contract = { ok: false, detail: 'no get_layers payload' };
+  const parsed =
+    typeof finalLayers === 'string'
+      ? (() => {
+          try {
+            return new Function(`return ${finalLayers}`)();
+          } catch {
+            return null;
+          }
+        })()
+      : finalLayers;
+  const layers = (parsed as { layers?: Array<{ name?: string; hasMask?: boolean }> })?.layers;
+  if (Array.isArray(layers)) {
+    const dupe = layers.find((l) => l.name === 'parity-dupe');
+    const maskedNames = layers.filter((l) => l.hasMask).map((l) => l.name);
+    if (dupe?.hasMask === true && maskedNames.length === 1) {
+      contract = { ok: true, detail: `mask on 'parity-dupe' only (masked: ${maskedNames.join(',')})` };
+    } else {
+      contract = {
+        ok: false,
+        detail: `expected hasMask only on 'parity-dupe'; masked layers = [${maskedNames.join(', ')}], dupe.hasMask=${String(
+          dupe?.hasMask
+        )}`,
+      };
+    }
+  }
+  log(`   ${label} target-identity contract: ${contract.ok ? 'HELD' : 'FAILED'} — ${contract.detail}`);
+
+  return { label, duplicate, select, mask, setProps, newLayerId, finalLayers, contract };
+}
+
 async function main(): Promise<void> {
   const connection = new PhotoshopConnection();
   const backendA = new ExtendScriptTransport(connection);
@@ -214,10 +336,72 @@ async function main(): Promise<void> {
       );
     }
   } finally {
-    log('Closing fixture document (no save)…');
+    log('Closing read-only fixture document (no save)…');
     await backendA
       .run({ name: 'close_document', params: { script: ExtendScriptSnippets.closeDocument(false) } })
       .catch((err) => log(`WARN: close failed: ${String(err)}`));
+  }
+
+  // --- §6.8 mutating-family parity (opt-in via --mutate) ---
+  const mutationResults: Array<Awaited<ReturnType<typeof runMutationChain>>> = [];
+  if (RUN_MUTATIONS) {
+    log('=== Mutating-family parity phase (§6.8 target identity) ===');
+
+    // Backend A chain on its own fresh fixture.
+    const runA = (name: string, params: Record<string, unknown>) =>
+      backendA.run({ name, params, timeoutMs: 30_000 });
+    const buildAFixture = async () => {
+      log('Building backend-A mutation fixture…');
+      await runA('new_document', { script: ExtendScriptSnippets.newDocument(1024, 768) });
+      await runA('new_layer', { script: ExtendScriptSnippets.newLayer('parity-src') });
+      await runA('fill_layer', { script: ExtendScriptSnippets.fillLayer(64, 128, 200) });
+    };
+    try {
+      mutationResults.push(await runMutationChain('A(extendscript)', runA, buildAFixture));
+    } catch (err) {
+      log(`MUTATION A ERROR — ${String(err)}`);
+    } finally {
+      await backendA
+        .run({ name: 'close_document', params: { script: ExtendScriptSnippets.closeDocument(false) } })
+        .catch(() => undefined);
+    }
+
+    // Backend B chain on its own fresh fixture. The fixture itself is still built
+    // with backend A (open/new/fill are ExtendScript-pinned), but the four §6.8
+    // commands run through UxpTransport — the mixed-backend reality of §8, safe here
+    // because both channels drive the one PS instance serially.
+    const runB = (name: string, params: Record<string, unknown>) => {
+      // The four mutating commands + the get_layers snapshot go to backend B where
+      // ported; setup/selection/close stay on backend A (unpinned-but-unported →
+      // fall back). Route by whether B advertises the command.
+      const bServes = [
+        'duplicate_layer',
+        'select_layer',
+        'create_layer_mask',
+        'set_layer_properties',
+        'get_layers',
+      ].includes(name);
+      return bServes
+        ? backendB.run({ name, params, timeoutMs: 30_000 })
+        : backendA.run({ name, params, timeoutMs: 30_000 });
+    };
+    const buildBFixture = async () => {
+      log('Building backend-B mutation fixture…');
+      await backendA.run({ name: 'new_document', params: { script: ExtendScriptSnippets.newDocument(1024, 768) } });
+      await backendA.run({ name: 'new_layer', params: { script: ExtendScriptSnippets.newLayer('parity-src') } });
+      await backendA.run({ name: 'fill_layer', params: { script: ExtendScriptSnippets.fillLayer(64, 128, 200) } });
+    };
+    try {
+      mutationResults.push(await runMutationChain('B(uxp)', runB, buildBFixture));
+    } catch (err) {
+      log(`MUTATION B ERROR — ${String(err)}`);
+    } finally {
+      await backendA
+        .run({ name: 'close_document', params: { script: ExtendScriptSnippets.closeDocument(false) } })
+        .catch(() => undefined);
+    }
+  } else {
+    log('Mutating-family phase skipped (pass --mutate to run it).');
   }
 
   mkdirSync(dirname(REPORT_PATH), { recursive: true });
@@ -229,6 +413,7 @@ async function main(): Promise<void> {
         fixture: FIXTURE_NAME,
         photoshop: await backendA.getVersion().catch(() => 'unknown'),
         results,
+        mutationResults,
       },
       null,
       2
@@ -237,11 +422,26 @@ async function main(): Promise<void> {
   log(`Report written: ${REPORT_PATH}`);
 
   const dirty = results.filter((r) => !r.clean);
-  if (dirty.length === 0) {
-    log(`PARITY CLEAN — ${results.length}/${results.length} commands identical across backends.`);
+  // A mutating result is "dirty" if the target-identity contract failed OR the
+  // read-back layerId was not a number on either backend.
+  const mutationDirty = mutationResults.filter(
+    (m) => !m.contract.ok || typeof m.newLayerId !== 'number'
+  );
+  const allClean = dirty.length === 0 && mutationDirty.length === 0;
+
+  if (allClean) {
+    log(
+      `PARITY CLEAN — read-only ${results.length}/${results.length} identical` +
+        (RUN_MUTATIONS ? `; mutating ${mutationResults.length}/${mutationResults.length} contract held` : '')
+    );
     process.exit(0);
   }
-  log(`PARITY DIRTY — ${dirty.length}/${results.length} commands differ: ${dirty.map((d) => d.command).join(', ')}`);
+  if (dirty.length > 0) {
+    log(`READ-ONLY DIRTY — ${dirty.length}/${results.length} differ: ${dirty.map((d) => d.command).join(', ')}`);
+  }
+  if (mutationDirty.length > 0) {
+    log(`MUTATING DIRTY — ${mutationDirty.map((m) => m.label).join(', ')} failed the target-identity contract`);
+  }
   process.exit(1);
 }
 
