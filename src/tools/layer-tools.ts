@@ -1,6 +1,7 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
+import { layerIdFrom } from './atomic-shared.js';
 
 export function createLayerTools(transport: TransportRouter): ToolDefinition[] {
   return [
@@ -142,6 +143,11 @@ export function createLayerTools(transport: TransportRouter): ToolDefinition[] {
             name: {
               type: 'string',
               description: 'Exact layer name (case-sensitive)',
+            },
+            layerId: {
+              type: 'number',
+              description:
+                'Optional native layer id to select instead of searching by name (from a prior tool result, e.g. duplicate_layer). When set, name is ignored.',
             },
           },
           required: ['name'],
@@ -310,16 +316,23 @@ async function selectLayerByName(
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const name = args.name as string;
+  const layerId = typeof args.layerId === 'number' ? args.layerId : undefined;
 
   try {
-    const script = ExtendScriptSnippets.selectLayerByName(name);
-    const result = await transport.runScript(script);
+    const result = await transport.run({
+      name: 'select_layer',
+      params: {
+        script: ExtendScriptSnippets.selectLayerByName(name, layerId),
+        layerId,
+      },
+    });
+    const affectedId = layerIdFrom(result);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Layer selected:\n${JSON.stringify(result, null, 2)}`,
+          text: `Layer selected${affectedId !== undefined ? ` (layerId ${affectedId})` : ''}:\n${JSON.stringify(result, null, 2)}`,
         },
       ],
     };

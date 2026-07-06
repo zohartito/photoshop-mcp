@@ -51,10 +51,14 @@ const COMMAND_REGISTRY: Record<string, CommandMeta> = {
   get_layers: {},
 
   // §6.8 target-identity metadata for the layer family. These carry descriptor
-  // builders in ../transport/uxp-commands/descriptors.ts and accept an optional
-  // layerId (resolved per backend) / return the affected layerId. The metadata is
-  // the machine-checkable source of truth the router, batch mode, and docs share
-  // (§6.1). Not pinned — auto-routable once the mutating-family port is verified.
+  // builders in ../transport/uxp-commands/descriptors.ts, accept an optional layerId
+  // (resolved per backend) and return the affected layerId. The metadata is the
+  // machine-checkable source of truth the router, batch mode, and docs share (§6.1).
+  // Now WIRED on both backends (§14): the tool handlers call run() with these names,
+  // backend A carries the ExtendScript snippet in params.script (unchanged default
+  // path), and UxpTransport.run() builds descriptors keyed on the name. Not pinned —
+  // auto stays on ExtendScript until the returned layerID is live-verified on a
+  // plugin-connected session (scripts/parity-uxp.ts --mutate).
   duplicate_layer: { mutatesActiveLayer: true },
   select_layer: { mutatesActiveLayer: true },
   create_layer_mask: { requiresSelection: true, requiresNonBackgroundLayer: true },

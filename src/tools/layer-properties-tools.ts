@@ -1,6 +1,7 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
+import { layerIdFrom } from './atomic-shared.js';
 
 export function createLayerPropertiesTools(transport: TransportRouter): ToolDefinition[] {
   return [
@@ -28,6 +29,11 @@ export function createLayerPropertiesTools(transport: TransportRouter): ToolDefi
               minimum: 0,
               maximum: 100,
             },
+            layerId: {
+              type: 'number',
+              description:
+                'Optional native layer id to target instead of the active layer (from a prior tool result). Prevents editing the wrong layer after duplicate/select.',
+            },
           },
           required: ['opacity'],
         },
@@ -41,6 +47,11 @@ export function createLayerPropertiesTools(transport: TransportRouter): ToolDefi
         inputSchema: {
           type: 'object',
           properties: {
+            layerId: {
+              type: 'number',
+              description:
+                'Optional native layer id to target instead of the active layer (from a prior tool result).',
+            },
             blendMode: {
               type: 'string',
               description: 'Blend mode name',
@@ -134,13 +145,19 @@ export function createLayerPropertiesTools(transport: TransportRouter): ToolDefi
     {
       tool: {
         name: 'photoshop_duplicate_layer',
-        description: 'Duplicate the active layer',
+        description:
+          'Duplicate the active layer (or the layer given by layerId). Returns the new layer id.',
         inputSchema: {
           type: 'object',
           properties: {
             newName: {
               type: 'string',
               description: 'Name for the duplicated layer (optional)',
+            },
+            layerId: {
+              type: 'number',
+              description:
+                'Optional native layer id to duplicate instead of the active layer (from a prior tool result).',
             },
           },
         },
@@ -177,16 +194,24 @@ async function setLayerOpacity(
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const opacity = args.opacity as number;
+  const layerId = typeof args.layerId === 'number' ? args.layerId : undefined;
 
   try {
-    const script = ExtendScriptSnippets.setLayerOpacity(opacity);
-    await transport.runScript(script);
+    const result = await transport.run({
+      name: 'set_layer_properties',
+      params: {
+        script: ExtendScriptSnippets.setLayerOpacity(opacity, layerId),
+        layerId,
+        opacity,
+      },
+    });
+    const affectedId = layerIdFrom(result);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Layer opacity set to ${opacity}%`,
+          text: `Layer opacity set to ${opacity}%${affectedId !== undefined ? ` (layerId ${affectedId})` : ''}`,
         },
       ],
     };
@@ -208,16 +233,24 @@ async function setLayerBlendMode(
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const blendMode = args.blendMode as string;
+  const layerId = typeof args.layerId === 'number' ? args.layerId : undefined;
 
   try {
-    const script = ExtendScriptSnippets.setLayerBlendMode(blendMode);
-    await transport.runScript(script);
+    const result = await transport.run({
+      name: 'set_layer_properties',
+      params: {
+        script: ExtendScriptSnippets.setLayerBlendMode(blendMode, layerId),
+        layerId,
+        blendMode,
+      },
+    });
+    const affectedId = layerIdFrom(result);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Layer blend mode set to ${blendMode}`,
+          text: `Layer blend mode set to ${blendMode}${affectedId !== undefined ? ` (layerId ${affectedId})` : ''}`,
         },
       ],
     };
@@ -332,16 +365,30 @@ async function duplicateLayer(
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const newName = args.newName as string | undefined;
+  const layerId = typeof args.layerId === 'number' ? args.layerId : undefined;
 
   try {
-    const script = ExtendScriptSnippets.duplicateLayer(newName);
-    const result = await transport.runScript(script);
+    const result = await transport.run({
+      name: 'duplicate_layer',
+      params: {
+        script: ExtendScriptSnippets.duplicateLayer(newName, layerId),
+        layerId,
+        newName,
+      },
+    });
+    // §6.8: the new layer's id is the affected-id the contract requires — surface
+    // it at the top level so a follow-up mask/select can bind to the copy.
+    const newLayerId = layerIdFrom(result);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: JSON.stringify({ ok: true, summary: `Layer duplicated`, details: result }, null, 2),
+          text: JSON.stringify(
+            { ok: true, summary: `Layer duplicated`, layerId: newLayerId, details: result },
+            null,
+            2
+          ),
         },
       ],
     };
