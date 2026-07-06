@@ -1141,6 +1141,9 @@ function __mcp_transformCorners(tl, tr, br, bl) {
  * (the event has a single 'skew' key) — callers needing 2D skew use __mcp_skew (corner quad).
  */
 function __mcp_affineTransform(scaleX, scaleY, angle, skewH, offsetX, offsetY) {
+  if (app.activeDocument.activeLayer.isBackgroundLayer) {
+    throw new Error('Cannot transform the background layer. Duplicate it or convert it to a normal layer first.');
+  }
   var d = new ActionDescriptor();
   var ref = new ActionReference();
   ref.putEnumerated(__mcp_s2t('layer'), __mcp_s2t('ordinal'), __mcp_s2t('targetEnum'));
@@ -1243,13 +1246,25 @@ function __mcp_warp(style, bend, hDistort, vDistort, orientation) {
 }
 
 /**
- * Free transform: scale (percent), rotate (degrees), horizontal skew (degrees), anchored
- * at center, in one call. Uses the reliable affine 'transform' keys. If a vertical skew is
- * also requested, it is applied as a second corner-quad skew pass (still inside the same
- * one-undo suspendHistory scope).
+ * Free transform: scale (percent), rotate (degrees), skew (degrees), anchored at center,
+ * in one call. Scale and rotation use the reliable DOM methods (layer.resize / layer.rotate,
+ * the same primitives scale_layer / rotate_layer use); skew has no DOM method and falls back
+ * to the affine 'transform' event. Background layers cannot be transformed.
  */
 function __mcp_freeTransform(scaleX, scaleY, angle, skewH, skewV) {
-  __mcp_affineTransform(scaleX, scaleY, angle, skewH, 0, 0);
+  var layer = app.activeDocument.activeLayer;
+  if (layer.isBackgroundLayer) {
+    throw new Error('Cannot transform the background layer. Duplicate it or convert it to a normal layer first.');
+  }
+  if (scaleX !== 100 || scaleY !== 100) {
+    layer.resize(scaleX, scaleY, AnchorPosition.MIDDLECENTER);
+  }
+  if (angle !== 0) {
+    layer.rotate(angle, AnchorPosition.MIDDLECENTER);
+  }
+  if (skewH !== 0) {
+    __mcp_affineTransform(100, 100, 0, skewH, 0, 0);
+  }
   if (skewV !== 0) {
     __mcp_skew(0, skewV);
   }
