@@ -23,6 +23,7 @@ import { createLayerPropertiesTools } from '../tools/layer-properties-tools.js';
 import { createFilterTools } from '../tools/filter-tools.js';
 import { createAdjustmentTools } from '../tools/adjustment-tools.js';
 import { createTextTools } from '../tools/text-tools.js';
+import { createLayerStyleTools } from '../tools/layer-style-tools.js';
 import { createSelectionTools } from '../tools/selection-tools.js';
 import { createMaskTools } from '../tools/mask-tools.js';
 import { createActionTools } from '../tools/action-tools.js';
@@ -130,6 +131,7 @@ export class PhotoshopMCPServer {
     this.registerToolDefinitions(createFilterTools(transport));
     this.registerToolDefinitions(createAdjustmentTools(transport));
     this.registerToolDefinitions(createTextTools(transport));
+    this.registerToolDefinitions(createLayerStyleTools(transport));
     this.registerToolDefinitions(createSelectionTools(transport));
     this.registerToolDefinitions(createMaskTools(transport));
     this.registerToolDefinitions(createActionTools(transport));

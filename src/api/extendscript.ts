@@ -248,6 +248,334 @@ function __mcp_gradientFillLayerMask(fromXPx, fromYPx, toXPx, toYPx, reverseGrad
 }
 `;
 
+/**
+ * Layer-style / FX (layer effects) helpers.
+ *
+ * Applies Photoshop layer effects (drop shadow, stroke, outer glow, color overlay,
+ * inner shadow, bevel/emboss, gradient overlay) to the active layer by building a
+ * `layerEffects` ActionDescriptor and running executeAction(sTID('set'), ...).
+ *
+ * Descriptor key structure and enum names are cribbed from the UXP batchPlay
+ * reference (~/adb-mcp/uxp/ps/commands/layer_styles.js) — batchPlay JSON descriptors
+ * translate 1:1 into these ActionDescriptor calls.
+ *
+ * MERGE BEHAVIOUR: __mcp_readLayerEffectsDesc() reads the layer's existing
+ * `layerEffects` descriptor (via getd on the Lefx property) and mutates it in place,
+ * so adding one effect preserves any effects already present (e.g. add_stroke after
+ * add_drop_shadow keeps both). Re-applying the same effect type replaces just that
+ * sub-effect.
+ *
+ * RGBColor QUIRK: the Action Manager RGBColor object uses the key `grain` for the
+ * GREEN channel (not `green`) — this matches the batchPlay reference and is required
+ * for the color to read correctly.
+ *
+ * Uses sTID/cTID which are provided by RECIPE_ACTION_HELPERS (the suspendHistory wrap).
+ * @see https://community.adobe.com/t5/photoshop-ecosystem-discussions/scripting-layer-styles/td-p/10730575
+ */
+export const MCP_LAYER_STYLE_HELPERS = `
+/** Map a friendly blend-mode name to its Action Manager blendMode enum string. */
+function __mcp_blendModeStr(name) {
+  var map = {
+    NORMAL: 'normal', DISSOLVE: 'dissolve', DARKEN: 'darken', MULTIPLY: 'multiply',
+    COLORBURN: 'colorBurn', LINEARBURN: 'linearBurn', DARKERCOLOR: 'darkerColor',
+    LIGHTEN: 'lighten', SCREEN: 'screen', COLORDODGE: 'colorDodge',
+    LINEARDODGE: 'linearDodge', LIGHTERCOLOR: 'lighterColor', OVERLAY: 'overlay',
+    SOFTLIGHT: 'softLight', HARDLIGHT: 'hardLight', VIVIDLIGHT: 'vividLight',
+    LINEARLIGHT: 'linearLight', PINLIGHT: 'pinLight', HARDMIX: 'hardMix',
+    DIFFERENCE: 'difference', EXCLUSION: 'exclusion', SUBTRACT: 'blendSubtraction',
+    DIVIDE: 'blendDivide', HUE: 'hue', SATURATION: 'saturation', COLOR: 'color',
+    LUMINOSITY: 'luminosity'
+  };
+  var key = String(name).toUpperCase();
+  var v = map[key];
+  if (!v) {
+    throw new Error('Unknown blend mode "' + name + '". Valid: ' + __mcp_objectKeys(map).join(', '));
+  }
+  return v;
+}
+
+function __mcp_objectKeys(obj) {
+  var out = [];
+  for (var k in obj) { if (obj.hasOwnProperty(k)) out.push(k); }
+  return out;
+}
+
+/** Throw a clear error unless the active document is in RGB color mode (layer effects require RGB). */
+function __mcp_assertRgbForEffects() {
+  var doc = app.activeDocument;
+  if (doc.mode !== DocumentMode.RGB) {
+    throw new Error(
+      'Layer effects require an RGB document. Active document mode is ' +
+      String(doc.mode) + '. Convert to RGB (Image > Mode > RGB Color) first.'
+    );
+  }
+}
+
+/** Build an RGBColor descriptor. NOTE: green channel uses key "grain" (AM quirk). */
+function __mcp_rgbColorDesc(red, green, blue) {
+  var c = new ActionDescriptor();
+  c.putDouble(sTID('red'), red);
+  c.putDouble(sTID('grain'), green);
+  c.putDouble(sTID('blue'), blue);
+  return c;
+}
+
+/** Clamp a numeric value to [min, max]. */
+function __mcp_clampNum(v, min, max) {
+  if (typeof v !== 'number' || isNaN(v)) return min;
+  return Math.max(min, Math.min(max, v));
+}
+
+/**
+ * Read the active layer's existing layerEffects descriptor so new effects merge with
+ * any already present. Returns a fresh ActionDescriptor if the layer has no effects.
+ */
+function __mcp_readLayerEffectsDesc() {
+  var ref = new ActionReference();
+  ref.putProperty(sTID('property'), sTID('layerEffects'));
+  ref.putEnumerated(sTID('layer'), sTID('ordinal'), sTID('targetEnum'));
+  var getDesc = new ActionDescriptor();
+  getDesc.putReference(sTID('null'), ref);
+  try {
+    var layerDesc = executeAction(sTID('get'), getDesc, DialogModes.NO);
+    if (layerDesc.hasKey(sTID('layerEffects'))) {
+      return layerDesc.getObjectValue(sTID('layerEffects'));
+    }
+  } catch (eRead) {
+    // No existing effects (or layer type without effects) — start fresh.
+  }
+  var fresh = new ActionDescriptor();
+  fresh.putUnitDouble(sTID('scale'), sTID('percentUnit'), 100.0);
+  return fresh;
+}
+
+/** Apply the assembled layerEffects descriptor to the active layer via set. */
+function __mcp_setLayerEffects(fxDesc) {
+  var setDesc = new ActionDescriptor();
+  var ref = new ActionReference();
+  ref.putProperty(sTID('property'), sTID('layerEffects'));
+  ref.putEnumerated(sTID('layer'), sTID('ordinal'), sTID('targetEnum'));
+  setDesc.putReference(sTID('null'), ref);
+  setDesc.putObject(sTID('to'), sTID('layerEffects'), fxDesc);
+  executeAction(sTID('set'), setDesc, DialogModes.NO);
+}
+
+/** Assert an active raster/text/smart-object layer (not a group) is selected. */
+function __mcp_assertEffectableLayer() {
+  var doc = app.activeDocument;
+  var layer = doc.activeLayer;
+  if (!layer) {
+    throw new Error('No active layer. Select a layer first.');
+  }
+  if (layer.typename === 'LayerSet') {
+    throw new Error('Layer effects cannot be applied to a layer group. Select a normal, text, or smart-object layer.');
+  }
+  return layer;
+}
+
+/** dropShadow sub-descriptor (opts: red, green, blue, opacity, angle, distance, size, spread, blendMode). */
+function __mcp_buildDropShadow(opts) {
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.blendMode)));
+  d.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.red, opts.green, opts.blue));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_clampNum(opts.opacity, 0, 100));
+  d.putUnitDouble(sTID('localLightingAngle'), sTID('angleUnit'), opts.angle);
+  d.putBoolean(sTID('useGlobalAngle'), false);
+  d.putUnitDouble(sTID('distance'), sTID('pixelsUnit'), Math.max(0, opts.distance));
+  d.putUnitDouble(sTID('chokeMatte'), sTID('percentUnit'), __mcp_clampNum(opts.spread, 0, 100));
+  d.putUnitDouble(sTID('blur'), sTID('pixelsUnit'), Math.max(0, opts.size));
+  d.putUnitDouble(sTID('noise'), sTID('percentUnit'), 0.0);
+  d.putBoolean(sTID('antiAlias'), false);
+  var transferSpec = new ActionDescriptor();
+  transferSpec.putString(sTID('name'), 'Linear');
+  d.putObject(sTID('transferSpec'), sTID('shapeCurveType'), transferSpec);
+  d.putBoolean(sTID('layerConceals'), true);
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/** innerShadow sub-descriptor (same opts shape as drop shadow). */
+function __mcp_buildInnerShadow(opts) {
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.blendMode)));
+  d.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.red, opts.green, opts.blue));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_clampNum(opts.opacity, 0, 100));
+  d.putUnitDouble(sTID('localLightingAngle'), sTID('angleUnit'), opts.angle);
+  d.putBoolean(sTID('useGlobalAngle'), false);
+  d.putUnitDouble(sTID('distance'), sTID('pixelsUnit'), Math.max(0, opts.distance));
+  d.putUnitDouble(sTID('chokeMatte'), sTID('percentUnit'), __mcp_clampNum(opts.spread, 0, 100));
+  d.putUnitDouble(sTID('blur'), sTID('pixelsUnit'), Math.max(0, opts.size));
+  d.putUnitDouble(sTID('noise'), sTID('percentUnit'), 0.0);
+  d.putBoolean(sTID('antiAlias'), false);
+  var transferSpec = new ActionDescriptor();
+  transferSpec.putString(sTID('name'), 'Linear');
+  d.putObject(sTID('transferSpec'), sTID('shapeCurveType'), transferSpec);
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/** frameFX (stroke) sub-descriptor (opts: size, position, red, green, blue, opacity, blendMode). */
+function __mcp_buildStroke(opts) {
+  var position = 'centeredFrame';
+  var p = String(opts.position || 'outside').toLowerCase();
+  if (p === 'inside') { position = 'insetFrame'; }
+  else if (p === 'outside') { position = 'outsetFrame'; }
+  else if (p === 'center') { position = 'centeredFrame'; }
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('style'), sTID('frameStyle'), sTID(position));
+  d.putEnumerated(sTID('paintType'), sTID('frameFill'), sTID('solidColor'));
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.blendMode)));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_clampNum(opts.opacity, 0, 100));
+  d.putUnitDouble(sTID('size'), sTID('pixelsUnit'), Math.max(0, opts.size));
+  d.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.red, opts.green, opts.blue));
+  d.putBoolean(sTID('overprint'), false);
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/** outerGlow sub-descriptor (opts: red, green, blue, opacity, size, spread, blendMode). */
+function __mcp_buildOuterGlow(opts) {
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.blendMode)));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_clampNum(opts.opacity, 0, 100));
+  d.putUnitDouble(sTID('noise'), sTID('percentUnit'), 0.0);
+  d.putEnumerated(sTID('glowTechnique'), sTID('matteTechnique'), sTID('softMatte'));
+  d.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.red, opts.green, opts.blue));
+  d.putUnitDouble(sTID('chokeMatte'), sTID('percentUnit'), __mcp_clampNum(opts.spread, 0, 100));
+  d.putUnitDouble(sTID('blur'), sTID('pixelsUnit'), Math.max(0, opts.size));
+  d.putUnitDouble(sTID('inputRange'), sTID('percentUnit'), 50.0);
+  d.putUnitDouble(sTID('shadingNoise'), sTID('percentUnit'), 0.0);
+  d.putBoolean(sTID('antiAlias'), false);
+  var transferSpec = new ActionDescriptor();
+  transferSpec.putString(sTID('name'), 'Linear');
+  d.putObject(sTID('transferSpec'), sTID('shapeCurveType'), transferSpec);
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/** solidFill (color overlay) sub-descriptor (opts: red, green, blue, opacity, blendMode). */
+function __mcp_buildColorOverlay(opts) {
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.blendMode)));
+  d.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.red, opts.green, opts.blue));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_clampNum(opts.opacity, 0, 100));
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/** bevelEmboss sub-descriptor (opts: style, depth, size, soften, angle, altitude, highlight/shadow color+opacity+blend). */
+function __mcp_buildBevelEmboss(opts) {
+  var styleMap = {
+    outerBevel: 'outerBevel', innerBevel: 'innerBevel', emboss: 'emboss',
+    pillowEmboss: 'pillowEmboss', strokeEmboss: 'strokeEmboss'
+  };
+  var bevelStyle = styleMap[opts.style] || 'innerBevel';
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('bevelStyle'), sTID('bevelEmbossStyle'), sTID(bevelStyle));
+  d.putEnumerated(sTID('bevelTechnique'), sTID('bevelEmbossTechnique'), sTID('softMatte'));
+  d.putUnitDouble(sTID('strengthRatio'), sTID('percentUnit'), __mcp_clampNum(opts.depth, 1, 1000));
+  d.putEnumerated(sTID('bevelDirection'), sTID('bevelEmbossStampStyle'), sTID('stampIn'));
+  d.putUnitDouble(sTID('blur'), sTID('pixelsUnit'), Math.max(0, opts.size));
+  d.putUnitDouble(sTID('softness'), sTID('pixelsUnit'), Math.max(0, opts.soften));
+  d.putBoolean(sTID('useGlobalAngle'), false);
+  d.putUnitDouble(sTID('localLightingAngle'), sTID('angleUnit'), opts.angle);
+  d.putUnitDouble(sTID('localLightingAltitude'), sTID('angleUnit'), __mcp_clampNum(opts.altitude, 0, 90));
+  var highlightTransfer = new ActionDescriptor();
+  highlightTransfer.putString(sTID('name'), 'Linear');
+  d.putObject(sTID('transferSpec'), sTID('shapeCurveType'), highlightTransfer);
+  d.putBoolean(sTID('antiAlias'), false);
+  d.putEnumerated(sTID('highlightMode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.highlightBlendMode)));
+  d.putObject(sTID('highlightColor'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.highlightRed, opts.highlightGreen, opts.highlightBlue));
+  d.putUnitDouble(sTID('highlightOpacity'), sTID('percentUnit'), __mcp_clampNum(opts.highlightOpacity, 0, 100));
+  d.putEnumerated(sTID('shadowMode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.shadowBlendMode)));
+  d.putObject(sTID('shadowColor'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.shadowRed, opts.shadowGreen, opts.shadowBlue));
+  d.putUnitDouble(sTID('shadowOpacity'), sTID('percentUnit'), __mcp_clampNum(opts.shadowOpacity, 0, 100));
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/** Two-color gradientLayer descriptor (black->white style) for a gradient overlay. */
+function __mcp_buildGradientOverlay(opts) {
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.blendMode)));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_clampNum(opts.opacity, 0, 100));
+  var gradient = new ActionDescriptor();
+  gradient.putString(sTID('name'), 'Custom');
+  gradient.putEnumerated(sTID('gradientForm'), sTID('gradientForm'), sTID('customStops'));
+  gradient.putDouble(sTID('interfaceIconFrameDimmed'), 4096.0);
+
+  var colors = new ActionList();
+  var startStop = new ActionDescriptor();
+  startStop.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.startRed, opts.startGreen, opts.startBlue));
+  startStop.putEnumerated(sTID('type'), sTID('colorStopType'), sTID('userStop'));
+  startStop.putInteger(sTID('location'), 0);
+  startStop.putInteger(sTID('midpoint'), 50);
+  colors.putObject(sTID('colorStop'), startStop);
+  var endStop = new ActionDescriptor();
+  endStop.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.endRed, opts.endGreen, opts.endBlue));
+  endStop.putEnumerated(sTID('type'), sTID('colorStopType'), sTID('userStop'));
+  endStop.putInteger(sTID('location'), 4096);
+  endStop.putInteger(sTID('midpoint'), 50);
+  colors.putObject(sTID('colorStop'), endStop);
+  gradient.putList(sTID('colors'), colors);
+
+  var transparency = new ActionList();
+  var startOpacity = new ActionDescriptor();
+  startOpacity.putUnitDouble(sTID('opacity'), sTID('percentUnit'), 100.0);
+  startOpacity.putInteger(sTID('location'), 0);
+  startOpacity.putInteger(sTID('midpoint'), 50);
+  transparency.putObject(sTID('transferSpec'), startOpacity);
+  var endOpacity = new ActionDescriptor();
+  endOpacity.putUnitDouble(sTID('opacity'), sTID('percentUnit'), 100.0);
+  endOpacity.putInteger(sTID('location'), 4096);
+  endOpacity.putInteger(sTID('midpoint'), 50);
+  transparency.putObject(sTID('transferSpec'), endOpacity);
+  gradient.putList(sTID('transparency'), transparency);
+
+  d.putObject(sTID('gradient'), sTID('gradientClassEvent'), gradient);
+  d.putEnumerated(sTID('type'), sTID('gradientType'), sTID('linear'));
+  d.putBoolean(sTID('reverse'), false);
+  d.putBoolean(sTID('dither'), false);
+  d.putBoolean(sTID('align'), true);
+  d.putUnitDouble(sTID('angle'), sTID('angleUnit'), opts.angle);
+  d.putUnitDouble(sTID('scale'), sTID('percentUnit'), __mcp_clampNum(opts.scale, 10, 150));
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/**
+ * Apply one layer effect to the active layer, merging with existing effects.
+ * effectKey is the layerEffects sub-key (e.g. 'dropShadow', 'frameFX', 'outerGlow',
+ * 'solidFill', 'innerShadow', 'bevelEmboss', 'gradientFill'); subDesc is the built
+ * sub-descriptor. globalAngle (optional) also sets the doc's global lighting angle.
+ */
+function __mcp_applyLayerEffect(effectKey, subDesc, globalAngle) {
+  __mcp_assertRgbForEffects();
+  var layer = __mcp_assertEffectableLayer();
+  var fx = __mcp_readLayerEffectsDesc();
+  fx.putObject(sTID(effectKey), sTID(effectKey === 'frameFX' ? 'frameFX' : (effectKey === 'solidFill' ? 'solidFill' : (effectKey === 'gradientFill' ? 'gradientLayer' : effectKey))), subDesc);
+  if (typeof globalAngle === 'number') {
+    fx.putUnitDouble(sTID('globalLightingAngle'), sTID('angleUnit'), globalAngle);
+  }
+  __mcp_setLayerEffects(fx);
+  return layer.name;
+}
+`;
+
 export type CurvesPreset = 'auto_tone' | 'neutral';
 
 export type GradientMaskDirection =
