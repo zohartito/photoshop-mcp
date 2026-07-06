@@ -549,3 +549,17 @@ the one thing offline testing cannot close.
 family wired on both backends, this **closes the transport track pending the single live
 `parity:uxp --mutate` run** (plus the `test:mcp-all` regression re-confirm). No code work
 remains for the mutating family; only live confirmation.
+
+### 14.5 Codex cross-review disposition (gpt-5.5 @ xhigh, read-only)
+
+Two findings, both folded in:
+
+| Sev | Finding | Disposition |
+|---|---|---|
+| MED | UXP `select_layer` was advertised in `capabilities().commands` but throws without a `layerId` → under `PHOTOSHOP_MCP_TRANSPORT=uxp` a default by-name `photoshop_select_layer_by_name({ name })` would regress | **Fixed** — `select_layer` removed from the advertised `UXP_COMMANDS` (backend B can only select by native id; by-name needs the DOM, which the generic `batch_play` action doesn't expose). `run()` still handles the id-carrying chain case (duplicate → select-the-copy) and throws a clear message on a no-id UXP invocation. The default `auto` path is unaffected — `select_layer` is unpinned, so it routes to ExtendScript where the name walk works. |
+| LOW | UXP `duplicate` read-back assumes the `duplicate` action leaves the copy active before the appended `get layerID`; wrong id if it doesn't (esp. `_id`-targeting a non-active layer) | **Hardened** — `normalizeDuplicateLayer` now takes BOTH the appended read-back AND the `duplicate` action's own result descriptor (the adb-mcp `o[0].layerID` pattern), preferring the read-back and falling back to the action result. Still flagged for the live `--mutate` run as the definitive confirmation. |
+
+Codex found no behavior change on the default no-`layerId` ExtendScript path beyond the
+intended returned `layerId`, confirmed the `putIdentifier('Lyr ', id)` + `slct` targeting
+and the `duplicated.id` DOM read are correct, and confirmed the blend-mode inverse map has
+no token collisions.

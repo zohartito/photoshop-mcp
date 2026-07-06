@@ -56,11 +56,19 @@ import type {
 const POLL_FRESHNESS_MS = 2_000;
 
 /**
- * Commands the UXP backend serves in M3. neural_filter is the original path; the
- * three read-only commands are the first descriptor ports (§5); the mutating
- * layer-family (duplicate/select/mask/properties) is the §6.8 target-identity port
- * — descriptors + read-back are wired here, pending live verification of the
- * returned layerID on a plugin-connected session (transport-layer.md §6.8, §14).
+ * Commands the UXP backend ADVERTISES as servable (feeds capabilities().commands).
+ * neural_filter is the original path; the three read-only commands are the first
+ * descriptor ports (§5); the mutating layer-family is the §6.8 target-identity port
+ * — descriptors + read-back are wired, pending live verification of the returned
+ * layerID (transport-layer.md §6.8, §14).
+ *
+ * `select_layer` is deliberately NOT advertised here even though run() handles it:
+ * backend B can only select by native id ({ _ref:'layer', _id }); it has no generic
+ * batchPlay way to resolve the tool's default by-NAME selection (that needs the
+ * plugin's DOM, which the generic batch_play action does not expose). So UXP
+ * select_layer is only meaningful inside a layerId-carrying chain (duplicate → mask)
+ * — advertising it as a general capability would over-promise (Codex MED). run()
+ * throws loud if it is invoked without a layerId.
  */
 const UXP_COMMANDS = [
   'neural_filter',
@@ -68,7 +76,6 @@ const UXP_COMMANDS = [
   'get_layers',
   'get_document_info',
   'duplicate_layer',
-  'select_layer',
   'create_layer_mask',
   'set_layer_properties',
 ] as const;
@@ -235,12 +242,13 @@ export class UxpTransport implements PhotoshopTransport {
     newName: string | undefined,
     timeoutMs?: number
   ): Promise<unknown> {
-    const descriptors = [
-      ...duplicateLayerDescriptor(layerId, newName),
-      getActiveLayerIdDescriptor(),
-    ];
+    const dupDescriptors = duplicateLayerDescriptor(layerId, newName);
+    const descriptors = [...dupDescriptors, getActiveLayerIdDescriptor()];
     const raw = await this.runBatchPlay(descriptors, 'duplicate_layer', timeoutMs);
-    return normalizeDuplicateLayer(raw[raw.length - 1]);
+    // Last element = the appended `get` of the active layer's id (the copy, which
+    // duplicate leaves active); first element = the duplicate action's own result
+    // (adb-mcp reads `o[0].layerID`). Pass both so the normalizer can fall back.
+    return normalizeDuplicateLayer(raw[raw.length - 1], raw[dupDescriptors.length - 1]);
   }
 
   private async selectLayer(
@@ -248,7 +256,12 @@ export class UxpTransport implements PhotoshopTransport {
     timeoutMs?: number
   ): Promise<unknown> {
     if (typeof layerId !== 'number') {
-      throw new Error('select_layer via UXP requires a layerId (name lookup is backend-A only)');
+      // By-name selection is backend-A only (needs the DOM layer walk); backend B
+      // selects strictly by native id. Under PHOTOSHOP_MCP_TRANSPORT=uxp a no-id
+      // name-select cannot be served — fail loud rather than select the wrong layer.
+      throw new Error(
+        'select_layer via UXP requires a layerId; by-name selection is only available on the ExtendScript backend'
+      );
     }
     const descriptors = [...selectLayerByIdDescriptor(layerId), getActiveLayerIdDescriptor()];
     const raw = await this.runBatchPlay(descriptors, 'select_layer', timeoutMs);

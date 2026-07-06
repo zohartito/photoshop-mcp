@@ -295,16 +295,31 @@ export function layerIdFromDescriptor(desc: Descriptor | null | undefined): numb
 }
 
 /**
- * duplicate_layer twin: the `duplicate` result carries the NEW layer's `layerID`.
- * Mirrors the ExtendScript snippet's `{ layerId, newName, originalName,
- * originalLayerId }` — the id is the affected-id the contract requires.
+ * duplicate_layer twin: report the NEW copy's `layerID`. Mirrors the ExtendScript
+ * snippet's `{ layerId, newName }`.
+ *
+ * Two candidate reads (either can be the source of truth depending on the live
+ * batchPlay result shape — resolved by the §6.8 live run): `readBackDesc` is the
+ * appended `get` of the active layer's layerID (a `duplicate` leaves the copy
+ * active), and `duplicateResultDesc` is the `duplicate` action's own result, which
+ * the adb-mcp reference reads as `o[0].layerID`. Prefer the read-back, fall back to
+ * the action result, so a wrong active-layer assumption on one build still yields a
+ * usable id.
  */
 export function normalizeDuplicateLayer(
-  resultDesc: Descriptor | null | undefined
+  readBackDesc: Descriptor | null | undefined,
+  duplicateResultDesc?: Descriptor | null | undefined
 ): { layerId: number | undefined; newName: unknown } {
+  const layerId = layerIdFromDescriptor(readBackDesc) ?? layerIdFromDescriptor(duplicateResultDesc);
+  const nameSource =
+    readBackDesc && typeof readBackDesc.name === 'string'
+      ? readBackDesc
+      : duplicateResultDesc && typeof duplicateResultDesc.name === 'string'
+        ? duplicateResultDesc
+        : undefined;
   return {
-    layerId: layerIdFromDescriptor(resultDesc),
-    newName: resultDesc && typeof resultDesc.name === 'string' ? resultDesc.name : undefined,
+    layerId,
+    newName: nameSource ? (nameSource.name as string) : undefined,
   };
 }
 

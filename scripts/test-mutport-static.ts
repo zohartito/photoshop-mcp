@@ -224,6 +224,10 @@ check('UXP mutating normalizers surface the SAME top-level layerId as backend A'
   const dup = normalizeDuplicateLayer({ layerID: 900, name: 'copy' });
   assert.equal(layerIdFrom(dup), 900);
   assert.equal(dup.newName, 'copy');
+  // Fallback: read-back missing the id → use the duplicate action's own result.
+  const dupFallback = normalizeDuplicateLayer({}, { layerID: 901, name: 'copy2' });
+  assert.equal(layerIdFrom(dupFallback), 901);
+  assert.equal(dupFallback.newName, 'copy2');
 
   const sel = normalizeSelectLayer({ layerID: 901, name: 'L' });
   assert.equal(layerIdFrom(sel), 901);
