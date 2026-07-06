@@ -74,7 +74,10 @@ export function createStateTools(transport: TransportRouter): ToolDefinition[] {
 
 async function getState(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const raw = await runScript(transport, ExtendScriptSnippets.getState());
+    const raw = await transport.run({
+      name: 'get_state',
+      params: { script: ExtendScriptSnippets.getState() },
+    });
     const result = parseExtendScriptPayload(raw);
     return {
       content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],

@@ -157,8 +157,10 @@ async function createDocument(
 
 async function getDocumentInfo(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const script = ExtendScriptSnippets.getDocumentInfo();
-    const result = await transport.runScript(script);
+    const result = await transport.run({
+      name: 'get_document_info',
+      params: { script: ExtendScriptSnippets.getDocumentInfo() },
+    });
 
     return {
       content: [

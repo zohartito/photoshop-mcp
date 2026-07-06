@@ -279,8 +279,10 @@ async function fillLayer(
 
 async function getLayers(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const script = ExtendScriptSnippets.getLayerNames();
-    const result = await transport.runScript(script);
+    const result = await transport.run({
+      name: 'get_layers',
+      params: { script: ExtendScriptSnippets.getLayerNames() },
+    });
 
     return {
       content: [

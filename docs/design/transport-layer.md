@@ -393,6 +393,27 @@ the positive `hasMask` and `hasSelection` cases and exact pixel bounds. Report:
   round-trip once the plugin passes `continueOnError`).
 
 **M3 read-only port is complete and live-verified.** Remaining to close M3 per §5:
-flip the trio's tool handlers from `runScript()` to `router.run()` (now unblocked),
-then the mutating-family port (§6.8 descriptors already staged) using the same
-harness pattern extended with mutation fixtures.
+~~flip the trio's tool handlers from `runScript()` to `router.run()` (now unblocked)~~
+**DONE** (see §13), then the mutating-family port (§6.8 descriptors already staged)
+using the same harness pattern extended with mutation fixtures.
+
+## 13. Read-only handler flip (M3 close-out)
+
+The `get_state`, `get_document_info`, and `get_layers` tool handlers now call
+`transport.run({ name, params: { script } })` instead of `transport.runScript(script)`.
+The command **name** routes through `COMMAND_REGISTRY` (all three unpinned → `auto`);
+`params.script` carries the ExtendScript snippet for backend A, and the UXP switch keys
+on the name for backend B. This is the exact `PsCommand` shape the parity harness proved
+3/3 clean (§12), and it makes `PHOTOSHOP_MCP_TRANSPORT=uxp` route these three tools
+through the batchPlay bridge end-to-end.
+
+- **Default path unchanged:** in `auto`, ExtendScript is always available, so `run()`
+  funnels into the same `PhotoshopAPIFactory…executeScript` call the old `runScript` used;
+  `parseExtendScriptPayload` is idempotent on the already-normalized UXP object, so neither
+  path double-processes.
+- **Gate (this change):** `build:server` strict clean; `scripts/test-all-mcp-tools.ts`
+  reproduces the baseline **118 pass / 2 fail / 11 skip** exactly (the 2 fails are the
+  pre-existing synthetic-canvas recipes). The three flipped tools passed live on PS 27.8.0.
+- **Next:** mutating-family port (§6.8) — route `duplicate_layer` / `select_layer` /
+  `create_layer_mask` / `set_layer_properties` through `run()` with the layerID read-back,
+  verified by the parity harness extended with mutation fixtures.
