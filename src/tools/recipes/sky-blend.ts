@@ -1,7 +1,7 @@
 import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
 import { ExtendScriptSnippets } from '../../api/extendscript.js';
 import { getPhotoshopCapabilities } from '../../platform/capabilities.js';
-import { PhotoshopConnection } from '../../platform/connection.js';
+import type { TransportRouter } from '../../transport/index.js';
 import {
   parseGenerativeResult,
   runGenerativeSnippet,
@@ -16,7 +16,7 @@ import {
 
 const TOOL_NAME = 'photoshop_recipe_sky_blend';
 
-export function bindSkyBlend(connection: PhotoshopConnection): ToolDefinition {
+export function bindSkyBlend(transport: TransportRouter): ToolDefinition {
   return {
     tool: {
       name: TOOL_NAME,
@@ -73,12 +73,12 @@ export function bindSkyBlend(connection: PhotoshopConnection): ToolDefinition {
         required: ['sky_image_path'],
       },
     },
-    handler: async (args) => runSkyBlend(connection, args),
+    handler: async (args) => runSkyBlend(transport, args),
   };
 }
 
 async function runSkyBlend(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const skyPath = typeof args.sky_image_path === 'string' ? args.sky_image_path.trim() : '';
@@ -90,13 +90,13 @@ async function runSkyBlend(
     });
   }
 
-  const version = await connection.getVersion();
+  const version = await transport.getVersion();
   const caps = getPhotoshopCapabilities(version);
   const tryNative = args.use_native_sky !== false && caps.features.sky_replacement_native;
 
   if (tryNative) {
     const raw = await runGenerativeSnippet(
-      connection,
+      transport,
       ExtendScriptSnippets.skyReplacement(skyPath)
     );
     const nativeResult = parseGenerativeResult(raw);
@@ -203,5 +203,5 @@ async function runSkyBlend(
     };
   `;
 
-  return executeRecipe(connection, 'Sky Blend', body);
+  return executeRecipe(transport, 'Sky Blend', body);
 }

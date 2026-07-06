@@ -1,17 +1,17 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 import { PhotoshopDetector } from '../platform/detector.js';
 import {
   atomicFailure,
   atomicFailureFromError,
   atomicSuccess,
+  layerIdFrom,
   parseSnippetResult,
   runSnippet,
 } from './atomic-shared.js';
 
-export function createSelectionTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createSelectionTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -45,7 +45,7 @@ export function createSelectionTools(connection: PhotoshopConnection): ToolDefin
           required: ['left', 'top', 'right', 'bottom'],
         },
       },
-      handler: async (args) => selectRectangle(connection, args),
+      handler: async (args) => selectRectangle(transport, args),
     },
     {
       tool: {
@@ -56,7 +56,7 @@ export function createSelectionTools(connection: PhotoshopConnection): ToolDefin
           properties: {},
         },
       },
-      handler: async () => selectAll(connection),
+      handler: async () => selectAll(transport),
     },
     {
       tool: {
@@ -67,7 +67,7 @@ export function createSelectionTools(connection: PhotoshopConnection): ToolDefin
           properties: {},
         },
       },
-      handler: async () => deselect(connection),
+      handler: async () => deselect(transport),
     },
     {
       tool: {
@@ -78,24 +78,30 @@ export function createSelectionTools(connection: PhotoshopConnection): ToolDefin
           properties: {},
         },
       },
-      handler: async () => invertSelection(connection),
+      handler: async () => invertSelection(transport),
     },
     {
       tool: {
         name: 'photoshop_create_layer_mask',
         description:
-          'Create a layer mask on the active layer from the current selection (reveal selection).\n\n' +
+          'Create a layer mask on the active layer (or the layer given by layerId) from the current selection (reveal selection).\n\n' +
           'Users often say: mask this, hide the background, non-destructive cutout (after selection).\n\n' +
           'Use when: non-destructive hide/show after a selection exists.\n' +
           'Do NOT use when: no selection exists — create selection first or use remove_background recipe.\n\n' +
-          'Returns: maskCreated confirmation.\n' +
-          'Preconditions: active document and active selection. Side effects: adds mask to active layer.',
+          'Returns: maskCreated confirmation and the masked layerId.\n' +
+          'Preconditions: active document and active selection. Side effects: adds mask to the targeted layer.',
         inputSchema: {
           type: 'object',
-          properties: {},
+          properties: {
+            layerId: {
+              type: 'number',
+              description:
+                'Optional native layer id to mask instead of the active layer (from a prior tool result, e.g. duplicate_layer). Prevents masking the wrong layer.',
+            },
+          },
         },
       },
-      handler: async () => createLayerMask(connection),
+      handler: async (args) => createLayerMask(transport, args),
     },
     {
       tool: {
@@ -106,7 +112,7 @@ export function createSelectionTools(connection: PhotoshopConnection): ToolDefin
           properties: {},
         },
       },
-      handler: async () => deleteLayerMask(connection),
+      handler: async () => deleteLayerMask(transport),
     },
     {
       tool: {
@@ -117,7 +123,7 @@ export function createSelectionTools(connection: PhotoshopConnection): ToolDefin
           properties: {},
         },
       },
-      handler: async () => applyLayerMask(connection),
+      handler: async () => applyLayerMask(transport),
     },
     {
       tool: {
@@ -141,7 +147,7 @@ export function createSelectionTools(connection: PhotoshopConnection): ToolDefin
           },
         },
       },
-      handler: async (args) => selectSubject(connection, args),
+      handler: async (args) => selectSubject(transport, args),
     },
     {
       tool: {
@@ -160,13 +166,13 @@ export function createSelectionTools(connection: PhotoshopConnection): ToolDefin
           properties: {},
         },
       },
-      handler: async () => contentAwareFill(connection),
+      handler: async () => contentAwareFill(transport),
     },
   ];
 }
 
 async function selectRectangle(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const left = args.left as number;
@@ -175,11 +181,8 @@ async function selectRectangle(
   const bottom = args.bottom as number;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.selectRectangle(left, top, right, bottom);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -202,13 +205,10 @@ async function selectRectangle(
   }
 }
 
-async function selectAll(connection: PhotoshopConnection): Promise<ToolResult> {
+async function selectAll(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.selectAll();
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -231,13 +231,10 @@ async function selectAll(connection: PhotoshopConnection): Promise<ToolResult> {
   }
 }
 
-async function deselect(connection: PhotoshopConnection): Promise<ToolResult> {
+async function deselect(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.deselect();
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -260,13 +257,10 @@ async function deselect(connection: PhotoshopConnection): Promise<ToolResult> {
   }
 }
 
-async function invertSelection(connection: PhotoshopConnection): Promise<ToolResult> {
+async function invertSelection(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.invertSelection();
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -289,19 +283,27 @@ async function invertSelection(connection: PhotoshopConnection): Promise<ToolRes
   }
 }
 
-async function createLayerMask(connection: PhotoshopConnection): Promise<ToolResult> {
-  try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
+async function createLayerMask(
+  transport: TransportRouter,
+  args: Record<string, unknown> = {}
+): Promise<ToolResult> {
+  const layerId = typeof args.layerId === 'number' ? args.layerId : undefined;
 
-    const script = ExtendScriptSnippets.createLayerMask();
-    await api.executeScript(script);
+  try {
+    const result = await transport.run({
+      name: 'create_layer_mask',
+      params: {
+        script: ExtendScriptSnippets.createLayerMask(layerId),
+        layerId,
+      },
+    });
+    const maskedId = layerIdFrom(result);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: 'Layer mask created from selection',
+          text: `Layer mask created from selection${maskedId !== undefined ? ` (layerId ${maskedId})` : ''}`,
         },
       ],
     };
@@ -318,13 +320,10 @@ async function createLayerMask(connection: PhotoshopConnection): Promise<ToolRes
   }
 }
 
-async function deleteLayerMask(connection: PhotoshopConnection): Promise<ToolResult> {
+async function deleteLayerMask(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.deleteLayerMask();
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -347,13 +346,10 @@ async function deleteLayerMask(connection: PhotoshopConnection): Promise<ToolRes
   }
 }
 
-async function applyLayerMask(connection: PhotoshopConnection): Promise<ToolResult> {
+async function applyLayerMask(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.applyLayerMask();
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -377,13 +373,13 @@ async function applyLayerMask(connection: PhotoshopConnection): Promise<ToolResu
 }
 
 async function selectSubject(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const sampleAllLayers = args.sample_all_layers === true;
 
-  await connection.ping().catch(() => undefined);
-  const info = connection.getPhotoshopInfo();
+  await transport.ping().catch(() => undefined);
+  const info = transport.getPhotoshopInfo();
   if (info) {
     const detector = new PhotoshopDetector();
     if (!detector.supportsSelectSubjectV2(info.version)) {
@@ -397,7 +393,7 @@ async function selectSubject(
   }
 
   try {
-    const raw = await runSnippet(connection, ExtendScriptSnippets.selectSubject(sampleAllLayers));
+    const raw = await runSnippet(transport, ExtendScriptSnippets.selectSubject(sampleAllLayers));
     const parsed = parseSnippetResult(raw);
     if (!parsed) {
       return atomicFailureFromError(new Error(`Snippet returned unparseable payload: ${String(raw)}`));
@@ -410,9 +406,9 @@ async function selectSubject(
   }
 }
 
-async function contentAwareFill(connection: PhotoshopConnection): Promise<ToolResult> {
+async function contentAwareFill(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const raw = await runSnippet(connection, ExtendScriptSnippets.contentAwareFill());
+    const raw = await runSnippet(transport, ExtendScriptSnippets.contentAwareFill());
     const parsed = parseSnippetResult(raw);
     if (!parsed) {
       return atomicFailureFromError(new Error(`Snippet returned unparseable payload: ${String(raw)}`));

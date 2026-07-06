@@ -1,6 +1,6 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { ExtendScriptSnippets, type GradientMaskDirection } from '../api/extendscript.js';
-import { PhotoshopConnection } from '../platform/connection.js';
+import type { TransportRouter } from '../transport/index.js';
 import { clampInt } from './recipes/_shared.js';
 import {
   atomicFailureFromError,
@@ -23,7 +23,7 @@ function parseGradientDirection(value: unknown): GradientMaskDirection {
   return 'bottom_to_top';
 }
 
-export function createMaskTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createMaskTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -67,13 +67,13 @@ export function createMaskTools(connection: PhotoshopConnection): ToolDefinition
           },
         },
       },
-      handler: async (args) => applyGradientMask(connection, args),
+      handler: async (args) => applyGradientMask(transport, args),
     },
   ];
 }
 
 async function applyGradientMask(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const direction = parseGradientDirection(args.direction);
@@ -91,7 +91,7 @@ async function applyGradientMask(
   let maskAutoCreated = false;
 
   try {
-    const raw = await runSnippet(connection, gradientScript);
+    const raw = await runSnippet(transport, gradientScript);
     const parsed = parseSnippetResult(raw);
     if (!parsed) {
       return atomicFailureFromError(new Error(`Snippet returned unparseable payload: ${String(raw)}`));
@@ -108,13 +108,13 @@ async function applyGradientMask(
   }
 
   try {
-    const maskRaw = await runSnippet(connection, ExtendScriptSnippets.createLayerMask());
+    const maskRaw = await runSnippet(transport, ExtendScriptSnippets.createLayerMask());
     const maskParsed = parseSnippetResult(maskRaw);
     if (maskParsed?.maskCreated === true) {
       maskAutoCreated = true;
     }
 
-    const raw = await runSnippet(connection, gradientScript);
+    const raw = await runSnippet(transport, gradientScript);
     const parsed = parseSnippetResult(raw);
     if (!parsed) {
       return atomicFailureFromError(new Error(`Snippet returned unparseable payload: ${String(raw)}`));

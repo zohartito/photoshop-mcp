@@ -1,5 +1,5 @@
 import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
-import { PhotoshopConnection } from '../../platform/connection.js';
+import type { TransportRouter } from '../../transport/index.js';
 import { executeRecipe } from './_shared.js';
 
 const TOOL_NAME = 'photoshop_recipe_apply_color_grade';
@@ -30,7 +30,7 @@ const HUE_SAT_BY_PRESET: Record<Preset, HueSatPreset> = {
   cool_dusk: { hue: -6, saturation: -10, lightness: 0 },
 };
 
-export function bindApplyColorGrade(connection: PhotoshopConnection): ToolDefinition {
+export function bindApplyColorGrade(transport: TransportRouter): ToolDefinition {
   return {
     tool: {
       name: TOOL_NAME,
@@ -58,12 +58,12 @@ export function bindApplyColorGrade(connection: PhotoshopConnection): ToolDefini
         },
       },
     },
-    handler: async (args) => runApplyColorGrade(connection, args),
+    handler: async (args) => runApplyColorGrade(transport, args),
   };
 }
 
 async function runApplyColorGrade(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const preset = parsePreset(args.preset);
@@ -108,7 +108,7 @@ async function runApplyColorGrade(
     };
   `;
 
-  return executeRecipe(connection, `Color Grade ${preset}`, body);
+  return executeRecipe(transport, `Color Grade ${preset}`, body);
 }
 
 function parsePreset(raw: unknown): Preset {

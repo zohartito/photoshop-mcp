@@ -1,9 +1,8 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 
-export function createImageTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createImageTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -26,7 +25,7 @@ export function createImageTools(connection: PhotoshopConnection): ToolDefinitio
           required: ['width', 'height'],
         },
       },
-      handler: async (args) => resizeImage(connection, args),
+      handler: async (args) => resizeImage(transport, args),
     },
     {
       tool: {
@@ -59,24 +58,21 @@ export function createImageTools(connection: PhotoshopConnection): ToolDefinitio
           required: ['left', 'top', 'right', 'bottom'],
         },
       },
-      handler: async (args) => cropDocument(connection, args),
+      handler: async (args) => cropDocument(transport, args),
     },
   ];
 }
 
 async function resizeImage(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const width = args.width as number;
   const height = args.height as number;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.resizeImage(width, height);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -100,7 +96,7 @@ async function resizeImage(
 }
 
 async function cropDocument(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const left = args.left as number;
@@ -109,17 +105,14 @@ async function cropDocument(
   const bottom = args.bottom as number;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.cropDocument(left, top, right, bottom);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Document cropped\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Document cropped`, details: result }, null, 2),
         },
       ],
     };

@@ -4,11 +4,8 @@
  */
 import type { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { resolvePhotoshopCapabilities } from '../platform/capabilities.js';
-import type { PhotoshopConnection } from '../platform/connection.js';
-import {
-  invokeNeuralFilter,
-  type NeuralFilterKind,
-} from '../platform/uxp-bridge-client.js';
+import type { TransportRouter } from '../transport/index.js';
+import type { NeuralFilterKind } from '../platform/uxp-bridge-client.js';
 import { atomicFailure, atomicSuccess } from './atomic-shared.js';
 
 const FILTER_KINDS: NeuralFilterKind[] = [
@@ -24,7 +21,7 @@ function clampPct(value: unknown, fallback: number): number {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
-export function createNeuralTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createNeuralTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -65,16 +62,16 @@ export function createNeuralTools(connection: PhotoshopConnection): ToolDefiniti
           required: ['filter'],
         },
       },
-      handler: async (args) => runNeuralFilter(connection, args),
+      handler: async (args) => runNeuralFilter(transport, args),
     },
   ];
 }
 
 async function runNeuralFilter(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
-  const version = await connection.getVersion();
+  const version = await transport.getVersion();
   const caps = await resolvePhotoshopCapabilities(version);
 
   if (!caps.features.neural_filters) {
@@ -105,19 +102,28 @@ async function runNeuralFilter(
       : {}),
   };
 
-  const result = await invokeNeuralFilter(filter, params);
-  if (!result.ok) {
+  // UXP-pinned command (§4.3): route through the router so the neural filter runs
+  // on the UXP backend via the global queue. Params match the old invokeNeuralFilter
+  // → invokeUxpBridge('neural_filter', { filter, ...params }, 90_000) shape exactly.
+  let bridgeData: unknown;
+  try {
+    bridgeData = await transport.run({
+      name: 'neural_filter',
+      params: { filter, ...params },
+      timeoutMs: 90_000,
+    });
+  } catch (error) {
     return atomicFailure({
       ok: false,
       code: 'uxp_bridge_unavailable',
-      message: result.error ?? 'Neural filter invocation failed',
+      message: error instanceof Error ? error.message : 'Neural filter invocation failed',
       suggested_next_tool: 'photoshop_get_capabilities',
     });
   }
 
   return atomicSuccess(
     `Neural filter "${filter}" applied via UXP bridge`,
-    { filter, params, bridge: result.data },
+    { filter, params, bridge: bridgeData },
     'photoshop_get_preview'
   );
 }

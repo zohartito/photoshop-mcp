@@ -6,8 +6,8 @@ import type { ProviderAdapter, ProviderModel } from './types.js';
 // tier; we don't currently differentiate the 1-hour tier.
 const MODELS: ProviderModel[] = [
   {
-    id: 'claude-opus-4-5',
-    label: 'Claude Opus 4.5',
+    id: 'claude-opus-4-8',
+    label: 'Claude Opus 4.8',
     pricing: {
       inputUsdPerMTok: 5,
       outputUsdPerMTok: 25,
@@ -16,8 +16,8 @@ const MODELS: ProviderModel[] = [
     },
   },
   {
-    id: 'claude-sonnet-4-5',
-    label: 'Claude Sonnet 4.5',
+    id: 'claude-sonnet-5',
+    label: 'Claude Sonnet 5',
     pricing: {
       inputUsdPerMTok: 3,
       outputUsdPerMTok: 15,
@@ -88,7 +88,7 @@ export const anthropicAdapter: ProviderAdapter = {
     return MODELS.map((m) => ({ ...m }));
   },
   defaultModel() {
-    return 'claude-sonnet-4-5';
+    return 'claude-opus-4-8';
   },
   getLanguageModel({ apiKey, modelId }) {
     return createAnthropic({ apiKey })(modelId);

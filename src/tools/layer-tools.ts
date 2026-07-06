@@ -1,9 +1,9 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
+import { layerIdFrom } from './atomic-shared.js';
 
-export function createLayerTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createLayerTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -24,7 +24,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           },
         },
       },
-      handler: async (args) => createLayer(connection, args),
+      handler: async (args) => createLayer(transport, args),
     },
     {
       tool: {
@@ -35,7 +35,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           properties: {},
         },
       },
-      handler: async () => deleteLayer(connection),
+      handler: async () => deleteLayer(transport),
     },
     {
       tool: {
@@ -44,8 +44,9 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           'Create a text layer with content, position, font size, and optional font.\n\n' +
           'Use when: adding labels, titles, or typography to the design.\n' +
           'Do NOT use when: editing existing text — use photoshop_update_text_content.\n\n' +
-          'Returns: layer name, text, position, fontSize, font (when fontName set), context.\n' +
+          'Returns: layer name, text, position, final bounds, fontSize, font/color (when set), context.\n' +
           'Use photoshop_list_fonts to discover font names; photoshop_set_text_font to change font later.\n' +
+          'Tip: pass center to place the text on the canvas without guessing x/y; pass red/green/blue to color it in one call.\n' +
           'Preconditions: active document. Side effects: adds text layer.',
         inputSchema: {
           type: 'object',
@@ -56,12 +57,12 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
             },
             x: {
               type: 'number',
-              description: 'X position in pixels (default: 100)',
+              description: 'X position in pixels (default: 100). Ignored on an axis that center covers.',
               default: 100,
             },
             y: {
               type: 'number',
-              description: 'Y position in pixels (default: 100)',
+              description: 'Y position in pixels (default: 100). Ignored on an axis that center covers.',
               default: 100,
             },
             fontSize: {
@@ -74,11 +75,35 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
               description:
                 'Optional font display or PostScript name (resolved via app.fonts; see photoshop_list_fonts)',
             },
+            center: {
+              type: 'string',
+              description:
+                'Optional. Center the text layer on the canvas: "horizontal", "vertical", or "both". Overrides x/y on the centered axis.',
+              enum: ['horizontal', 'vertical', 'both'],
+            },
+            red: {
+              type: 'number',
+              description: 'Optional text color red (0-255). Provide red, green, and blue together to color at creation.',
+              minimum: 0,
+              maximum: 255,
+            },
+            green: {
+              type: 'number',
+              description: 'Optional text color green (0-255)',
+              minimum: 0,
+              maximum: 255,
+            },
+            blue: {
+              type: 'number',
+              description: 'Optional text color blue (0-255)',
+              minimum: 0,
+              maximum: 255,
+            },
           },
           required: ['text'],
         },
       },
-      handler: async (args) => createTextLayer(connection, args),
+      handler: async (args) => createTextLayer(transport, args),
     },
     {
       tool: {
@@ -109,7 +134,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           required: ['red', 'green', 'blue'],
         },
       },
-      handler: async (args) => fillLayer(connection, args),
+      handler: async (args) => fillLayer(transport, args),
     },
     {
       tool: {
@@ -125,7 +150,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           properties: {},
         },
       },
-      handler: async () => getLayers(connection),
+      handler: async () => getLayers(transport),
     },
     {
       tool: {
@@ -144,27 +169,29 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
               type: 'string',
               description: 'Exact layer name (case-sensitive)',
             },
+            layerId: {
+              type: 'number',
+              description:
+                'Optional native layer id to select instead of searching by name (from a prior tool result, e.g. duplicate_layer). When set, name is ignored.',
+            },
           },
           required: ['name'],
         },
       },
-      handler: async (args) => selectLayerByName(connection, args),
+      handler: async (args) => selectLayerByName(transport, args),
     },
   ];
 }
 
 async function createLayer(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const name = args.name as string | undefined;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.newLayer(name);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -187,13 +214,10 @@ async function createLayer(
   }
 }
 
-async function deleteLayer(connection: PhotoshopConnection): Promise<ToolResult> {
+async function deleteLayer(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.deleteLayer();
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -217,7 +241,7 @@ async function deleteLayer(connection: PhotoshopConnection): Promise<ToolResult>
 }
 
 async function createTextLayer(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const text = args.text as string;
@@ -225,19 +249,40 @@ async function createTextLayer(
   const y = (args.y as number) || 100;
   const fontSize = (args.fontSize as number) || 24;
   const fontName = args.fontName as string | undefined;
+  const center = args.center as 'horizontal' | 'vertical' | 'both' | undefined;
+  const color =
+    typeof args.red === 'number' &&
+    typeof args.green === 'number' &&
+    typeof args.blue === 'number'
+      ? { red: args.red as number, green: args.green as number, blue: args.blue as number }
+      : undefined;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
+    const script = ExtendScriptSnippets.createTextLayer(
+      text,
+      x,
+      y,
+      fontSize,
+      fontName,
+      center,
+      color
+    );
+    const result = await transport.runScript(script);
 
-    const script = ExtendScriptSnippets.createTextLayer(text, x, y, fontSize, fontName);
-    await api.executeScript(script);
-
+    const where = center ? `centered (${center})` : `at (${x}, ${y})`;
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Text layer created: "${text}" at (${x}, ${y})${fontName ? ` with font ${fontName}` : ''}`,
+          text: JSON.stringify(
+            {
+              ok: true,
+              summary: `Text layer created: "${text}" ${where}${fontName ? ` with font ${fontName}` : ''}${color ? ` in RGB(${color.red}, ${color.green}, ${color.blue})` : ''}`,
+              details: result,
+            },
+            null,
+            2
+          ),
         },
       ],
     };
@@ -255,7 +300,7 @@ async function createTextLayer(
 }
 
 async function fillLayer(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const red = args.red as number;
@@ -263,11 +308,8 @@ async function fillLayer(
   const blue = args.blue as number;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.fillLayer(red, green, blue);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -290,13 +332,12 @@ async function fillLayer(
   }
 }
 
-async function getLayers(connection: PhotoshopConnection): Promise<ToolResult> {
+async function getLayers(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    const script = ExtendScriptSnippets.getLayerNames();
-    const result = await api.executeScript(script);
+    const result = await transport.run({
+      name: 'get_layers',
+      params: { script: ExtendScriptSnippets.getLayerNames() },
+    });
 
     return {
       content: [
@@ -320,23 +361,27 @@ async function getLayers(connection: PhotoshopConnection): Promise<ToolResult> {
 }
 
 async function selectLayerByName(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const name = args.name as string;
+  const layerId = typeof args.layerId === 'number' ? args.layerId : undefined;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    const script = ExtendScriptSnippets.selectLayerByName(name);
-    const result = await api.executeScript(script);
+    const result = await transport.run({
+      name: 'select_layer',
+      params: {
+        script: ExtendScriptSnippets.selectLayerByName(name, layerId),
+        layerId,
+      },
+    });
+    const affectedId = layerIdFrom(result);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Layer selected:\n${JSON.stringify(result, null, 2)}`,
+          text: `Layer selected${affectedId !== undefined ? ` (layerId ${affectedId})` : ''}:\n${JSON.stringify(result, null, 2)}`,
         },
       ],
     };

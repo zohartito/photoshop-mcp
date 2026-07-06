@@ -1,11 +1,10 @@
 import type { ToolResult } from '../../core/tool-registry.js';
-import type { PhotoshopConnection } from '../../platform/connection.js';
+import type { TransportRouter } from '../../transport/index.js';
 import {
   MCP_CURVES_ADJUSTMENT_HELPER,
   MCP_LAYER_MASK_HELPERS,
   type GradientMaskDirection,
 } from '../../api/extendscript.js';
-import { PhotoshopAPIFactory } from '../../api/photoshop-api.js';
 import { parseExtendScriptPayload } from '../../utils/extendscript-result.js';
 
 export interface RecipeSuccess {
@@ -255,15 +254,18 @@ export function toolException(error: unknown, code = 'recipe_exception'): ToolRe
 }
 
 export async function executeRecipe(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   historyName: string,
   body: string
 ): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
+    // A recipe is one one-undo operation (§6.3): the suspendHistory wrap makes the
+    // whole multi-step body a single history scope. Run it through the router's
+    // operation API so it takes the global queue (§6.2) as one indivisible unit.
     const script = wrapInSuspendHistory(historyName, body);
-    const raw = await api.executeScript(script);
+    const raw = await transport.runOperation(`recipe:${historyName}`, [
+      { name: 'execute_script', params: { script } },
+    ]);
     const parsed = parseRecipeResult(raw);
     if (!parsed) {
       return toolFailure({

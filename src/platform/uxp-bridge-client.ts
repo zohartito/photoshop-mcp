@@ -1,25 +1,29 @@
 /**
- * Client for the MCP-hosted UXP bridge (health check + neural filter invoke).
+ * Client for the MCP-hosted UXP bridge (liveness check + neural filter invoke).
  */
-import { ensureUxpBridgeServer, invokeUxpBridge } from './uxp-bridge-server.js';
+import {
+  ensureUxpBridgeServer,
+  getUxpBridgeLastPollAt,
+  invokeUxpBridge,
+} from './uxp-bridge-server.js';
 
-const HEALTH_TIMEOUT_MS = 800;
+/**
+ * Truthful liveness (docs/design/transport-layer.md §4.1, Codex #3): the plugin
+ * must have hit `GET /poll` recently. The old `/health` probe only proved the
+ * in-process server was up, which is always true and told nothing about whether
+ * the plugin was actually connected — so `neural_filters` could report available
+ * with no plugin. Delegates to the same last-poll signal `UxpTransport` uses.
+ */
+const POLL_FRESHNESS_MS = 2_000;
 
 export async function isUxpBridgeReachable(): Promise<boolean> {
   try {
-    const port = await ensureUxpBridgeServer();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
-    const res = await fetch(`http://127.0.0.1:${port}/health`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    if (!res.ok) return false;
-    const body = (await res.json()) as { ok?: boolean };
-    return body.ok === true;
+    await ensureUxpBridgeServer();
   } catch {
     return false;
   }
+  const lastPoll = getUxpBridgeLastPollAt();
+  return lastPoll > 0 && Date.now() - lastPoll <= POLL_FRESHNESS_MS;
 }
 
 export type NeuralFilterKind = 'skin_smoothing' | 'harmonize' | 'depth_blur' | 'super_zoom';

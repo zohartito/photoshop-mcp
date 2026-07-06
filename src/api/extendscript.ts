@@ -69,7 +69,7 @@ function getContextInfo() {
           var layer = doc.activeLayer;
           context.activeLayer = {
             name: layer.name,
-            kind: String(layer.kind),
+            kind: (layer.typename === 'LayerSet' ? 'LayerKind.GROUP' : String(layer.kind)),
             opacity: layer.opacity,
             blendMode: String(layer.blendMode),
             visible: layer.visible,
@@ -146,6 +146,37 @@ function __mcp_makeCurvesAdjustmentLayer(preset) {
 const mcpActionHelperAliases = `
 function __mcp_s2t(s) { return sTID(s); }
 function __mcp_c2t(s) { return cTID(s); }
+`;
+
+/**
+ * §6.8 target-identity helpers (docs/design/transport-layer.md §6.8). Backend A
+ * leans on doc.activeLayer, so to let layer-targeting commands bind to the layer
+ * they MEAN — not whatever happens to be active — these resolve/activate a layer
+ * by its native id (the same stable id the mutating snippets read back and return).
+ *
+ * __mcp_layerIdSafe(layer): read layer.id, returning null if unavailable so a
+ * snippet can still succeed on a PS build where the property throws (defensive; the
+ * property is reliable on PS 2026, used by getLayerNames' mask probe).
+ *
+ * __mcp_selectLayerById(id): make the layer with this id the active layer via an AM
+ * 'slct' by identifier (the DOM has no getByID for layers). Mirrors the UXP
+ * selectLayerByIdDescriptor so both backends resolve identity the same way. Throws
+ * if the id does not resolve, so a bad id fails loud rather than mutating the wrong
+ * layer — which is the entire point of the target-identity contract.
+ */
+const MCP_LAYER_IDENTITY_HELPERS = `
+function __mcp_layerIdSafe(layer) {
+  try { return layer.id; } catch (e) { return null; }
+}
+function __mcp_selectLayerById(layerId) {
+  var ref = new ActionReference();
+  ref.putIdentifier(charIDToTypeID('Lyr '), layerId);
+  var desc = new ActionDescriptor();
+  desc.putReference(charIDToTypeID('null'), ref);
+  desc.putBoolean(charIDToTypeID('MkVs'), false);
+  executeAction(charIDToTypeID('slct'), desc, DialogModes.NO);
+  return app.activeDocument.activeLayer;
+}
 `;
 
 /**
@@ -248,6 +279,998 @@ function __mcp_gradientFillLayerMask(fromXPx, fromYPx, toXPx, toYPx, reverseGrad
 }
 `;
 
+/**
+ * Layer-style / FX (layer effects) helpers.
+ *
+ * Applies Photoshop layer effects (drop shadow, stroke, outer glow, color overlay,
+ * inner shadow, bevel/emboss, gradient overlay) to the active layer by building a
+ * `layerEffects` ActionDescriptor and running executeAction(sTID('set'), ...).
+ *
+ * Descriptor key structure and enum names are cribbed from the UXP batchPlay
+ * reference (~/adb-mcp/uxp/ps/commands/layer_styles.js) — batchPlay JSON descriptors
+ * translate 1:1 into these ActionDescriptor calls.
+ *
+ * MERGE BEHAVIOUR: __mcp_readLayerEffectsDesc() reads the layer's existing
+ * `layerEffects` descriptor (via getd on the Lefx property) and mutates it in place,
+ * so adding one effect preserves any effects already present (e.g. add_stroke after
+ * add_drop_shadow keeps both). Re-applying the same effect type replaces just that
+ * sub-effect.
+ *
+ * RGBColor QUIRK: the Action Manager RGBColor object uses the key `grain` for the
+ * GREEN channel (not `green`) — this matches the batchPlay reference and is required
+ * for the color to read correctly.
+ *
+ * Uses sTID/cTID which are provided by RECIPE_ACTION_HELPERS (the suspendHistory wrap).
+ * @see https://community.adobe.com/t5/photoshop-ecosystem-discussions/scripting-layer-styles/td-p/10730575
+ */
+export const MCP_LAYER_STYLE_HELPERS = `
+/** Map a friendly blend-mode name to its Action Manager blendMode enum string. */
+function __mcp_blendModeStr(name) {
+  var map = {
+    NORMAL: 'normal', DISSOLVE: 'dissolve', DARKEN: 'darken', MULTIPLY: 'multiply',
+    COLORBURN: 'colorBurn', LINEARBURN: 'linearBurn', DARKERCOLOR: 'darkerColor',
+    LIGHTEN: 'lighten', SCREEN: 'screen', COLORDODGE: 'colorDodge',
+    LINEARDODGE: 'linearDodge', LIGHTERCOLOR: 'lighterColor', OVERLAY: 'overlay',
+    SOFTLIGHT: 'softLight', HARDLIGHT: 'hardLight', VIVIDLIGHT: 'vividLight',
+    LINEARLIGHT: 'linearLight', PINLIGHT: 'pinLight', HARDMIX: 'hardMix',
+    DIFFERENCE: 'difference', EXCLUSION: 'exclusion', SUBTRACT: 'blendSubtraction',
+    DIVIDE: 'blendDivide', HUE: 'hue', SATURATION: 'saturation', COLOR: 'color',
+    LUMINOSITY: 'luminosity'
+  };
+  var key = String(name).toUpperCase();
+  var v = map[key];
+  if (!v) {
+    throw new Error('Unknown blend mode "' + name + '". Valid: ' + __mcp_objectKeys(map).join(', '));
+  }
+  return v;
+}
+
+function __mcp_objectKeys(obj) {
+  var out = [];
+  for (var k in obj) { if (obj.hasOwnProperty(k)) out.push(k); }
+  return out;
+}
+
+/** Throw a clear error unless the active document is in RGB color mode (layer effects require RGB). */
+function __mcp_assertRgbForEffects() {
+  var doc = app.activeDocument;
+  if (doc.mode !== DocumentMode.RGB) {
+    throw new Error(
+      'Layer effects require an RGB document. Active document mode is ' +
+      String(doc.mode) + '. Convert to RGB (Image > Mode > RGB Color) first.'
+    );
+  }
+}
+
+/** Build an RGBColor descriptor. NOTE: green channel uses key "grain" (AM quirk). */
+function __mcp_rgbColorDesc(red, green, blue) {
+  var c = new ActionDescriptor();
+  c.putDouble(sTID('red'), red);
+  c.putDouble(sTID('grain'), green);
+  c.putDouble(sTID('blue'), blue);
+  return c;
+}
+
+/** Clamp a numeric value to [min, max]. */
+function __mcp_clampNum(v, min, max) {
+  if (typeof v !== 'number' || isNaN(v)) return min;
+  return Math.max(min, Math.min(max, v));
+}
+
+/**
+ * Read the active layer's existing layerEffects descriptor so new effects merge with
+ * any already present. Returns a fresh ActionDescriptor if the layer has no effects.
+ */
+function __mcp_readLayerEffectsDesc() {
+  var ref = new ActionReference();
+  ref.putProperty(sTID('property'), sTID('layerEffects'));
+  ref.putEnumerated(sTID('layer'), sTID('ordinal'), sTID('targetEnum'));
+  var getDesc = new ActionDescriptor();
+  getDesc.putReference(sTID('null'), ref);
+  try {
+    var layerDesc = executeAction(sTID('get'), getDesc, DialogModes.NO);
+    if (layerDesc.hasKey(sTID('layerEffects'))) {
+      return layerDesc.getObjectValue(sTID('layerEffects'));
+    }
+  } catch (eRead) {
+    // No existing effects (or layer type without effects) — start fresh.
+  }
+  var fresh = new ActionDescriptor();
+  fresh.putUnitDouble(sTID('scale'), sTID('percentUnit'), 100.0);
+  return fresh;
+}
+
+/** Apply the assembled layerEffects descriptor to the active layer via set. */
+function __mcp_setLayerEffects(fxDesc) {
+  var setDesc = new ActionDescriptor();
+  var ref = new ActionReference();
+  ref.putProperty(sTID('property'), sTID('layerEffects'));
+  ref.putEnumerated(sTID('layer'), sTID('ordinal'), sTID('targetEnum'));
+  setDesc.putReference(sTID('null'), ref);
+  setDesc.putObject(sTID('to'), sTID('layerEffects'), fxDesc);
+  executeAction(sTID('set'), setDesc, DialogModes.NO);
+}
+
+/** Assert an active raster/text/smart-object layer (not a group) is selected. */
+function __mcp_assertEffectableLayer() {
+  var doc = app.activeDocument;
+  var layer = doc.activeLayer;
+  if (!layer) {
+    throw new Error('No active layer. Select a layer first.');
+  }
+  if (layer.typename === 'LayerSet') {
+    throw new Error('Layer effects cannot be applied to a layer group. Select a normal, text, or smart-object layer.');
+  }
+  return layer;
+}
+
+/** dropShadow sub-descriptor (opts: red, green, blue, opacity, angle, distance, size, spread, blendMode). */
+function __mcp_buildDropShadow(opts) {
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.blendMode)));
+  d.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.red, opts.green, opts.blue));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_clampNum(opts.opacity, 0, 100));
+  d.putUnitDouble(sTID('localLightingAngle'), sTID('angleUnit'), opts.angle);
+  d.putBoolean(sTID('useGlobalAngle'), false);
+  d.putUnitDouble(sTID('distance'), sTID('pixelsUnit'), Math.max(0, opts.distance));
+  d.putUnitDouble(sTID('chokeMatte'), sTID('pixelsUnit'), __mcp_clampNum(opts.spread, 0, 100));
+  d.putUnitDouble(sTID('blur'), sTID('pixelsUnit'), Math.max(0, opts.size));
+  d.putUnitDouble(sTID('noise'), sTID('percentUnit'), 0.0);
+  d.putBoolean(sTID('antiAlias'), false);
+  var transferSpec = new ActionDescriptor();
+  transferSpec.putString(sTID('name'), 'Linear');
+  d.putObject(sTID('transferSpec'), sTID('shapeCurveType'), transferSpec);
+  d.putBoolean(sTID('layerConceals'), true);
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/** innerShadow sub-descriptor (same opts shape as drop shadow). */
+function __mcp_buildInnerShadow(opts) {
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.blendMode)));
+  d.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.red, opts.green, opts.blue));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_clampNum(opts.opacity, 0, 100));
+  d.putUnitDouble(sTID('localLightingAngle'), sTID('angleUnit'), opts.angle);
+  d.putBoolean(sTID('useGlobalAngle'), false);
+  d.putUnitDouble(sTID('distance'), sTID('pixelsUnit'), Math.max(0, opts.distance));
+  d.putUnitDouble(sTID('chokeMatte'), sTID('pixelsUnit'), __mcp_clampNum(opts.spread, 0, 100));
+  d.putUnitDouble(sTID('blur'), sTID('pixelsUnit'), Math.max(0, opts.size));
+  d.putUnitDouble(sTID('noise'), sTID('percentUnit'), 0.0);
+  d.putBoolean(sTID('antiAlias'), false);
+  var transferSpec = new ActionDescriptor();
+  transferSpec.putString(sTID('name'), 'Linear');
+  d.putObject(sTID('transferSpec'), sTID('shapeCurveType'), transferSpec);
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/** frameFX (stroke) sub-descriptor (opts: size, position, red, green, blue, opacity, blendMode). */
+function __mcp_buildStroke(opts) {
+  var position = 'centeredFrame';
+  var p = String(opts.position || 'outside').toLowerCase();
+  if (p === 'inside') { position = 'insetFrame'; }
+  else if (p === 'outside') { position = 'outsetFrame'; }
+  else if (p === 'center') { position = 'centeredFrame'; }
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('style'), sTID('frameStyle'), sTID(position));
+  d.putEnumerated(sTID('paintType'), sTID('frameFill'), sTID('solidColor'));
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.blendMode)));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_clampNum(opts.opacity, 0, 100));
+  d.putUnitDouble(sTID('size'), sTID('pixelsUnit'), Math.max(0, opts.size));
+  d.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.red, opts.green, opts.blue));
+  d.putBoolean(sTID('overprint'), false);
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/** outerGlow sub-descriptor (opts: red, green, blue, opacity, size, spread, blendMode). */
+function __mcp_buildOuterGlow(opts) {
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.blendMode)));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_clampNum(opts.opacity, 0, 100));
+  d.putUnitDouble(sTID('noise'), sTID('percentUnit'), 0.0);
+  d.putEnumerated(sTID('glowTechnique'), sTID('matteTechnique'), sTID('softMatte'));
+  d.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.red, opts.green, opts.blue));
+  d.putUnitDouble(sTID('chokeMatte'), sTID('pixelsUnit'), __mcp_clampNum(opts.spread, 0, 100));
+  d.putUnitDouble(sTID('blur'), sTID('pixelsUnit'), Math.max(0, opts.size));
+  d.putUnitDouble(sTID('inputRange'), sTID('percentUnit'), 50.0);
+  d.putUnitDouble(sTID('shadingNoise'), sTID('percentUnit'), 0.0);
+  d.putBoolean(sTID('antiAlias'), false);
+  var transferSpec = new ActionDescriptor();
+  transferSpec.putString(sTID('name'), 'Linear');
+  d.putObject(sTID('transferSpec'), sTID('shapeCurveType'), transferSpec);
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/** solidFill (color overlay) sub-descriptor (opts: red, green, blue, opacity, blendMode). */
+function __mcp_buildColorOverlay(opts) {
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.blendMode)));
+  d.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.red, opts.green, opts.blue));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_clampNum(opts.opacity, 0, 100));
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/** bevelEmboss sub-descriptor (opts: style, depth, size, soften, angle, altitude, highlight/shadow color+opacity+blend). */
+function __mcp_buildBevelEmboss(opts) {
+  var styleMap = {
+    outerBevel: 'outerBevel', innerBevel: 'innerBevel', emboss: 'emboss',
+    pillowEmboss: 'pillowEmboss', strokeEmboss: 'strokeEmboss'
+  };
+  var bevelStyle = styleMap[opts.style] || 'innerBevel';
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('bevelStyle'), sTID('bevelEmbossStyle'), sTID(bevelStyle));
+  d.putEnumerated(sTID('bevelTechnique'), sTID('bevelEmbossTechnique'), sTID('softMatte'));
+  d.putUnitDouble(sTID('strengthRatio'), sTID('percentUnit'), __mcp_clampNum(opts.depth, 1, 1000));
+  d.putEnumerated(sTID('bevelDirection'), sTID('bevelEmbossStampStyle'), sTID('in'));
+  d.putUnitDouble(sTID('blur'), sTID('pixelsUnit'), Math.max(0, opts.size));
+  d.putUnitDouble(sTID('softness'), sTID('pixelsUnit'), Math.max(0, opts.soften));
+  d.putBoolean(sTID('useGlobalAngle'), false);
+  d.putUnitDouble(sTID('localLightingAngle'), sTID('angleUnit'), opts.angle);
+  d.putUnitDouble(sTID('localLightingAltitude'), sTID('angleUnit'), __mcp_clampNum(opts.altitude, 0, 90));
+  var highlightTransfer = new ActionDescriptor();
+  highlightTransfer.putString(sTID('name'), 'Linear');
+  d.putObject(sTID('transferSpec'), sTID('shapeCurveType'), highlightTransfer);
+  d.putBoolean(sTID('antiAlias'), false);
+  d.putEnumerated(sTID('highlightMode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.highlightBlendMode)));
+  d.putObject(sTID('highlightColor'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.highlightRed, opts.highlightGreen, opts.highlightBlue));
+  d.putUnitDouble(sTID('highlightOpacity'), sTID('percentUnit'), __mcp_clampNum(opts.highlightOpacity, 0, 100));
+  d.putEnumerated(sTID('shadowMode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.shadowBlendMode)));
+  d.putObject(sTID('shadowColor'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.shadowRed, opts.shadowGreen, opts.shadowBlue));
+  d.putUnitDouble(sTID('shadowOpacity'), sTID('percentUnit'), __mcp_clampNum(opts.shadowOpacity, 0, 100));
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/** Two-color gradientLayer descriptor (black->white style) for a gradient overlay. */
+function __mcp_buildGradientOverlay(opts) {
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_blendModeStr(opts.blendMode)));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_clampNum(opts.opacity, 0, 100));
+  var gradient = new ActionDescriptor();
+  gradient.putString(sTID('name'), 'Custom');
+  gradient.putEnumerated(sTID('gradientForm'), sTID('gradientForm'), sTID('customStops'));
+  gradient.putDouble(sTID('interfaceIconFrameDimmed'), 4096.0);
+
+  var colors = new ActionList();
+  var startStop = new ActionDescriptor();
+  startStop.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.startRed, opts.startGreen, opts.startBlue));
+  startStop.putEnumerated(sTID('type'), sTID('colorStopType'), sTID('userStop'));
+  startStop.putInteger(sTID('location'), 0);
+  startStop.putInteger(sTID('midpoint'), 50);
+  colors.putObject(sTID('colorStop'), startStop);
+  var endStop = new ActionDescriptor();
+  endStop.putObject(sTID('color'), sTID('RGBColor'), __mcp_rgbColorDesc(opts.endRed, opts.endGreen, opts.endBlue));
+  endStop.putEnumerated(sTID('type'), sTID('colorStopType'), sTID('userStop'));
+  endStop.putInteger(sTID('location'), 4096);
+  endStop.putInteger(sTID('midpoint'), 50);
+  colors.putObject(sTID('colorStop'), endStop);
+  gradient.putList(sTID('colors'), colors);
+
+  var transparency = new ActionList();
+  var startOpacity = new ActionDescriptor();
+  startOpacity.putUnitDouble(sTID('opacity'), sTID('percentUnit'), 100.0);
+  startOpacity.putInteger(sTID('location'), 0);
+  startOpacity.putInteger(sTID('midpoint'), 50);
+  transparency.putObject(sTID('transferSpec'), startOpacity);
+  var endOpacity = new ActionDescriptor();
+  endOpacity.putUnitDouble(sTID('opacity'), sTID('percentUnit'), 100.0);
+  endOpacity.putInteger(sTID('location'), 4096);
+  endOpacity.putInteger(sTID('midpoint'), 50);
+  transparency.putObject(sTID('transferSpec'), endOpacity);
+  gradient.putList(sTID('transparency'), transparency);
+
+  d.putObject(sTID('gradient'), sTID('gradientClassEvent'), gradient);
+  d.putEnumerated(sTID('type'), sTID('gradientType'), sTID('linear'));
+  d.putBoolean(sTID('reverse'), false);
+  d.putBoolean(sTID('dither'), false);
+  d.putBoolean(sTID('align'), true);
+  d.putUnitDouble(sTID('angle'), sTID('angleUnit'), opts.angle);
+  d.putUnitDouble(sTID('scale'), sTID('percentUnit'), __mcp_clampNum(opts.scale, 10, 150));
+  d.putBoolean(sTID('enabled'), true);
+  d.putBoolean(sTID('present'), true);
+  d.putBoolean(sTID('showInDialog'), true);
+  return d;
+}
+
+/**
+ * Apply one layer effect to the active layer, merging with existing effects.
+ * effectKey is the layerEffects sub-key (e.g. 'dropShadow', 'frameFX', 'outerGlow',
+ * 'solidFill', 'innerShadow', 'bevelEmboss', 'gradientFill'); subDesc is the built
+ * sub-descriptor. globalAngle (optional) also sets the doc's global lighting angle.
+ */
+function __mcp_applyLayerEffect(effectKey, subDesc, globalAngle) {
+  __mcp_assertRgbForEffects();
+  var layer = __mcp_assertEffectableLayer();
+  var fx = __mcp_readLayerEffectsDesc();
+  // Sub-effect object type equals the effect key for every layer effect (dropShadow,
+  // innerShadow, outerGlow, bevelEmboss, frameFX, solidFill, gradientFill). Note:
+  // the Gradient OVERLAY effect is 'gradientFill' — NOT 'gradientLayer', which is the
+  // separate content-layer gradient-fill class.
+  fx.putObject(sTID(effectKey), sTID(effectKey), subDesc);
+  if (typeof globalAngle === 'number') {
+    fx.putUnitDouble(sTID('globalLightingAngle'), sTID('angleUnit'), globalAngle);
+  }
+  __mcp_setLayerEffects(fx);
+  return layer.name;
+}
+`;
+
+/**
+ * Adjustment-layer helpers — create NON-DESTRUCTIVE adjustment layers above the
+ * active layer via the "Make adjustmentLayer" Action Manager pattern:
+ * executeAction(sTID('make'), desc, DialogModes.NO) where desc.using -> object
+ * (class adjustmentLayer) -> key `type` -> the per-adjustment descriptor.
+ *
+ * Descriptor shapes are cribbed from the UXP batchPlay reference
+ * (~/adb-mcp/uxp/ps/commands/adjustment_layers.js) for black&white / vibrance /
+ * colorBalance, and from Photoshop ScriptingListener captures for curves / levels /
+ * gradientMapClass / selectiveColor / photoFilter. batchPlay JSON descriptors map
+ * 1:1 onto these ActionDescriptor putX calls.
+ *
+ * RGBColor QUIRK: the Action Manager RGBColor object uses key `grain` for the GREEN
+ * channel (not `green`) — same quirk as the layer-style helpers.
+ *
+ * Uses sTID/cTID/__mcp_s2t/__mcp_c2t which are provided by RECIPE_ACTION_HELPERS
+ * (the suspendHistory wrap). Every tool creates exactly ONE adjustment layer, so the
+ * suspendHistory scope collapses it to a single undo.
+ */
+export const MCP_ADJUSTMENT_LAYER_HELPERS = `
+/** Throw a clear error unless the active document is RGB (adjustment layers assume RGB channels). */
+function __mcp_assertRgbForAdjustment() {
+  if (app.documents.length === 0) {
+    throw new Error('No active document. Open or create a document first.');
+  }
+  var doc = app.activeDocument;
+  if (doc.mode !== DocumentMode.RGB) {
+    throw new Error(
+      'This adjustment layer requires an RGB document. Active document mode is ' +
+      String(doc.mode) + '. Convert to RGB (Image > Mode > RGB Color) first.'
+    );
+  }
+}
+
+/** Assert a document exists (adjustment layers that work in any color mode). */
+function __mcp_assertDocForAdjustment() {
+  if (app.documents.length === 0) {
+    throw new Error('No active document. Open or create a document first.');
+  }
+}
+
+/** Build an RGBColor descriptor. NOTE: green channel uses key "grain" (AM quirk). */
+function __mcp_adjRgbColor(red, green, blue) {
+  var c = new ActionDescriptor();
+  c.putDouble(sTID('red'), red);
+  c.putDouble(sTID('grain'), green);
+  c.putDouble(sTID('blue'), blue);
+  return c;
+}
+
+/**
+ * Run the standard "Make adjustmentLayer" executeAction given a type descriptor
+ * and its type stringID. Returns the newly-created adjustment layer's name.
+ */
+function __mcp_makeAdjustmentLayer(typeStringId, typeDesc) {
+  var desc = new ActionDescriptor();
+  var ref = new ActionReference();
+  ref.putClass(sTID('adjustmentLayer'));
+  desc.putReference(sTID('null'), ref);
+  var using = new ActionDescriptor();
+  using.putObject(sTID('type'), sTID(typeStringId), typeDesc);
+  desc.putObject(sTID('using'), sTID('adjustmentLayer'), using);
+  executeAction(sTID('make'), desc, DialogModes.NO);
+  return app.activeDocument.activeLayer.name;
+}
+
+/** Map a channel name to the curves/levels channel ActionReference. */
+function __mcp_channelRef(channelName) {
+  var ref = new ActionReference();
+  var name = String(channelName || 'composite').toLowerCase();
+  if (name === 'red') {
+    ref.putEnumerated(cTID('Chnl'), cTID('Chnl'), cTID('Rd  '));
+  } else if (name === 'green') {
+    ref.putEnumerated(cTID('Chnl'), cTID('Chnl'), cTID('Grn '));
+  } else if (name === 'blue') {
+    ref.putEnumerated(cTID('Chnl'), cTID('Chnl'), cTID('Bl  '));
+  } else {
+    ref.putEnumerated(cTID('Chnl'), cTID('Chnl'), cTID('Cmps'));
+  }
+  return ref;
+}
+
+/**
+ * Curves adjustment layer with arbitrary points on one channel.
+ * points: array of { input: 0-255, output: 0-255 } (already sorted/clamped by TS).
+ */
+function __mcp_makeCurvesPointsLayer(channelName, points) {
+  var curvesAdjust = new ActionDescriptor();
+  var adjustments = new ActionList();
+  var pair = new ActionDescriptor();
+  var pointList = new ActionList();
+  for (var i = 0; i < points.length; i++) {
+    var pt = new ActionDescriptor();
+    pt.putDouble(cTID('Hrzn'), points[i].input);
+    pt.putDouble(cTID('Vrtc'), points[i].output);
+    pointList.putObject(cTID('Pnt '), pt);
+  }
+  pair.putList(cTID('Crv '), pointList);
+  pair.putReference(cTID('Chnl'), __mcp_channelRef(channelName));
+  adjustments.putObject(cTID('CrvA'), pair);
+  curvesAdjust.putList(cTID('Adjs'), adjustments);
+  return __mcp_makeAdjustmentLayer('curves', curvesAdjust);
+}
+
+/**
+ * Levels adjustment layer on one channel.
+ * inputBlack/inputWhite 0-255, gamma 0.1-9.99, outputBlack/outputWhite 0-255.
+ */
+function __mcp_makeLevelsLayer(channelName, inputBlack, inputWhite, gamma, outputBlack, outputWhite) {
+  var levelsDesc = new ActionDescriptor();
+  levelsDesc.putEnumerated(sTID('presetKind'), sTID('presetKindType'), sTID('presetKindCustom'));
+  var adjustments = new ActionList();
+  var entry = new ActionDescriptor();
+  entry.putReference(sTID('channel'), __mcp_channelRef(channelName));
+  var inputList = new ActionList();
+  inputList.putInteger(inputBlack);
+  inputList.putInteger(inputWhite);
+  entry.putList(sTID('input'), inputList);
+  entry.putDouble(sTID('gamma'), gamma);
+  var outputList = new ActionList();
+  outputList.putInteger(outputBlack);
+  outputList.putInteger(outputWhite);
+  entry.putList(sTID('output'), outputList);
+  adjustments.putObject(sTID('levelsAdjustment'), entry);
+  levelsDesc.putList(sTID('adjustment'), adjustments);
+  return __mcp_makeAdjustmentLayer('levels', levelsDesc);
+}
+
+/**
+ * Gradient Map adjustment layer from a start color to an end color.
+ * reverse flips the gradient. Colors are {r,g,b} 0-255.
+ */
+function __mcp_makeGradientMapLayer(startR, startG, startB, endR, endG, endB, reverse, dither) {
+  var typeDesc = new ActionDescriptor();
+  var gradient = new ActionDescriptor();
+  gradient.putString(sTID('name'), 'Custom');
+  gradient.putEnumerated(sTID('gradientForm'), sTID('gradientForm'), sTID('customStops'));
+  gradient.putDouble(sTID('interfaceIconFrameDimmed'), 4096.0);
+
+  var colors = new ActionList();
+  var startStop = new ActionDescriptor();
+  startStop.putObject(sTID('color'), sTID('RGBColor'), __mcp_adjRgbColor(startR, startG, startB));
+  startStop.putEnumerated(sTID('type'), sTID('colorStopType'), sTID('userStop'));
+  startStop.putInteger(sTID('location'), 0);
+  startStop.putInteger(sTID('midpoint'), 50);
+  colors.putObject(sTID('colorStop'), startStop);
+  var endStop = new ActionDescriptor();
+  endStop.putObject(sTID('color'), sTID('RGBColor'), __mcp_adjRgbColor(endR, endG, endB));
+  endStop.putEnumerated(sTID('type'), sTID('colorStopType'), sTID('userStop'));
+  endStop.putInteger(sTID('location'), 4096);
+  endStop.putInteger(sTID('midpoint'), 50);
+  colors.putObject(sTID('colorStop'), endStop);
+  gradient.putList(sTID('colors'), colors);
+
+  var transparency = new ActionList();
+  var startOpacity = new ActionDescriptor();
+  startOpacity.putUnitDouble(sTID('opacity'), sTID('percentUnit'), 100.0);
+  startOpacity.putInteger(sTID('location'), 0);
+  startOpacity.putInteger(sTID('midpoint'), 50);
+  transparency.putObject(sTID('transferSpec'), startOpacity);
+  var endOpacity = new ActionDescriptor();
+  endOpacity.putUnitDouble(sTID('opacity'), sTID('percentUnit'), 100.0);
+  endOpacity.putInteger(sTID('location'), 4096);
+  endOpacity.putInteger(sTID('midpoint'), 50);
+  transparency.putObject(sTID('transferSpec'), endOpacity);
+  gradient.putList(sTID('transparency'), transparency);
+
+  typeDesc.putObject(sTID('gradient'), sTID('gradientClassEvent'), gradient);
+  typeDesc.putBoolean(sTID('reverse'), !!reverse);
+  typeDesc.putBoolean(sTID('dither'), !!dither);
+  return __mcp_makeAdjustmentLayer('gradientMapClass', typeDesc);
+}
+
+/** Map a selective-color target name to its colors enum stringID. */
+function __mcp_selectiveColorEnum(target) {
+  var map = {
+    reds: 'reds', yellows: 'yellows', greens: 'greens', cyans: 'cyans',
+    blues: 'blues', magentas: 'magentas', whites: 'whites',
+    neutrals: 'neutrals', blacks: 'blacks'
+  };
+  var key = String(target || 'reds').toLowerCase();
+  return map[key] || 'reds';
+}
+
+/**
+ * Selective Color adjustment layer adjusting ONE target color band.
+ * cyan/magenta/yellow/black are -100..100 percent. relative=true uses the
+ * relative method, false uses absolute.
+ */
+function __mcp_makeSelectiveColorLayer(target, cyan, magenta, yellow, black, relative) {
+  var typeDesc = new ActionDescriptor();
+  typeDesc.putEnumerated(sTID('presetKind'), sTID('presetKindType'), sTID('presetKindCustom'));
+  typeDesc.putEnumerated(sTID('method'), sTID('correctionMethod'), sTID(relative ? 'relative' : 'absolute'));
+  var correctionList = new ActionList();
+  var entry = new ActionDescriptor();
+  entry.putEnumerated(sTID('colors'), sTID('colors'), sTID(__mcp_selectiveColorEnum(target)));
+  entry.putUnitDouble(sTID('cyan'), sTID('percentUnit'), cyan);
+  entry.putUnitDouble(sTID('magenta'), sTID('percentUnit'), magenta);
+  entry.putUnitDouble(sTID('yellowColor'), sTID('percentUnit'), yellow);
+  entry.putUnitDouble(sTID('black'), sTID('percentUnit'), black);
+  correctionList.putObject(sTID('colorCorrection'), entry);
+  typeDesc.putList(sTID('colorCorrection'), correctionList);
+  return __mcp_makeAdjustmentLayer('selectiveColor', typeDesc);
+}
+
+/**
+ * Photo Filter adjustment layer.
+ * useColor true -> custom RGB color; false -> named preset via presetId.
+ * density 0-100, preserveLuminosity boolean.
+ */
+function __mcp_makePhotoFilterLayer(useColor, red, green, blue, density, preserveLuminosity) {
+  var typeDesc = new ActionDescriptor();
+  if (useColor) {
+    typeDesc.putObject(sTID('color'), sTID('RGBColor'), __mcp_adjRgbColor(red, green, blue));
+  } else {
+    // Fallback: warming filter (85) preset color if no color supplied.
+    typeDesc.putObject(sTID('color'), sTID('RGBColor'), __mcp_adjRgbColor(red, green, blue));
+  }
+  typeDesc.putInteger(sTID('density'), density);
+  typeDesc.putBoolean(sTID('preserveLuminosity'), !!preserveLuminosity);
+  return __mcp_makeAdjustmentLayer('photoFilter', typeDesc);
+}
+
+/**
+ * Vibrance adjustment layer. vibrance/saturation are -100..100.
+ * Crib: adb-mcp addAdjustmentLayerVibrance — this one uses the two-step
+ * make(empty vibrance class) + set(values) path (the reference's proven shape),
+ * unlike the other adjustments which populate values in the make descriptor.
+ */
+function __mcp_makeVibranceLayer(vibrance, saturation) {
+  // Step 1: make an empty Vibrance adjustment layer (type is a bare class ref).
+  var makeDesc = new ActionDescriptor();
+  var ref = new ActionReference();
+  ref.putClass(sTID('adjustmentLayer'));
+  makeDesc.putReference(sTID('null'), ref);
+  var using = new ActionDescriptor();
+  using.putClass(sTID('type'), sTID('vibrance'));
+  makeDesc.putObject(sTID('using'), sTID('adjustmentLayer'), using);
+  executeAction(sTID('make'), makeDesc, DialogModes.NO);
+  var layerName = app.activeDocument.activeLayer.name;
+
+  // Step 2: set the vibrance/saturation values on the new adjustment layer.
+  var setDesc = new ActionDescriptor();
+  var setRef = new ActionReference();
+  setRef.putEnumerated(sTID('adjustmentLayer'), sTID('ordinal'), sTID('targetEnum'));
+  setDesc.putReference(sTID('null'), setRef);
+  var valuesDesc = new ActionDescriptor();
+  valuesDesc.putInteger(sTID('vibrance'), vibrance);
+  valuesDesc.putInteger(sTID('saturation'), saturation);
+  setDesc.putObject(sTID('to'), sTID('vibrance'), valuesDesc);
+  executeAction(sTID('set'), setDesc, DialogModes.NO);
+  return layerName;
+}
+
+/**
+ * Color Balance adjustment layer. Each of shadows/midtones/highlights is a
+ * 3-int array [cyanRed, magentaGreen, yellowBlue], -100..100.
+ * Crib: adb-mcp addColorBalanceAdjustmentLayer.
+ */
+function __mcp_makeColorBalanceLayer(shadows, midtones, highlights, preserveLuminosity) {
+  var typeDesc = new ActionDescriptor();
+  function levelsList(arr) {
+    var l = new ActionList();
+    l.putInteger(arr[0]);
+    l.putInteger(arr[1]);
+    l.putInteger(arr[2]);
+    return l;
+  }
+  typeDesc.putList(sTID('shadowLevels'), levelsList(shadows));
+  typeDesc.putList(sTID('midtoneLevels'), levelsList(midtones));
+  typeDesc.putList(sTID('highlightLevels'), levelsList(highlights));
+  typeDesc.putBoolean(sTID('preserveLuminosity'), !!preserveLuminosity);
+  return __mcp_makeAdjustmentLayer('colorBalance', typeDesc);
+}
+
+/**
+ * Black & White adjustment layer. colors holds per-channel mix (red/yellow/green/
+ * cyan/blue/magenta), -200..300. tint applies an RGB tintColor when useTint true.
+ * Crib: adb-mcp addAdjustmentLayerBlackAndWhite.
+ */
+function __mcp_makeBlackWhiteLayer(colors, useTint, tintR, tintG, tintB) {
+  var typeDesc = new ActionDescriptor();
+  typeDesc.putEnumerated(sTID('presetKind'), sTID('presetKindType'), sTID('presetKindDefault'));
+  typeDesc.putInteger(sTID('red'), colors.red);
+  typeDesc.putInteger(sTID('yellow'), colors.yellow);
+  typeDesc.putInteger(sTID('grain'), colors.green);
+  typeDesc.putInteger(sTID('cyan'), colors.cyan);
+  typeDesc.putInteger(sTID('blue'), colors.blue);
+  typeDesc.putInteger(sTID('magenta'), colors.magenta);
+  typeDesc.putBoolean(sTID('useTint'), !!useTint);
+  typeDesc.putObject(sTID('tintColor'), sTID('RGBColor'), __mcp_adjRgbColor(tintR, tintG, tintB));
+  return __mcp_makeAdjustmentLayer('blackAndWhite', typeDesc);
+}
+`;
+
+/**
+ * Filter Gallery / Distort / Stylize / Pixelate / Render / Blur dispatcher.
+ *
+ * `__mcp_applyFilter(name, params)` applies one filter to the ACTIVE LAYER and
+ * returns the layer name. It prefers the ArtLayer DOM `apply*` method where one
+ * exists (twirl, ripple, glowing edges, mosaic, clouds, …) and falls back to a
+ * fixed Action Manager descriptor via executeAction where the DOM has no method
+ * (shear, box/surface/shape blur, lens blur, wave, ocean ripple, glass).
+ *
+ * Assumes the shared AM helpers (__mcp_s2t / __mcp_c2t / __mcp_ensureRasterActiveLayer)
+ * from RECIPE_ACTION_HELPERS are already in scope — this block is only ever run
+ * through executeRecipe(), which prepends them.
+ *
+ * Raster-only: __mcp_ensureRasterActiveLayer rasterizes text/smart-object layers
+ * and throws on layer groups, matching the existing dedicated filter tools.
+ */
+export const MCP_FILTER_GALLERY_HELPER = `
+function __mcp_filterAction(eventStr, desc) {
+  executeAction(__mcp_s2t(eventStr), desc, DialogModes.NO);
+}
+
+// Distort > Shear, Wave, Ocean Ripple, Glass and Blur > Lens Blur all HAVE ArtLayer DOM
+// methods (verified against the Photoshop ExtendScript reference), so they are called
+// directly in __mcp_applyFilter below rather than via hand-built descriptors. Only
+// Box / Surface / Shape Blur lack a DOM method and keep an executeAction descriptor here.
+
+/** Blur > Box Blur — no DOM method; AM descriptor. */
+function __mcp_applyBoxBlur(radius) {
+  var d = new ActionDescriptor();
+  d.putUnitDouble(__mcp_s2t('radius'), __mcp_s2t('pixelsUnit'), radius);
+  __mcp_filterAction('boxBlur', d);
+}
+
+/** Blur > Surface Blur — no DOM method; AM descriptor. */
+function __mcp_applySurfaceBlur(radius, threshold) {
+  var d = new ActionDescriptor();
+  d.putUnitDouble(__mcp_s2t('radius'), __mcp_s2t('pixelsUnit'), radius);
+  d.putInteger(__mcp_s2t('threshold'), threshold);
+  __mcp_filterAction('surfaceBlur', d);
+}
+
+/**
+ * Blur > Shape Blur — no DOM method; AM descriptor. Uses the built-in "Ellipse 1" custom
+ * shape as the kernel. NOTE: the exact shape descriptor is unverified without a
+ * ScriptingListener capture; if the named preset is absent this throws and the
+ * suspendHistory scope rolls back cleanly. Flagged for live verification.
+ */
+function __mcp_applyShapeBlur(radius) {
+  var d = new ActionDescriptor();
+  d.putUnitDouble(__mcp_s2t('radius'), __mcp_s2t('pixelsUnit'), radius);
+  d.putString(__mcp_s2t('name'), 'Ellipse 1');
+  d.putBoolean(__mcp_s2t('custom'), false);
+  __mcp_filterAction('shapeBlur', d);
+}
+
+/** Map a friendly spherize mode to the DOM SpherizeMode enum. */
+function __mcp_spherizeMode(mode) {
+  if (mode === 'horizontal') return SpherizeMode.HORIZONTAL;
+  if (mode === 'vertical') return SpherizeMode.VERTICAL;
+  return SpherizeMode.NORMAL;
+}
+
+function __mcp_polarConversion(conversion) {
+  return (conversion === 'polar_to_rect')
+    ? PolarConversionType.POLARTORECTANGULAR
+    : PolarConversionType.RECTANGULARTOPOLAR;
+}
+
+function __mcp_zigZagType(style) {
+  if (style === 'around_center') return ZigZagType.AROUNDCENTER;
+  if (style === 'out_from_center') return ZigZagType.OUTFROMCENTER;
+  return ZigZagType.PONDRIPPLES;
+}
+
+function __mcp_radialBlurMethod(method) {
+  return (method === 'zoom') ? RadialBlurMethod.ZOOM : RadialBlurMethod.SPIN;
+}
+
+/** Map a friendly lens-flare lens name to the DOM LensType enum (member names differ from friendly ones). */
+function __mcp_lensType(lensType) {
+  if (lensType === 'prime35') return LensType.PRIME35;
+  if (lensType === 'prime105') return LensType.PRIME105;
+  if (lensType === 'movie') return LensType.MOVIEPRIME;
+  return LensType.ZOOMLENS; // 'zoom' default (50-300mm zoom)
+}
+
+function __mcp_waveType(waveType) {
+  if (waveType === 'triangle') return WaveType.TRIANGULAR;
+  if (waveType === 'square') return WaveType.SQUARE;
+  return WaveType.SINE;
+}
+
+/** The active layer's geometric center as a [UnitValue, UnitValue] point (for radial blur). */
+function __mcp_layerCenterUnitPoint() {
+  var b = app.activeDocument.activeLayer.bounds;
+  var cx = (b[0].as('px') + b[2].as('px')) / 2;
+  var cy = (b[1].as('px') + b[3].as('px')) / 2;
+  return [new UnitValue(cx, 'px'), new UnitValue(cy, 'px')];
+}
+
+/**
+ * Apply a filter by friendly name. \`p\` is a plain object of already-validated
+ * numeric/string params. Returns the (post-rasterize) layer name.
+ */
+function __mcp_applyFilter(name, p) {
+  var layer = __mcp_ensureRasterActiveLayer();
+  switch (name) {
+    // --- Distort ---
+    case 'twirl': layer.applyTwirl(p.angle); break;
+    case 'ripple': layer.applyRipple(p.amount, RippleSize[String(p.size).toUpperCase()] || RippleSize.MEDIUM); break;
+    case 'pinch': layer.applyPinch(p.amount); break;
+    case 'spherize': layer.applySpherize(p.amount, __mcp_spherizeMode(p.mode)); break;
+    case 'polar_coordinates': layer.applyPolarCoordinates(__mcp_polarConversion(p.conversion)); break;
+    case 'zigzag': layer.applyZigZag(p.amount, p.ridges, __mcp_zigZagType(p.style)); break;
+    case 'wave':
+      layer.applyWave(p.generators, p.minWavelength, p.maxWavelength, p.minAmplitude, p.maxAmplitude,
+        100, 100, __mcp_waveType(p.waveType), UndefinedAreas.WRAPAROUND, 1);
+      break;
+    case 'ocean_ripple': layer.applyOceanRipple(p.size, p.magnitude); break;
+    case 'glass':
+      layer.applyGlassEffect(p.distortion, p.smoothness, 100, false, TextureType.FROSTED, undefined);
+      break;
+    case 'shear':
+      layer.applyShear([[0, 0], [p.offset, 255]], UndefinedAreas.WRAPAROUND);
+      break;
+
+    // --- Stylize ---
+    case 'glowing_edges': layer.applyGlowingEdges(p.edgeWidth, p.edgeBrightness, p.smoothness); break;
+    case 'emboss': layer.applyEmboss(p.angle, p.height, p.amount); break;
+    case 'diffuse_glow': layer.applyDiffuseGlow(p.graininess, p.glowAmount, p.clearAmount); break;
+    case 'find_edges': layer.applyFindEdges(); break;
+    case 'solarize': layer.applySolarize(); break;
+
+    // --- Pixelate ---
+    case 'crystallize': layer.applyCrystallize(p.cellSize); break;
+    case 'mosaic': layer.applyMosaic(p.cellSize); break;
+    case 'pointillize': layer.applyPointillize(p.cellSize); break;
+    case 'facet': layer.applyFacet(); break;
+
+    // --- Render ---
+    case 'lens_flare':
+      var __lfB = layer.bounds;
+      var __lfX = __lfB[0].as('px') + (__lfB[2].as('px') - __lfB[0].as('px')) * (p.positionX / 100);
+      var __lfY = __lfB[1].as('px') + (__lfB[3].as('px') - __lfB[1].as('px')) * (p.positionY / 100);
+      layer.applyLensFlare(p.brightness, [[__lfX, 'px'], [__lfY, 'px']], __mcp_lensType(p.lensType));
+      break;
+    case 'difference_clouds': layer.applyDifferenceClouds(); break;
+    case 'clouds': layer.applyClouds(); break;
+
+    // --- Blur (variants not already tooled) ---
+    case 'smart_blur': layer.applySmartBlur(p.radius, p.threshold, SmartBlurQuality.HIGH, SmartBlurMode.NORMAL); break;
+    case 'radial_blur': layer.applyRadialBlur(p.amount, __mcp_radialBlurMethod(p.method), RadialBlurQuality.GOOD, __mcp_layerCenterUnitPoint()); break;
+    case 'lens_blur':
+      layer.applyLensBlur(DepthMapSource.NONE, 0, false, Geometry.HEXAGON, p.radius, 0, 0,
+        p.brightness, p.threshold, 0, NoiseDistribution.UNIFORM, false);
+      break;
+    case 'surface_blur': __mcp_applySurfaceBlur(p.radius, p.threshold); break;
+    case 'box_blur': __mcp_applyBoxBlur(p.radius); break;
+    case 'shape_blur': __mcp_applyShapeBlur(p.radius); break;
+
+    default:
+      throw new Error('Unknown filter "' + name + '"');
+  }
+  return layer.name;
+}
+`;
+
+/**
+ * Extra transform helpers (skew / free-distort corners / perspective / warp / free transform).
+ *
+ * Each function drives the Action Manager \`transform\` or \`warp\` event on the ACTIVE
+ * LAYER. Assumes the shared AM helpers (__mcp_s2t / __mcp_c2t) and
+ * __mcp_ensureRasterActiveLayer from RECIPE_ACTION_HELPERS are already in scope
+ * (always true — run only through executeRecipe()).
+ *
+ * Corner points are absolute document pixel coordinates in order
+ * [topLeft, topRight, bottomRight, bottomLeft].
+ */
+export const MCP_TRANSFORM_EXTRA_HELPER = `
+/** Read the active layer's bounds as {left,top,right,bottom,width,height} in px. */
+function __mcp_layerBoundsPx() {
+  var b = app.activeDocument.activeLayer.bounds;
+  var left = b[0].as('px'), top = b[1].as('px'), right = b[2].as('px'), bottom = b[3].as('px');
+  return { left: left, top: top, right: right, bottom: bottom, width: right - left, height: bottom - top };
+}
+
+/** Put a pixel-unit distance value. */
+function __mcp_putPx(desc, key, value) {
+  desc.putUnitDouble(__mcp_s2t(key), __mcp_s2t('pixelsUnit'), value);
+}
+
+/**
+ * Free-distort by four absolute corner points. Photoshop's \`transform\` event with a
+ * quadrilateral is expressed as offsets from the layer's current corners; we compute
+ * the mapping by translating each source corner to its target via the transform matrix
+ * built from the freeTransformQuadrilateral keys.
+ */
+function __mcp_transformCorners(tl, tr, br, bl) {
+  // Establish the layer's current corners as the free-transform source quad, then
+  // move each corner to its target. Photoshop records a free distort as a 'transform'
+  // event whose destination corners are 'point' sub-objects keyed by corner name; the
+  // freeTransformCenterState + rectangle (source bounds) anchor the mapping.
+  var bnds = __mcp_layerBoundsPx();
+  var d = new ActionDescriptor();
+  var ref = new ActionReference();
+  ref.putEnumerated(__mcp_s2t('layer'), __mcp_s2t('ordinal'), __mcp_s2t('targetEnum'));
+  d.putReference(__mcp_s2t('null'), ref);
+  d.putEnumerated(__mcp_s2t('freeTransformCenterState'), __mcp_s2t('quadCenterState'), __mcp_s2t('QCSAverage'));
+  // Source rectangle = current layer bounds.
+  var q = new ActionDescriptor();
+  __mcp_putPx(q, 'top', bnds.top);
+  __mcp_putPx(q, 'left', bnds.left);
+  __mcp_putPx(q, 'bottom', bnds.bottom);
+  __mcp_putPx(q, 'right', bnds.right);
+  d.putObject(__mcp_s2t('rectangle'), __mcp_s2t('rectangle'), q);
+  // Destination quadrilateral corners as 'point' objects.
+  var corners = [tl, tr, br, bl];
+  var keys = ['topLeft', 'topRight', 'bottomRight', 'bottomLeft'];
+  for (var i = 0; i < 4; i++) {
+    var c = new ActionDescriptor();
+    __mcp_putPx(c, 'horizontal', corners[i].x);
+    __mcp_putPx(c, 'vertical', corners[i].y);
+    d.putObject(__mcp_s2t(keys[i]), __mcp_s2t('point'), c);
+  }
+  d.putEnumerated(__mcp_s2t('interpolation'), __mcp_s2t('interpolationType'), __mcp_s2t('bicubic'));
+  executeAction(__mcp_s2t('transform'), d, DialogModes.NO);
+}
+
+/**
+ * Affine transform via the classic 'transform' event keys (width/height percent, angle,
+ * single horizontal skew, offset). This is the scriptlistener-standard form and covers
+ * scale + rotate + horizontal skew + move reliably. Vertical skew is NOT expressible here
+ * (the event has a single 'skew' key) — callers needing 2D skew use __mcp_skew (corner quad).
+ */
+function __mcp_affineTransform(scaleX, scaleY, angle, skewH, offsetX, offsetY) {
+  if (app.activeDocument.activeLayer.isBackgroundLayer) {
+    throw new Error('Cannot transform the background layer. Duplicate it or convert it to a normal layer first.');
+  }
+  var d = new ActionDescriptor();
+  var ref = new ActionReference();
+  ref.putEnumerated(__mcp_s2t('layer'), __mcp_s2t('ordinal'), __mcp_s2t('targetEnum'));
+  d.putReference(__mcp_s2t('null'), ref);
+  d.putEnumerated(__mcp_s2t('freeTransformCenterState'), __mcp_s2t('quadCenterState'), __mcp_s2t('QCSAverage'));
+  var offset = new ActionDescriptor();
+  __mcp_putPx(offset, 'horizontal', offsetX);
+  __mcp_putPx(offset, 'vertical', offsetY);
+  d.putObject(__mcp_s2t('offset'), __mcp_s2t('offset'), offset);
+  d.putUnitDouble(__mcp_s2t('width'), __mcp_s2t('percentUnit'), scaleX);
+  d.putUnitDouble(__mcp_s2t('height'), __mcp_s2t('percentUnit'), scaleY);
+  d.putUnitDouble(__mcp_s2t('angle'), __mcp_s2t('angleUnit'), angle);
+  d.putUnitDouble(__mcp_s2t('skew'), __mcp_s2t('angleUnit'), skewH);
+  d.putEnumerated(__mcp_s2t('interpolation'), __mcp_s2t('interpolationType'), __mcp_s2t('bicubic'));
+  executeAction(__mcp_s2t('transform'), d, DialogModes.NO);
+}
+
+/**
+ * Skew the active layer by horizontal/vertical angles (degrees), anchored at center.
+ * If only a horizontal skew is requested, use the reliable affine 'skew' key; if a
+ * vertical skew is present, map the four corners to a parallelogram (corner quad).
+ */
+function __mcp_skew(hAngle, vAngle) {
+  if (vAngle === 0) {
+    __mcp_affineTransform(100, 100, 0, hAngle, 0, 0);
+    return;
+  }
+  var bnds = __mcp_layerBoundsPx();
+  var hRad = hAngle * Math.PI / 180;
+  var vRad = vAngle * Math.PI / 180;
+  // Skew maps a rectangle to a parallelogram; derive the 4 target corners.
+  // Horizontal skew shifts x proportional to vertical position; vertical skew shifts
+  // y proportional to horizontal position. Anchor the top-left corner.
+  var dx = bnds.height * Math.tan(hRad);
+  var dy = bnds.width * Math.tan(vRad);
+  var tl = { x: bnds.left,        y: bnds.top };
+  var tr = { x: bnds.right,       y: bnds.top + dy };
+  var br = { x: bnds.right + dx,  y: bnds.bottom + dy };
+  var bl = { x: bnds.left + dx,   y: bnds.bottom };
+  __mcp_transformCorners(tl, tr, br, bl);
+}
+
+/**
+ * Perspective transform: symmetric squeeze by \`amount\` percent. axis 'horizontal' narrows
+ * the TOP edge; axis 'vertical' narrows the RIGHT edge. amount>0 narrows (classic
+ * perspective), amount<0 widens. Implemented via the corner quad.
+ */
+function __mcp_perspective(axis, amount) {
+  var bnds = __mcp_layerBoundsPx();
+  var tl = { x: bnds.left,  y: bnds.top };
+  var tr = { x: bnds.right, y: bnds.top };
+  var br = { x: bnds.right, y: bnds.bottom };
+  var bl = { x: bnds.left,  y: bnds.bottom };
+  if (axis === 'vertical') {
+    var vInset = bnds.height * (amount / 100) / 2;
+    // Narrow the right edge (top-right down, bottom-right up).
+    tr.y = bnds.top + vInset;
+    br.y = bnds.bottom - vInset;
+  } else {
+    var hInset = bnds.width * (amount / 100) / 2;
+    // Narrow the top edge (top-left right, top-right left).
+    tl.x = bnds.left + hInset;
+    tr.x = bnds.right - hInset;
+  }
+  __mcp_transformCorners(tl, tr, br, bl);
+}
+
+/** Warp preset style names → AM warpStyle enum strings. */
+function __mcp_warpStyleEnum(style) {
+  var map = {
+    arc: 'arc', arc_lower: 'arcLower', arc_upper: 'arcUpper', arch: 'arch',
+    bulge: 'bulge', shell_lower: 'shellLower', shell_upper: 'shellUpper',
+    flag: 'flag', wave: 'wave', fish: 'fish', rise: 'rise',
+    fisheye: 'fishEye', inflate: 'inflate', squeeze: 'squeeze', twist: 'twist'
+  };
+  var v = map[style];
+  if (!v) throw new Error('Unknown warp style "' + style + '"');
+  return v;
+}
+
+/**
+ * Warp the active layer with a preset style. \`bend\` is -100..100, \`hDistort\`/\`vDistort\`
+ * are -100..100. Orientation 'horizontal' | 'vertical'. Bend/distortion are stored as
+ * 0-1 fractions in the warp descriptor, so percent inputs are divided by 100.
+ */
+function __mcp_warp(style, bend, hDistort, vDistort, orientation) {
+  var d = new ActionDescriptor();
+  var ref = new ActionReference();
+  ref.putEnumerated(__mcp_s2t('layer'), __mcp_s2t('ordinal'), __mcp_s2t('targetEnum'));
+  d.putReference(__mcp_s2t('null'), ref);
+  var w = new ActionDescriptor();
+  w.putEnumerated(__mcp_s2t('warpStyle'), __mcp_s2t('warpStyle'), __mcp_s2t(__mcp_warpStyleEnum(style)));
+  w.putDouble(__mcp_s2t('warpValue'), bend / 100);
+  w.putDouble(__mcp_s2t('warpPerspective'), hDistort / 100);
+  w.putDouble(__mcp_s2t('warpPerspectiveOther'), vDistort / 100);
+  var orient = (orientation === 'vertical') ? 'vertical' : 'horizontal';
+  w.putEnumerated(__mcp_s2t('warpRotate'), __mcp_s2t('orientation'), __mcp_s2t(orient));
+  d.putObject(__mcp_s2t('warp'), __mcp_s2t('warp'), w);
+  executeAction(__mcp_s2t('transform'), d, DialogModes.NO);
+}
+
+/**
+ * Free transform: scale (percent), rotate (degrees), skew (degrees), anchored at center,
+ * in one call. Scale and rotation use the reliable DOM methods (layer.resize / layer.rotate,
+ * the same primitives scale_layer / rotate_layer use); skew has no DOM method and falls back
+ * to the affine 'transform' event. Background layers cannot be transformed.
+ */
+function __mcp_freeTransform(scaleX, scaleY, angle, skewH, skewV) {
+  var layer = app.activeDocument.activeLayer;
+  if (layer.isBackgroundLayer) {
+    throw new Error('Cannot transform the background layer. Duplicate it or convert it to a normal layer first.');
+  }
+  if (scaleX !== 100 || scaleY !== 100) {
+    layer.resize(scaleX, scaleY, AnchorPosition.MIDDLECENTER);
+  }
+  if (angle !== 0) {
+    layer.rotate(angle, AnchorPosition.MIDDLECENTER);
+  }
+  if (skewH !== 0) {
+    __mcp_affineTransform(100, 100, 0, skewH, 0, 0);
+  }
+  if (skewV !== 0) {
+    __mcp_skew(0, skewV);
+  }
+}
+`;
+
 export type CurvesPreset = 'auto_tone' | 'neutral';
 
 export type GradientMaskDirection =
@@ -302,7 +1325,15 @@ export const ExtendScriptSnippets = {
   /**
    * Create a text layer
    */
-  createTextLayer: (text: string, x = 100, y = 100, fontSize = 24, fontName?: string) => `
+  createTextLayer: (
+    text: string,
+    x = 100,
+    y = 100,
+    fontSize = 24,
+    fontName?: string,
+    center?: 'horizontal' | 'vertical' | 'both',
+    color?: { red: number; green: number; blue: number }
+  ) => `
     ${getContextInfo}
     ${resolveFontPostScriptName}
     
@@ -322,13 +1353,38 @@ export const ExtendScriptSnippets = {
     }
     textLayer.textItem.font = __psFont;
     ` : ''}
-    
+    ${color ? `
+    var __textColor = new SolidColor();
+    __textColor.rgb.red = ${color.red};
+    __textColor.rgb.green = ${color.green};
+    __textColor.rgb.blue = ${color.blue};
+    textLayer.textItem.color = __textColor;
+    ` : ''}
+    ${center ? `
+    // Center the text layer on the canvas by translating its bounding box.
+    var __b = textLayer.bounds;
+    var __layerCx = (__b[0].as('px') + __b[2].as('px')) / 2;
+    var __layerCy = (__b[1].as('px') + __b[3].as('px')) / 2;
+    var __dx = ${center === 'horizontal' || center === 'both' ? '(doc.width.as("px") / 2) - __layerCx' : '0'};
+    var __dy = ${center === 'vertical' || center === 'both' ? '(doc.height.as("px") / 2) - __layerCy' : '0'};
+    if (__dx !== 0 || __dy !== 0) { textLayer.translate(__dx, __dy); }
+    ` : ''}
+
+    var __finalBounds = textLayer.bounds;
     var result = {
       created: true,
       layerName: textLayer.name,
       text: "${jsString(text)}",
       position: { x: ${x}, y: ${y} },
+      centered: ${center ? `"${center}"` : 'false'},
+      bounds: {
+        left: __finalBounds[0].as('px'),
+        top: __finalBounds[1].as('px'),
+        right: __finalBounds[2].as('px'),
+        bottom: __finalBounds[3].as('px')
+      },
       fontSize: ${fontSize},
+      ${color ? `color: 'RGB(${color.red}, ${color.green}, ${color.blue})',` : ''}
       ${fontName ? `font: textLayer.textItem.font,` : ''}
       context: getContextInfo()
     };
@@ -569,9 +1625,26 @@ export const ExtendScriptSnippets = {
    */
   getLayerNames: () => `
     ${getContextInfo}
-    
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
+    }
+    // §6.6 — the DOM property layer.hasLayerMask is unreliable in PS 2026 (returns
+    // undefined even for masks created via Action Manager). Probe the layer's
+    // user-mask channel by its stable id instead: an AM getd on a layer reference
+    // keyed by id exposes the 'UsrM' property only when a user mask exists.
+    function __mcp_layerHasMaskById(layerId) {
+      try {
+        var ref = new ActionReference();
+        ref.putProperty(charIDToTypeID('Prpr'), charIDToTypeID('UsrM'));
+        ref.putIdentifier(charIDToTypeID('Lyr '), layerId);
+        var args = new ActionDescriptor();
+        args.putReference(charIDToTypeID('null'), ref);
+        var resultDesc = executeAction(charIDToTypeID('getd'), args, DialogModes.NO);
+        return resultDesc.hasKey(charIDToTypeID('UsrM'));
+      } catch (e) {
+        return false;
+      }
     }
     var doc = app.activeDocument;
     var layers = [];
@@ -579,12 +1652,15 @@ export const ExtendScriptSnippets = {
       for (var i = 0; i < container.layers.length; i++) {
         var layer = container.layers[i];
         try {
+          var layerHasMask = false;
+          try { layerHasMask = __mcp_layerHasMaskById(layer.id); } catch (eMask) { layerHasMask = false; }
           layers.push({
             name: layer.name,
-            kind: String(layer.kind),
+            kind: (layer.typename === 'LayerSet' ? 'LayerKind.GROUP' : String(layer.kind)),
             visible: layer.visible,
             opacity: layer.opacity,
-            blendMode: String(layer.blendMode)
+            blendMode: String(layer.blendMode),
+            hasMask: layerHasMask
           });
         } catch (e) {
           var layerName = 'layer_' + layers.length;
@@ -607,17 +1683,25 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Select layer by name (recursive search including layer groups)
+   * Select layer by name (recursive search including layer groups).
+   * §6.8: when layerId is supplied it targets by native id instead of by name,
+   * so a chain can re-bind to the exact layer a prior step returned. Returns the
+   * resolved layerId (the target-identity contract: layer-targeting commands
+   * accept an optional layerId and report the affected id).
    */
-  selectLayerByName: (name: string) => `
+  selectLayerByName: (name: string, layerId?: number) => `
     ${getContextInfo}
-    
+    ${MCP_LAYER_IDENTITY_HELPERS}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var targetName = "${jsString(name)}";
     var target = null;
+    ${
+      typeof layerId === 'number'
+        ? `target = __mcp_selectLayerById(${layerId});`
+        : `var targetName = "${jsString(name)}";
     function findLayer(container, name) {
       for (var i = 0; i < container.layers.length; i++) {
         var l = container.layers[i];
@@ -633,11 +1717,13 @@ export const ExtendScriptSnippets = {
     if (!target) {
       throw new Error('Layer not found: ' + targetName);
     }
-    doc.activeLayer = target;
+    doc.activeLayer = target;`
+    }
     var result = {
       selected: true,
       layerName: target.name,
-      kind: String(target.kind),
+      layerId: __mcp_layerIdSafe(target),
+      kind: (target.typename === 'LayerSet' ? 'LayerKind.GROUP' : String(target.kind)),
       context: getContextInfo()
     };
     try {
@@ -789,46 +1875,51 @@ export const ExtendScriptSnippets = {
   /**
    * Set layer opacity
    */
-  setLayerOpacity: (opacity: number) => `
+  setLayerOpacity: (opacity: number, layerId?: number) => `
     ${getContextInfo}
-    
+    ${MCP_LAYER_IDENTITY_HELPERS}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
-    
+    var layer = ${typeof layerId === 'number' ? `__mcp_selectLayerById(${layerId})` : 'doc.activeLayer'};
+
     layer.opacity = ${opacity};
-    
-    var result = { 
+
+    var result = {
       updated: true,
       property: 'opacity',
       value: layer.opacity,
       layerName: layer.name,
+      layerId: __mcp_layerIdSafe(layer),
       context: getContextInfo()
     };
     return result;
   `,
 
   /**
-   * Set layer blend mode
+   * Set layer blend mode. §6.8: optional layerId targets a specific layer and the
+   * result carries the affected layerId.
    */
-  setLayerBlendMode: (blendMode: string) => `
+  setLayerBlendMode: (blendMode: string, layerId?: number) => `
     ${getContextInfo}
-    
+    ${MCP_LAYER_IDENTITY_HELPERS}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
-    
+    var layer = ${typeof layerId === 'number' ? `__mcp_selectLayerById(${layerId})` : 'doc.activeLayer'};
+
     layer.blendMode = BlendMode.${blendMode};
-    
-    var result = { 
+
+    var result = {
       updated: true,
       property: 'blendMode',
       value: String(layer.blendMode),
       layerName: layer.name,
+      layerId: __mcp_layerIdSafe(layer),
       context: getContextInfo()
     };
     return result;
@@ -890,21 +1981,30 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Duplicate active layer
+   * Duplicate a layer (the active layer by default, or the layer with `layerId`).
+   * §6.8: returns the NEW layer's id as `layerId` — the affected-id the contract
+   * requires so a follow-up (mask/select) binds to the copy, not whatever is
+   * active. DOM layer.duplicate() does NOT reliably activate the copy (§6.1), so
+   * the id is read straight off the returned duplicate rather than from
+   * activeLayer.
    */
-  duplicateLayer: (newName?: string) => `
+  duplicateLayer: (newName?: string, layerId?: number) => `
+    ${MCP_LAYER_IDENTITY_HELPERS}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
-    
+    var layer = ${typeof layerId === 'number' ? `__mcp_selectLayerById(${layerId})` : 'doc.activeLayer'};
+
     var duplicated = layer.duplicate();
     ${newName ? `duplicated.name = "${jsString(newName)}";` : ''}
-    
-    return { 
+
+    return {
       originalName: layer.name,
-      newName: duplicated.name
+      originalLayerId: __mcp_layerIdSafe(layer),
+      newName: duplicated.name,
+      layerId: __mcp_layerIdSafe(duplicated)
     };
   `,
 
@@ -1426,9 +2526,138 @@ export const ExtendScriptSnippets = {
     }
     
     layer.textItem.contents = "${jsString(newText)}";
-    
-    return { 
+
+    return {
       text: layer.textItem.contents
+    };
+  `,
+
+  /**
+   * Set character tracking (letter-spacing) on the active text layer.
+   * Photoshop tracking is in 1/1000 em; range -1000..10000.
+   */
+  setTextTracking: (tracking: number) => `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var layer = app.activeDocument.activeLayer;
+    if (layer.kind !== LayerKind.TEXT) {
+      throw new Error('Active layer is not a text layer');
+    }
+    layer.textItem.tracking = ${tracking};
+    return {
+      tracking: layer.textItem.tracking
+    };
+  `,
+
+  /**
+   * Set leading (line spacing) in points on the active text layer, or turn on auto-leading.
+   */
+  setTextLeading: (leadingPoints: number | undefined, auto: boolean) => `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var layer = app.activeDocument.activeLayer;
+    if (layer.kind !== LayerKind.TEXT) {
+      throw new Error('Active layer is not a text layer');
+    }
+    ${
+      auto
+        ? `layer.textItem.useAutoLeading = true;`
+        : `layer.textItem.useAutoLeading = false;
+    layer.textItem.leading = ${leadingPoints};`
+    }
+    return {
+      autoLeading: layer.textItem.useAutoLeading,
+      leading: (layer.textItem.useAutoLeading ? null : layer.textItem.leading)
+    };
+  `,
+
+  /**
+   * Set kerning mode (metrics / optical / manual) on the active text layer via
+   * TextItem.autoKerning (AutoKernType). "manual" turns auto-kerning off so per-pair
+   * manual kerning applies.
+   */
+  setTextKerning: (mode: 'metrics' | 'optical' | 'manual') => `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var layer = app.activeDocument.activeLayer;
+    if (layer.kind !== LayerKind.TEXT) {
+      throw new Error('Active layer is not a text layer');
+    }
+    layer.textItem.autoKerning = AutoKernType.${
+      mode === 'metrics' ? 'METRICS' : mode === 'optical' ? 'OPTICAL' : 'MANUAL'
+    };
+    return {
+      kerning: '${mode}',
+      autoKerning: String(layer.textItem.autoKerning)
+    };
+  `,
+
+  /**
+   * Set letter case (all caps / small caps / normal) and toggle faux bold / faux italic
+   * on the active text layer. Any argument left undefined is not touched.
+   */
+  setTextCase: (
+    caseMode: 'allCaps' | 'smallCaps' | 'normal' | undefined,
+    fauxBold: boolean | undefined,
+    fauxItalic: boolean | undefined
+  ) => `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var layer = app.activeDocument.activeLayer;
+    if (layer.kind !== LayerKind.TEXT) {
+      throw new Error('Active layer is not a text layer');
+    }
+    ${
+      caseMode !== undefined
+        ? `layer.textItem.capitalization = TextCase.${
+            caseMode === 'allCaps' ? 'ALLCAPS' : caseMode === 'smallCaps' ? 'SMALLCAPS' : 'NORMAL'
+          };`
+        : ''
+    }
+    ${fauxBold !== undefined ? `layer.textItem.fauxBold = ${fauxBold};` : ''}
+    ${fauxItalic !== undefined ? `layer.textItem.fauxItalic = ${fauxItalic};` : ''}
+    return {
+      capitalization: String(layer.textItem.capitalization),
+      fauxBold: layer.textItem.fauxBold,
+      fauxItalic: layer.textItem.fauxItalic
+    };
+  `,
+
+  /**
+   * Warp the active text layer (TextItem.warpStyle + bend + distortions). style 'none'
+   * removes the warp. bend / horizontalDistortion / verticalDistortion are -100..100
+   * percentages passed straight through to the DOM (which also uses -100..100).
+   */
+  warpText: (
+    style: string,
+    bend: number,
+    horizontalDistortion: number,
+    verticalDistortion: number
+  ) => `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var layer = app.activeDocument.activeLayer;
+    if (layer.kind !== LayerKind.TEXT) {
+      throw new Error('Active layer is not a text layer');
+    }
+    layer.textItem.warpStyle = WarpStyle.${style};
+    ${
+      style === 'NONE'
+        ? ''
+        : `layer.textItem.warpBend = ${bend};
+    layer.textItem.warpHorizontalDistortion = ${horizontalDistortion};
+    layer.textItem.warpVerticalDistortion = ${verticalDistortion};`
+    }
+    return {
+      warpStyle: String(layer.textItem.warpStyle),
+      warpBend: layer.textItem.warpBend,
+      warpHorizontalDistortion: layer.textItem.warpHorizontalDistortion,
+      warpVerticalDistortion: layer.textItem.warpVerticalDistortion
     };
   `,
 
@@ -1571,18 +2800,28 @@ export const ExtendScriptSnippets = {
   /**
    * Create layer mask from selection
    */
-  createLayerMask: () => `
+  createLayerMask: (layerId?: number) => `
     ${helperFunctions}
     ${MCP_LAYER_MASK_HELPERS}
+    ${MCP_LAYER_IDENTITY_HELPERS}
 
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
+    ${
+      typeof layerId === 'number'
+        ? `// §6.8 — bind to the intended layer FIRST so the mask lands on it, not
+    // whatever happens to be active (the §6.1 mask-the-wrong-layer bug fix).
+    __mcp_selectLayerById(${layerId});`
+        : ''
+    }
+    var __mcp_maskLayerId = __mcp_layerIdSafe(app.activeDocument.activeLayer);
 
     if (__mcp_hasLayerMaskAM()) {
       return {
         maskCreated: false,
         fromSelection: false,
+        layerId: __mcp_maskLayerId,
         message: 'Layer already has a mask'
       };
     }
@@ -1595,7 +2834,8 @@ export const ExtendScriptSnippets = {
 
     return {
       maskCreated: true,
-      fromSelection: hasSelection
+      fromSelection: hasSelection,
+      layerId: __mcp_maskLayerId
     };
   `,
 

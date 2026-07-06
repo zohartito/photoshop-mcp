@@ -1,9 +1,9 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
+import { layerIdFrom } from './atomic-shared.js';
 
-export function createLayerPropertiesTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createLayerPropertiesTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -14,7 +14,7 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
           properties: {},
         },
       },
-      handler: async () => rasterizeLayer(connection),
+      handler: async () => rasterizeLayer(transport),
     },
     {
       tool: {
@@ -29,11 +29,16 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
               minimum: 0,
               maximum: 100,
             },
+            layerId: {
+              type: 'number',
+              description:
+                'Optional native layer id to target instead of the active layer (from a prior tool result). Prevents editing the wrong layer after duplicate/select.',
+            },
           },
           required: ['opacity'],
         },
       },
-      handler: async (args) => setLayerOpacity(connection, args),
+      handler: async (args) => setLayerOpacity(transport, args),
     },
     {
       tool: {
@@ -42,6 +47,11 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
         inputSchema: {
           type: 'object',
           properties: {
+            layerId: {
+              type: 'number',
+              description:
+                'Optional native layer id to target instead of the active layer (from a prior tool result).',
+            },
             blendMode: {
               type: 'string',
               description: 'Blend mode name',
@@ -79,7 +89,7 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
           required: ['blendMode'],
         },
       },
-      handler: async (args) => setLayerBlendMode(connection, args),
+      handler: async (args) => setLayerBlendMode(transport, args),
     },
     {
       tool: {
@@ -96,7 +106,7 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
           required: ['visible'],
         },
       },
-      handler: async (args) => setLayerVisibility(connection, args),
+      handler: async (args) => setLayerVisibility(transport, args),
     },
     {
       tool: {
@@ -113,7 +123,7 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
           required: ['locked'],
         },
       },
-      handler: async (args) => setLayerLocked(connection, args),
+      handler: async (args) => setLayerLocked(transport, args),
     },
     {
       tool: {
@@ -130,12 +140,13 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
           required: ['name'],
         },
       },
-      handler: async (args) => renameLayer(connection, args),
+      handler: async (args) => renameLayer(transport, args),
     },
     {
       tool: {
         name: 'photoshop_duplicate_layer',
-        description: 'Duplicate the active layer',
+        description:
+          'Duplicate the active layer (or the layer given by layerId). Returns the new layer id.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -143,10 +154,15 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
               type: 'string',
               description: 'Name for the duplicated layer (optional)',
             },
+            layerId: {
+              type: 'number',
+              description:
+                'Optional native layer id to duplicate instead of the active layer (from a prior tool result).',
+            },
           },
         },
       },
-      handler: async (args) => duplicateLayer(connection, args),
+      handler: async (args) => duplicateLayer(transport, args),
     },
     {
       tool: {
@@ -157,7 +173,7 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
           properties: {},
         },
       },
-      handler: async () => mergeVisibleLayers(connection),
+      handler: async () => mergeVisibleLayers(transport),
     },
     {
       tool: {
@@ -168,29 +184,34 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
           properties: {},
         },
       },
-      handler: async () => flattenImage(connection),
+      handler: async () => flattenImage(transport),
     },
   ];
 }
 
 async function setLayerOpacity(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const opacity = args.opacity as number;
+  const layerId = typeof args.layerId === 'number' ? args.layerId : undefined;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    const script = ExtendScriptSnippets.setLayerOpacity(opacity);
-    await api.executeScript(script);
+    const result = await transport.run({
+      name: 'set_layer_properties',
+      params: {
+        script: ExtendScriptSnippets.setLayerOpacity(opacity, layerId),
+        layerId,
+        opacity,
+      },
+    });
+    const affectedId = layerIdFrom(result);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Layer opacity set to ${opacity}%`,
+          text: `Layer opacity set to ${opacity}%${affectedId !== undefined ? ` (layerId ${affectedId})` : ''}`,
         },
       ],
     };
@@ -208,23 +229,28 @@ async function setLayerOpacity(
 }
 
 async function setLayerBlendMode(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const blendMode = args.blendMode as string;
+  const layerId = typeof args.layerId === 'number' ? args.layerId : undefined;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    const script = ExtendScriptSnippets.setLayerBlendMode(blendMode);
-    await api.executeScript(script);
+    const result = await transport.run({
+      name: 'set_layer_properties',
+      params: {
+        script: ExtendScriptSnippets.setLayerBlendMode(blendMode, layerId),
+        layerId,
+        blendMode,
+      },
+    });
+    const affectedId = layerIdFrom(result);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Layer blend mode set to ${blendMode}`,
+          text: `Layer blend mode set to ${blendMode}${affectedId !== undefined ? ` (layerId ${affectedId})` : ''}`,
         },
       ],
     };
@@ -242,17 +268,14 @@ async function setLayerBlendMode(
 }
 
 async function setLayerVisibility(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const visible = args.visible as boolean;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.setLayerVisibility(visible);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -276,17 +299,14 @@ async function setLayerVisibility(
 }
 
 async function setLayerLocked(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const locked = args.locked as boolean;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.setLayerLocked(locked);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -310,23 +330,20 @@ async function setLayerLocked(
 }
 
 async function renameLayer(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const name = args.name as string;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.renameLayer(name);
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Layer renamed to: ${name}\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer renamed to: ${name}`, details: result }, null, 2),
         },
       ],
     };
@@ -344,23 +361,34 @@ async function renameLayer(
 }
 
 async function duplicateLayer(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const newName = args.newName as string | undefined;
+  const layerId = typeof args.layerId === 'number' ? args.layerId : undefined;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    const script = ExtendScriptSnippets.duplicateLayer(newName);
-    const result = await api.executeScript(script);
+    const result = await transport.run({
+      name: 'duplicate_layer',
+      params: {
+        script: ExtendScriptSnippets.duplicateLayer(newName, layerId),
+        layerId,
+        newName,
+      },
+    });
+    // §6.8: the new layer's id is the affected-id the contract requires — surface
+    // it at the top level so a follow-up mask/select can bind to the copy.
+    const newLayerId = layerIdFrom(result);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Layer duplicated\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify(
+            { ok: true, summary: `Layer duplicated`, layerId: newLayerId, details: result },
+            null,
+            2
+          ),
         },
       ],
     };
@@ -377,13 +405,10 @@ async function duplicateLayer(
   }
 }
 
-async function mergeVisibleLayers(connection: PhotoshopConnection): Promise<ToolResult> {
+async function mergeVisibleLayers(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.mergeVisibleLayers();
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -406,13 +431,10 @@ async function mergeVisibleLayers(connection: PhotoshopConnection): Promise<Tool
   }
 }
 
-async function flattenImage(connection: PhotoshopConnection): Promise<ToolResult> {
+async function flattenImage(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.flattenImage();
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -435,19 +457,16 @@ async function flattenImage(connection: PhotoshopConnection): Promise<ToolResult
   }
 }
 
-async function rasterizeLayer(connection: PhotoshopConnection): Promise<ToolResult> {
+async function rasterizeLayer(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.rasterizeLayer();
-    const result = await api.executeScript(script);
+    const result = await transport.runScript(script);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Layer rasterized\nResult: ${JSON.stringify(result)}`,
+          text: JSON.stringify({ ok: true, summary: `Layer rasterized`, details: result }, null, 2),
         },
       ],
     };

@@ -1,5 +1,5 @@
 import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
-import { PhotoshopConnection } from '../../platform/connection.js';
+import type { TransportRouter } from '../../transport/index.js';
 import { executeRecipe } from './_shared.js';
 
 const TOOL_NAME = 'photoshop_recipe_dodge_burn';
@@ -12,7 +12,7 @@ const BLEND_MODE_BY_ARG: Record<BlendModeArg, string> = {
   soft_light: 'SOFTLIGHT',
 };
 
-export function bindDodgeBurn(connection: PhotoshopConnection): ToolDefinition {
+export function bindDodgeBurn(transport: TransportRouter): ToolDefinition {
   return {
     tool: {
       name: TOOL_NAME,
@@ -41,12 +41,12 @@ export function bindDodgeBurn(connection: PhotoshopConnection): ToolDefinition {
         },
       },
     },
-    handler: async (args) => runDodgeBurn(connection, args),
+    handler: async (args) => runDodgeBurn(transport, args),
   };
 }
 
 async function runDodgeBurn(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const blendArg = parseBlendMode(args.blend_mode);
@@ -87,7 +87,7 @@ async function runDodgeBurn(
     };
   `;
 
-  return executeRecipe(connection, 'Dodge & Burn', body);
+  return executeRecipe(transport, 'Dodge & Burn', body);
 }
 
 function parseBlendMode(raw: unknown): BlendModeArg {

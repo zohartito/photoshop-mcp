@@ -1,7 +1,7 @@
 import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
 import { ExtendScriptSnippets } from '../../api/extendscript.js';
 import { getPhotoshopCapabilities } from '../../platform/capabilities.js';
-import { PhotoshopConnection } from '../../platform/connection.js';
+import type { TransportRouter } from '../../transport/index.js';
 import {
   parseGenerativeResult,
   runGenerativeSnippet,
@@ -10,7 +10,7 @@ import { clampInt, executeRecipe } from './_shared.js';
 
 const TOOL_NAME = 'photoshop_recipe_remove_distraction';
 
-export function bindRemoveDistraction(connection: PhotoshopConnection): ToolDefinition {
+export function bindRemoveDistraction(transport: TransportRouter): ToolDefinition {
   return {
     tool: {
       name: TOOL_NAME,
@@ -43,23 +43,23 @@ export function bindRemoveDistraction(connection: PhotoshopConnection): ToolDefi
         },
       },
     },
-    handler: async (args) => runRemoveDistraction(connection, args),
+    handler: async (args) => runRemoveDistraction(transport, args),
   };
 }
 
 async function runRemoveDistraction(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const feather = clampInt(args.feather_px, 0, 20, 0);
-  const version = await connection.getVersion();
+  const version = await transport.getVersion();
   const caps = getPhotoshopCapabilities(version);
   const useGenerative =
     args.use_generative !== false && caps.features.generative_remove;
 
   if (useGenerative) {
     const raw = await runGenerativeSnippet(
-      connection,
+      transport,
       ExtendScriptSnippets.generativeRemove(feather, false)
     );
     const result = parseGenerativeResult(raw);
@@ -132,5 +132,5 @@ async function runRemoveDistraction(
     };
   `;
 
-  return executeRecipe(connection, 'Remove Distraction', body);
+  return executeRecipe(transport, 'Remove Distraction', body);
 }

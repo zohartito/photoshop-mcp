@@ -1,5 +1,5 @@
 import type { ToolDefinition } from '../../core/tool-registry.js';
-import type { PhotoshopConnection } from '../../platform/connection.js';
+import type { TransportRouter } from '../../transport/index.js';
 import { bindRemoveBackground } from './remove-background.js';
 import { bindEnhancePortrait } from './enhance-portrait.js';
 import { bindPrepareForWeb } from './prepare-for-web.js';
@@ -13,20 +13,20 @@ import { bindSkyBlend } from './sky-blend.js';
 import { bindDodgeBurn } from './dodge-burn.js';
 import { bindRemoveDistraction } from './remove-distraction.js';
 
-export function createRecipeTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createRecipeTools(transport: TransportRouter): ToolDefinition[] {
   return [
-    bindRemoveBackground(connection),
-    bindEnhancePortrait(connection),
-    bindPrepareForWeb(connection),
-    bindExportSocialVariants(connection),
-    bindApplyColorGrade(connection),
-    bindFrequencySeparation(connection),
-    bindBatchMockupReplace(connection),
-    bindOrganizeLayers(connection),
-    bindGradientFade(connection),
-    bindSkyBlend(connection),
-    bindDodgeBurn(connection),
-    bindRemoveDistraction(connection),
+    bindRemoveBackground(transport),
+    bindEnhancePortrait(transport),
+    bindPrepareForWeb(transport),
+    bindExportSocialVariants(transport),
+    bindApplyColorGrade(transport),
+    bindFrequencySeparation(transport),
+    bindBatchMockupReplace(transport),
+    bindOrganizeLayers(transport),
+    bindGradientFade(transport),
+    bindSkyBlend(transport),
+    bindDodgeBurn(transport),
+    bindRemoveDistraction(transport),
   ];
 }
 

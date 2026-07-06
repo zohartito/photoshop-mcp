@@ -1,6 +1,5 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
+import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets, type CurvesPreset } from '../api/extendscript.js';
 import {
   atomicFailureFromError,
@@ -18,7 +17,7 @@ function parseCurvesPreset(value: unknown): CurvesPreset {
   return 'auto_tone';
 }
 
-export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefinition[] {
+export function createAdjustmentTools(transport: TransportRouter): ToolDefinition[] {
   return [
     {
       tool: {
@@ -45,7 +44,7 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
           required: ['brightness', 'contrast'],
         },
       },
-      handler: async (args) => adjustBrightnessContrast(connection, args),
+      handler: async (args) => adjustBrightnessContrast(transport, args),
     },
     {
       tool: {
@@ -76,7 +75,7 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
           required: ['hue', 'saturation', 'lightness'],
         },
       },
-      handler: async (args) => adjustHueSaturation(connection, args),
+      handler: async (args) => adjustHueSaturation(transport, args),
     },
     {
       tool: {
@@ -89,7 +88,7 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
           properties: {},
         },
       },
-      handler: async () => autoLevels(connection),
+      handler: async () => autoLevels(transport),
     },
     {
       tool: {
@@ -100,7 +99,7 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
           properties: {},
         },
       },
-      handler: async () => autoContrast(connection),
+      handler: async () => autoContrast(transport),
     },
     {
       tool: {
@@ -124,7 +123,7 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
           },
         },
       },
-      handler: async (args) => adjustCurves(connection, args),
+      handler: async (args) => adjustCurves(transport, args),
     },
     {
       tool: {
@@ -135,7 +134,7 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
           properties: {},
         },
       },
-      handler: async () => desaturate(connection),
+      handler: async () => desaturate(transport),
     },
     {
       tool: {
@@ -146,24 +145,21 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
           properties: {},
         },
       },
-      handler: async () => invert(connection),
+      handler: async () => invert(transport),
     },
   ];
 }
 
 async function adjustBrightnessContrast(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const brightness = args.brightness as number;
   const contrast = args.contrast as number;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.adjustBrightnessContrast(brightness, contrast);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -187,7 +183,7 @@ async function adjustBrightnessContrast(
 }
 
 async function adjustHueSaturation(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const hue = args.hue as number;
@@ -195,11 +191,8 @@ async function adjustHueSaturation(
   const lightness = args.lightness as number;
 
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.adjustHueSaturation(hue, saturation, lightness);
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -222,13 +215,10 @@ async function adjustHueSaturation(
   }
 }
 
-async function autoLevels(connection: PhotoshopConnection): Promise<ToolResult> {
+async function autoLevels(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.autoLevels();
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -252,13 +242,13 @@ async function autoLevels(connection: PhotoshopConnection): Promise<ToolResult> 
 }
 
 async function adjustCurves(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const preset = parseCurvesPreset(args.preset);
 
   try {
-    const raw = await runSnippet(connection, ExtendScriptSnippets.adjustCurves(preset));
+    const raw = await runSnippet(transport, ExtendScriptSnippets.adjustCurves(preset));
     const parsed = parseSnippetResult(raw);
     if (!parsed) {
       return atomicFailureFromError(new Error(`Snippet returned unparseable payload: ${String(raw)}`));
@@ -276,13 +266,10 @@ async function adjustCurves(
   }
 }
 
-async function autoContrast(connection: PhotoshopConnection): Promise<ToolResult> {
+async function autoContrast(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.autoContrast();
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -305,13 +292,10 @@ async function autoContrast(connection: PhotoshopConnection): Promise<ToolResult
   }
 }
 
-async function desaturate(connection: PhotoshopConnection): Promise<ToolResult> {
+async function desaturate(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.desaturate();
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [
@@ -334,13 +318,10 @@ async function desaturate(connection: PhotoshopConnection): Promise<ToolResult> 
   }
 }
 
-async function invert(connection: PhotoshopConnection): Promise<ToolResult> {
+async function invert(transport: TransportRouter): Promise<ToolResult> {
   try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
     const script = ExtendScriptSnippets.invert();
-    await api.executeScript(script);
+    await transport.runScript(script);
 
     return {
       content: [

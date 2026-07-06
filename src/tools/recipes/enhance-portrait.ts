@@ -1,7 +1,6 @@
 import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
 import { resolvePhotoshopCapabilities } from '../../platform/capabilities.js';
-import { PhotoshopConnection } from '../../platform/connection.js';
-import { invokeNeuralFilter } from '../../platform/uxp-bridge-client.js';
+import type { TransportRouter } from '../../transport/index.js';
 import { executeRecipe } from './_shared.js';
 
 const TOOL_NAME = 'photoshop_recipe_enhance_portrait';
@@ -15,7 +14,7 @@ const RADIUS_BY_INTENSITY: Record<Intensity, number> = {
   high: 7,
 };
 
-export function bindEnhancePortrait(connection: PhotoshopConnection): ToolDefinition {
+export function bindEnhancePortrait(transport: TransportRouter): ToolDefinition {
   return {
     tool: {
       name: TOOL_NAME,
@@ -56,12 +55,12 @@ export function bindEnhancePortrait(connection: PhotoshopConnection): ToolDefini
         },
       },
     },
-    handler: async (args) => runEnhancePortrait(connection, args),
+    handler: async (args) => runEnhancePortrait(transport, args),
   };
 }
 
 async function runEnhancePortrait(
-  connection: PhotoshopConnection,
+  transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const intensity = parseIntensity(args.intensity);
@@ -69,7 +68,7 @@ async function runEnhancePortrait(
   const radius = RADIUS_BY_INTENSITY[intensity];
 
   if (args.use_neural_skin === true) {
-    const version = await connection.getVersion();
+    const version = await transport.getVersion();
     const caps = await resolvePhotoshopCapabilities(version);
     if (!caps.features.neural_filters) {
       return {
@@ -92,11 +91,17 @@ async function runEnhancePortrait(
         isError: true,
       };
     }
-    const neural = await invokeNeuralFilter('skin_smoothing', {
-      smoothness: intensity === 'high' ? 70 : intensity === 'low' ? 30 : 50,
-      blur: intensity === 'high' ? 60 : intensity === 'low' ? 25 : 40,
-    });
-    if (!neural.ok) {
+    try {
+      await transport.run({
+        name: 'neural_filter',
+        params: {
+          filter: 'skin_smoothing',
+          smoothness: intensity === 'high' ? 70 : intensity === 'low' ? 30 : 50,
+          blur: intensity === 'high' ? 60 : intensity === 'low' ? 25 : 40,
+        },
+        timeoutMs: 90_000,
+      });
+    } catch (error) {
       return {
         content: [
           {
@@ -105,7 +110,7 @@ async function runEnhancePortrait(
               {
                 ok: false,
                 code: 'uxp_bridge_unavailable',
-                message: neural.error ?? 'Neural skin smoothing failed',
+                message: error instanceof Error ? error.message : 'Neural skin smoothing failed',
                 suggested_next_tool: 'photoshop_get_capabilities',
               },
               null,
@@ -173,7 +178,7 @@ async function runEnhancePortrait(
     };
   `;
 
-  return executeRecipe(connection, 'Enhance Portrait', body);
+  return executeRecipe(transport, 'Enhance Portrait', body);
 }
 
 function parseIntensity(raw: unknown): Intensity {
