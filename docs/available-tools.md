@@ -820,3 +820,37 @@ Requires `uxp-plugin/` — see [development.md](development.md).
 
 #### `photoshop_neural_filter`
 **Parameters:** `filter` (skin_smoothing|harmonize|depth_blur|super_zoom), `smoothness`, `blur`
+
+### Smart Objects
+
+Full reference: [tools/smart-objects-and-type.md](tools/smart-objects-and-type.md). Replace/export require the active layer to already be a Smart Object; convert and replace are one undo, export is a read-only disk write.
+
+#### `photoshop_convert_to_smart_object`
+Convert the active (or selected) layer(s) to one Smart Object (`newPlacedLayer`). **Parameters:** none
+
+#### `photoshop_replace_smart_object_contents`
+Replace the active Smart Object's contents from an image file (the mockup workflow). **Parameters:** `filePath` (required)
+
+#### `photoshop_export_smart_object_contents`
+Export the active Smart Object's embedded source to disk, unmodified. **Parameters:** `outputPath` (required)
+
+> Rasterizing a Smart Object back to pixels is handled by `photoshop_rasterize_layer` — no dedicated tool.
+
+### Type — Precise Controls
+
+Full reference: [tools/smart-objects-and-type.md](tools/smart-objects-and-type.md). All operate on the active **text** layer (clear error otherwise) and extend the base type tools.
+
+#### `photoshop_set_text_tracking`
+Set tracking (letter-spacing) in 1/1000 em. **Parameters:** `tracking` (required, -1000..10000)
+
+#### `photoshop_set_text_leading`
+Set leading in points, or auto-leading. **Parameters:** `leading`, `auto`
+
+#### `photoshop_set_text_kerning`
+Set kerning mode. **Parameters:** `mode` (required: metrics|optical|manual)
+
+#### `photoshop_set_text_case`
+Set case display + faux styles. **Parameters:** `case` (allCaps|smallCaps|normal), `fauxBold`, `fauxItalic`
+
+#### `photoshop_warp_text`
+Warp the text layer or remove the warp. **Parameters:** `style` (required: none|arc|arcLower|arcUpper|arch|bulge|flag|wave|fish|rise|fisheye|inflate|squeeze|twist), `bend`, `horizontalDistortion`, `verticalDistortion`
