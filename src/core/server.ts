@@ -21,6 +21,8 @@ import { createImagePlacementTools } from '../tools/image-placement-tools.js';
 import { createLayerTransformTools } from '../tools/layer-transform-tools.js';
 import { createLayerPropertiesTools } from '../tools/layer-properties-tools.js';
 import { createFilterTools } from '../tools/filter-tools.js';
+import { createFilterGalleryTools } from '../tools/filter-gallery-tools.js';
+import { createTransformExtraTools } from '../tools/transform-extra-tools.js';
 import { createAdjustmentTools } from '../tools/adjustment-tools.js';
 import { createAdjustmentLayerTools } from '../tools/adjustment-layer-tools.js';
 import { createTextTools } from '../tools/text-tools.js';
@@ -130,6 +132,8 @@ export class PhotoshopMCPServer {
     this.registerToolDefinitions(createLayerTransformTools(transport));
     this.registerToolDefinitions(createLayerPropertiesTools(transport));
     this.registerToolDefinitions(createFilterTools(transport));
+    this.registerToolDefinitions(createFilterGalleryTools(transport));
+    this.registerToolDefinitions(createTransformExtraTools(transport));
     this.registerToolDefinitions(createAdjustmentTools(transport));
     this.registerToolDefinitions(createAdjustmentLayerTools(transport));
     this.registerToolDefinitions(createTextTools(transport));

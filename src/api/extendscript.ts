@@ -875,6 +875,356 @@ function __mcp_makeBlackWhiteLayer(colors, useTint, tintR, tintG, tintB) {
 }
 `;
 
+/**
+ * Filter Gallery / Distort / Stylize / Pixelate / Render / Blur dispatcher.
+ *
+ * `__mcp_applyFilter(name, params)` applies one filter to the ACTIVE LAYER and
+ * returns the layer name. It prefers the ArtLayer DOM `apply*` method where one
+ * exists (twirl, ripple, glowing edges, mosaic, clouds, …) and falls back to a
+ * fixed Action Manager descriptor via executeAction where the DOM has no method
+ * (shear, box/surface/shape blur, lens blur, wave, ocean ripple, glass).
+ *
+ * Assumes the shared AM helpers (__mcp_s2t / __mcp_c2t / __mcp_ensureRasterActiveLayer)
+ * from RECIPE_ACTION_HELPERS are already in scope — this block is only ever run
+ * through executeRecipe(), which prepends them.
+ *
+ * Raster-only: __mcp_ensureRasterActiveLayer rasterizes text/smart-object layers
+ * and throws on layer groups, matching the existing dedicated filter tools.
+ */
+export const MCP_FILTER_GALLERY_HELPER = `
+function __mcp_filterAction(eventStr, desc) {
+  executeAction(__mcp_s2t(eventStr), desc, DialogModes.NO);
+}
+
+// Distort > Shear, Wave, Ocean Ripple, Glass and Blur > Lens Blur all HAVE ArtLayer DOM
+// methods (verified against the Photoshop ExtendScript reference), so they are called
+// directly in __mcp_applyFilter below rather than via hand-built descriptors. Only
+// Box / Surface / Shape Blur lack a DOM method and keep an executeAction descriptor here.
+
+/** Blur > Box Blur — no DOM method; AM descriptor. */
+function __mcp_applyBoxBlur(radius) {
+  var d = new ActionDescriptor();
+  d.putUnitDouble(__mcp_s2t('radius'), __mcp_s2t('pixelsUnit'), radius);
+  __mcp_filterAction('boxBlur', d);
+}
+
+/** Blur > Surface Blur — no DOM method; AM descriptor. */
+function __mcp_applySurfaceBlur(radius, threshold) {
+  var d = new ActionDescriptor();
+  d.putUnitDouble(__mcp_s2t('radius'), __mcp_s2t('pixelsUnit'), radius);
+  d.putInteger(__mcp_s2t('threshold'), threshold);
+  __mcp_filterAction('surfaceBlur', d);
+}
+
+/**
+ * Blur > Shape Blur — no DOM method; AM descriptor. Uses the built-in "Ellipse 1" custom
+ * shape as the kernel. NOTE: the exact shape descriptor is unverified without a
+ * ScriptingListener capture; if the named preset is absent this throws and the
+ * suspendHistory scope rolls back cleanly. Flagged for live verification.
+ */
+function __mcp_applyShapeBlur(radius) {
+  var d = new ActionDescriptor();
+  d.putUnitDouble(__mcp_s2t('radius'), __mcp_s2t('pixelsUnit'), radius);
+  d.putString(__mcp_s2t('name'), 'Ellipse 1');
+  d.putBoolean(__mcp_s2t('custom'), false);
+  __mcp_filterAction('shapeBlur', d);
+}
+
+/** Map a friendly spherize mode to the DOM SpherizeMode enum. */
+function __mcp_spherizeMode(mode) {
+  if (mode === 'horizontal') return SpherizeMode.HORIZONTAL;
+  if (mode === 'vertical') return SpherizeMode.VERTICAL;
+  return SpherizeMode.NORMAL;
+}
+
+function __mcp_polarConversion(conversion) {
+  return (conversion === 'polar_to_rect')
+    ? PolarConversionType.POLARTORECTANGULAR
+    : PolarConversionType.RECTANGULARTOPOLAR;
+}
+
+function __mcp_zigZagType(style) {
+  if (style === 'around_center') return ZigZagType.AROUNDCENTER;
+  if (style === 'out_from_center') return ZigZagType.OUTFROMCENTER;
+  return ZigZagType.PONDRIPPLES;
+}
+
+function __mcp_radialBlurMethod(method) {
+  return (method === 'zoom') ? RadialBlurMethod.ZOOM : RadialBlurMethod.SPIN;
+}
+
+/** Map a friendly lens-flare lens name to the DOM LensType enum (member names differ from friendly ones). */
+function __mcp_lensType(lensType) {
+  if (lensType === 'prime35') return LensType.PRIME35;
+  if (lensType === 'prime105') return LensType.PRIME105;
+  if (lensType === 'movie') return LensType.MOVIEPRIME;
+  return LensType.ZOOMLENS; // 'zoom' default (50-300mm zoom)
+}
+
+function __mcp_waveType(waveType) {
+  if (waveType === 'triangle') return WaveType.TRIANGULAR;
+  if (waveType === 'square') return WaveType.SQUARE;
+  return WaveType.SINE;
+}
+
+/** The active layer's geometric center as a [UnitValue, UnitValue] point (for radial blur). */
+function __mcp_layerCenterUnitPoint() {
+  var b = app.activeDocument.activeLayer.bounds;
+  var cx = (b[0].as('px') + b[2].as('px')) / 2;
+  var cy = (b[1].as('px') + b[3].as('px')) / 2;
+  return [new UnitValue(cx, 'px'), new UnitValue(cy, 'px')];
+}
+
+/**
+ * Apply a filter by friendly name. \`p\` is a plain object of already-validated
+ * numeric/string params. Returns the (post-rasterize) layer name.
+ */
+function __mcp_applyFilter(name, p) {
+  var layer = __mcp_ensureRasterActiveLayer();
+  switch (name) {
+    // --- Distort ---
+    case 'twirl': layer.applyTwirl(p.angle); break;
+    case 'ripple': layer.applyRipple(p.amount, RippleSize[String(p.size).toUpperCase()] || RippleSize.MEDIUM); break;
+    case 'pinch': layer.applyPinch(p.amount); break;
+    case 'spherize': layer.applySpherize(p.amount, __mcp_spherizeMode(p.mode)); break;
+    case 'polar_coordinates': layer.applyPolarCoordinates(__mcp_polarConversion(p.conversion)); break;
+    case 'zigzag': layer.applyZigZag(p.amount, p.ridges, __mcp_zigZagType(p.style)); break;
+    case 'wave':
+      layer.applyWave(p.generators, p.minWavelength, p.maxWavelength, p.minAmplitude, p.maxAmplitude,
+        100, 100, __mcp_waveType(p.waveType), UndefinedAreas.WRAPAROUND, 1);
+      break;
+    case 'ocean_ripple': layer.applyOceanRipple(p.size, p.magnitude); break;
+    case 'glass':
+      layer.applyGlassEffect(p.distortion, p.smoothness, 100, false, TextureType.FROSTED, undefined);
+      break;
+    case 'shear':
+      layer.applyShear([[0, 0], [p.offset, 255]], UndefinedAreas.WRAPAROUND);
+      break;
+
+    // --- Stylize ---
+    case 'glowing_edges': layer.applyGlowingEdges(p.edgeWidth, p.edgeBrightness, p.smoothness); break;
+    case 'emboss': layer.applyEmboss(p.angle, p.height, p.amount); break;
+    case 'diffuse_glow': layer.applyDiffuseGlow(p.graininess, p.glowAmount, p.clearAmount); break;
+    case 'find_edges': layer.applyFindEdges(); break;
+    case 'solarize': layer.applySolarize(); break;
+
+    // --- Pixelate ---
+    case 'crystallize': layer.applyCrystallize(p.cellSize); break;
+    case 'mosaic': layer.applyMosaic(p.cellSize); break;
+    case 'pointillize': layer.applyPointillize(p.cellSize); break;
+    case 'facet': layer.applyFacet(); break;
+
+    // --- Render ---
+    case 'lens_flare':
+      var __lfB = layer.bounds;
+      var __lfX = __lfB[0].as('px') + (__lfB[2].as('px') - __lfB[0].as('px')) * (p.positionX / 100);
+      var __lfY = __lfB[1].as('px') + (__lfB[3].as('px') - __lfB[1].as('px')) * (p.positionY / 100);
+      layer.applyLensFlare(p.brightness, [[__lfX, 'px'], [__lfY, 'px']], __mcp_lensType(p.lensType));
+      break;
+    case 'difference_clouds': layer.applyDifferenceClouds(); break;
+    case 'clouds': layer.applyClouds(); break;
+
+    // --- Blur (variants not already tooled) ---
+    case 'smart_blur': layer.applySmartBlur(p.radius, p.threshold, SmartBlurQuality.HIGH, SmartBlurMode.NORMAL); break;
+    case 'radial_blur': layer.applyRadialBlur(p.amount, __mcp_radialBlurMethod(p.method), RadialBlurQuality.GOOD, __mcp_layerCenterUnitPoint()); break;
+    case 'lens_blur':
+      layer.applyLensBlur(DepthMapSource.NONE, 0, false, Geometry.HEXAGON, p.radius, 0, 0,
+        p.brightness, p.threshold, 0, NoiseDistribution.UNIFORM, false);
+      break;
+    case 'surface_blur': __mcp_applySurfaceBlur(p.radius, p.threshold); break;
+    case 'box_blur': __mcp_applyBoxBlur(p.radius); break;
+    case 'shape_blur': __mcp_applyShapeBlur(p.radius); break;
+
+    default:
+      throw new Error('Unknown filter "' + name + '"');
+  }
+  return layer.name;
+}
+`;
+
+/**
+ * Extra transform helpers (skew / free-distort corners / perspective / warp / free transform).
+ *
+ * Each function drives the Action Manager \`transform\` or \`warp\` event on the ACTIVE
+ * LAYER. Assumes the shared AM helpers (__mcp_s2t / __mcp_c2t) and
+ * __mcp_ensureRasterActiveLayer from RECIPE_ACTION_HELPERS are already in scope
+ * (always true — run only through executeRecipe()).
+ *
+ * Corner points are absolute document pixel coordinates in order
+ * [topLeft, topRight, bottomRight, bottomLeft].
+ */
+export const MCP_TRANSFORM_EXTRA_HELPER = `
+/** Read the active layer's bounds as {left,top,right,bottom,width,height} in px. */
+function __mcp_layerBoundsPx() {
+  var b = app.activeDocument.activeLayer.bounds;
+  var left = b[0].as('px'), top = b[1].as('px'), right = b[2].as('px'), bottom = b[3].as('px');
+  return { left: left, top: top, right: right, bottom: bottom, width: right - left, height: bottom - top };
+}
+
+/** Put a pixel-unit distance value. */
+function __mcp_putPx(desc, key, value) {
+  desc.putUnitDouble(__mcp_s2t(key), __mcp_s2t('pixelsUnit'), value);
+}
+
+/**
+ * Free-distort by four absolute corner points. Photoshop's \`transform\` event with a
+ * quadrilateral is expressed as offsets from the layer's current corners; we compute
+ * the mapping by translating each source corner to its target via the transform matrix
+ * built from the freeTransformQuadrilateral keys.
+ */
+function __mcp_transformCorners(tl, tr, br, bl) {
+  // Establish the layer's current corners as the free-transform source quad, then
+  // move each corner to its target. Photoshop records a free distort as a 'transform'
+  // event whose destination corners are 'point' sub-objects keyed by corner name; the
+  // freeTransformCenterState + rectangle (source bounds) anchor the mapping.
+  var bnds = __mcp_layerBoundsPx();
+  var d = new ActionDescriptor();
+  var ref = new ActionReference();
+  ref.putEnumerated(__mcp_s2t('layer'), __mcp_s2t('ordinal'), __mcp_s2t('targetEnum'));
+  d.putReference(__mcp_s2t('null'), ref);
+  d.putEnumerated(__mcp_s2t('freeTransformCenterState'), __mcp_s2t('quadCenterState'), __mcp_s2t('QCSAverage'));
+  // Source rectangle = current layer bounds.
+  var q = new ActionDescriptor();
+  __mcp_putPx(q, 'top', bnds.top);
+  __mcp_putPx(q, 'left', bnds.left);
+  __mcp_putPx(q, 'bottom', bnds.bottom);
+  __mcp_putPx(q, 'right', bnds.right);
+  d.putObject(__mcp_s2t('rectangle'), __mcp_s2t('rectangle'), q);
+  // Destination quadrilateral corners as 'point' objects.
+  var corners = [tl, tr, br, bl];
+  var keys = ['topLeft', 'topRight', 'bottomRight', 'bottomLeft'];
+  for (var i = 0; i < 4; i++) {
+    var c = new ActionDescriptor();
+    __mcp_putPx(c, 'horizontal', corners[i].x);
+    __mcp_putPx(c, 'vertical', corners[i].y);
+    d.putObject(__mcp_s2t(keys[i]), __mcp_s2t('point'), c);
+  }
+  d.putEnumerated(__mcp_s2t('interpolation'), __mcp_s2t('interpolationType'), __mcp_s2t('bicubic'));
+  executeAction(__mcp_s2t('transform'), d, DialogModes.NO);
+}
+
+/**
+ * Affine transform via the classic 'transform' event keys (width/height percent, angle,
+ * single horizontal skew, offset). This is the scriptlistener-standard form and covers
+ * scale + rotate + horizontal skew + move reliably. Vertical skew is NOT expressible here
+ * (the event has a single 'skew' key) — callers needing 2D skew use __mcp_skew (corner quad).
+ */
+function __mcp_affineTransform(scaleX, scaleY, angle, skewH, offsetX, offsetY) {
+  var d = new ActionDescriptor();
+  var ref = new ActionReference();
+  ref.putEnumerated(__mcp_s2t('layer'), __mcp_s2t('ordinal'), __mcp_s2t('targetEnum'));
+  d.putReference(__mcp_s2t('null'), ref);
+  d.putEnumerated(__mcp_s2t('freeTransformCenterState'), __mcp_s2t('quadCenterState'), __mcp_s2t('QCSAverage'));
+  var offset = new ActionDescriptor();
+  __mcp_putPx(offset, 'horizontal', offsetX);
+  __mcp_putPx(offset, 'vertical', offsetY);
+  d.putObject(__mcp_s2t('offset'), __mcp_s2t('offset'), offset);
+  d.putUnitDouble(__mcp_s2t('width'), __mcp_s2t('percentUnit'), scaleX);
+  d.putUnitDouble(__mcp_s2t('height'), __mcp_s2t('percentUnit'), scaleY);
+  d.putUnitDouble(__mcp_s2t('angle'), __mcp_s2t('angleUnit'), angle);
+  d.putUnitDouble(__mcp_s2t('skew'), __mcp_s2t('angleUnit'), skewH);
+  d.putEnumerated(__mcp_s2t('interpolation'), __mcp_s2t('interpolationType'), __mcp_s2t('bicubic'));
+  executeAction(__mcp_s2t('transform'), d, DialogModes.NO);
+}
+
+/**
+ * Skew the active layer by horizontal/vertical angles (degrees), anchored at center.
+ * If only a horizontal skew is requested, use the reliable affine 'skew' key; if a
+ * vertical skew is present, map the four corners to a parallelogram (corner quad).
+ */
+function __mcp_skew(hAngle, vAngle) {
+  if (vAngle === 0) {
+    __mcp_affineTransform(100, 100, 0, hAngle, 0, 0);
+    return;
+  }
+  var bnds = __mcp_layerBoundsPx();
+  var hRad = hAngle * Math.PI / 180;
+  var vRad = vAngle * Math.PI / 180;
+  // Skew maps a rectangle to a parallelogram; derive the 4 target corners.
+  // Horizontal skew shifts x proportional to vertical position; vertical skew shifts
+  // y proportional to horizontal position. Anchor the top-left corner.
+  var dx = bnds.height * Math.tan(hRad);
+  var dy = bnds.width * Math.tan(vRad);
+  var tl = { x: bnds.left,        y: bnds.top };
+  var tr = { x: bnds.right,       y: bnds.top + dy };
+  var br = { x: bnds.right + dx,  y: bnds.bottom + dy };
+  var bl = { x: bnds.left + dx,   y: bnds.bottom };
+  __mcp_transformCorners(tl, tr, br, bl);
+}
+
+/**
+ * Perspective transform: symmetric squeeze by \`amount\` percent. axis 'horizontal' narrows
+ * the TOP edge; axis 'vertical' narrows the RIGHT edge. amount>0 narrows (classic
+ * perspective), amount<0 widens. Implemented via the corner quad.
+ */
+function __mcp_perspective(axis, amount) {
+  var bnds = __mcp_layerBoundsPx();
+  var tl = { x: bnds.left,  y: bnds.top };
+  var tr = { x: bnds.right, y: bnds.top };
+  var br = { x: bnds.right, y: bnds.bottom };
+  var bl = { x: bnds.left,  y: bnds.bottom };
+  if (axis === 'vertical') {
+    var vInset = bnds.height * (amount / 100) / 2;
+    // Narrow the right edge (top-right down, bottom-right up).
+    tr.y = bnds.top + vInset;
+    br.y = bnds.bottom - vInset;
+  } else {
+    var hInset = bnds.width * (amount / 100) / 2;
+    // Narrow the top edge (top-left right, top-right left).
+    tl.x = bnds.left + hInset;
+    tr.x = bnds.right - hInset;
+  }
+  __mcp_transformCorners(tl, tr, br, bl);
+}
+
+/** Warp preset style names → AM warpStyle enum strings. */
+function __mcp_warpStyleEnum(style) {
+  var map = {
+    arc: 'arc', arc_lower: 'arcLower', arc_upper: 'arcUpper', arch: 'arch',
+    bulge: 'bulge', shell_lower: 'shellLower', shell_upper: 'shellUpper',
+    flag: 'flag', wave: 'wave', fish: 'fish', rise: 'rise',
+    fisheye: 'fishEye', inflate: 'inflate', squeeze: 'squeeze', twist: 'twist'
+  };
+  var v = map[style];
+  if (!v) throw new Error('Unknown warp style "' + style + '"');
+  return v;
+}
+
+/**
+ * Warp the active layer with a preset style. \`bend\` is -100..100, \`hDistort\`/\`vDistort\`
+ * are -100..100. Orientation 'horizontal' | 'vertical'. Bend/distortion are stored as
+ * 0-1 fractions in the warp descriptor, so percent inputs are divided by 100.
+ */
+function __mcp_warp(style, bend, hDistort, vDistort, orientation) {
+  var d = new ActionDescriptor();
+  var ref = new ActionReference();
+  ref.putEnumerated(__mcp_s2t('layer'), __mcp_s2t('ordinal'), __mcp_s2t('targetEnum'));
+  d.putReference(__mcp_s2t('null'), ref);
+  var w = new ActionDescriptor();
+  w.putEnumerated(__mcp_s2t('warpStyle'), __mcp_s2t('warpStyle'), __mcp_s2t(__mcp_warpStyleEnum(style)));
+  w.putDouble(__mcp_s2t('warpValue'), bend / 100);
+  w.putDouble(__mcp_s2t('warpPerspective'), hDistort / 100);
+  w.putDouble(__mcp_s2t('warpPerspectiveOther'), vDistort / 100);
+  var orient = (orientation === 'vertical') ? 'vertical' : 'horizontal';
+  w.putEnumerated(__mcp_s2t('warpRotate'), __mcp_s2t('orientation'), __mcp_s2t(orient));
+  d.putObject(__mcp_s2t('warp'), __mcp_s2t('warp'), w);
+  executeAction(__mcp_s2t('transform'), d, DialogModes.NO);
+}
+
+/**
+ * Free transform: scale (percent), rotate (degrees), horizontal skew (degrees), anchored
+ * at center, in one call. Uses the reliable affine 'transform' keys. If a vertical skew is
+ * also requested, it is applied as a second corner-quad skew pass (still inside the same
+ * one-undo suspendHistory scope).
+ */
+function __mcp_freeTransform(scaleX, scaleY, angle, skewH, skewV) {
+  __mcp_affineTransform(scaleX, scaleY, angle, skewH, 0, 0);
+  if (skewV !== 0) {
+    __mcp_skew(0, skewV);
+  }
+}
+`;
+
 export type CurvesPreset = 'auto_tone' | 'neutral';
 
 export type GradientMaskDirection =
