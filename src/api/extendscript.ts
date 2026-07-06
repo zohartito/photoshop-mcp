@@ -580,6 +580,281 @@ function __mcp_applyLayerEffect(effectKey, subDesc, globalAngle) {
 }
 `;
 
+/**
+ * Adjustment-layer helpers — create NON-DESTRUCTIVE adjustment layers above the
+ * active layer via the "Make adjustmentLayer" Action Manager pattern:
+ * executeAction(sTID('make'), desc, DialogModes.NO) where desc.using -> object
+ * (class adjustmentLayer) -> key `type` -> the per-adjustment descriptor.
+ *
+ * Descriptor shapes are cribbed from the UXP batchPlay reference
+ * (~/adb-mcp/uxp/ps/commands/adjustment_layers.js) for black&white / vibrance /
+ * colorBalance, and from Photoshop ScriptingListener captures for curves / levels /
+ * gradientMapClass / selectiveColor / photoFilter. batchPlay JSON descriptors map
+ * 1:1 onto these ActionDescriptor putX calls.
+ *
+ * RGBColor QUIRK: the Action Manager RGBColor object uses key `grain` for the GREEN
+ * channel (not `green`) — same quirk as the layer-style helpers.
+ *
+ * Uses sTID/cTID/__mcp_s2t/__mcp_c2t which are provided by RECIPE_ACTION_HELPERS
+ * (the suspendHistory wrap). Every tool creates exactly ONE adjustment layer, so the
+ * suspendHistory scope collapses it to a single undo.
+ */
+export const MCP_ADJUSTMENT_LAYER_HELPERS = `
+/** Throw a clear error unless the active document is RGB (adjustment layers assume RGB channels). */
+function __mcp_assertRgbForAdjustment() {
+  if (app.documents.length === 0) {
+    throw new Error('No active document. Open or create a document first.');
+  }
+  var doc = app.activeDocument;
+  if (doc.mode !== DocumentMode.RGB) {
+    throw new Error(
+      'This adjustment layer requires an RGB document. Active document mode is ' +
+      String(doc.mode) + '. Convert to RGB (Image > Mode > RGB Color) first.'
+    );
+  }
+}
+
+/** Assert a document exists (adjustment layers that work in any color mode). */
+function __mcp_assertDocForAdjustment() {
+  if (app.documents.length === 0) {
+    throw new Error('No active document. Open or create a document first.');
+  }
+}
+
+/** Build an RGBColor descriptor. NOTE: green channel uses key "grain" (AM quirk). */
+function __mcp_adjRgbColor(red, green, blue) {
+  var c = new ActionDescriptor();
+  c.putDouble(sTID('red'), red);
+  c.putDouble(sTID('grain'), green);
+  c.putDouble(sTID('blue'), blue);
+  return c;
+}
+
+/**
+ * Run the standard "Make adjustmentLayer" executeAction given a type descriptor
+ * and its type stringID. Returns the newly-created adjustment layer's name.
+ */
+function __mcp_makeAdjustmentLayer(typeStringId, typeDesc) {
+  var desc = new ActionDescriptor();
+  var ref = new ActionReference();
+  ref.putClass(sTID('adjustmentLayer'));
+  desc.putReference(sTID('null'), ref);
+  var using = new ActionDescriptor();
+  using.putObject(sTID('type'), sTID(typeStringId), typeDesc);
+  desc.putObject(sTID('using'), sTID('adjustmentLayer'), using);
+  executeAction(sTID('make'), desc, DialogModes.NO);
+  return app.activeDocument.activeLayer.name;
+}
+
+/** Map a channel name to the curves/levels channel ActionReference. */
+function __mcp_channelRef(channelName) {
+  var ref = new ActionReference();
+  var name = String(channelName || 'composite').toLowerCase();
+  if (name === 'red') {
+    ref.putEnumerated(cTID('Chnl'), cTID('Chnl'), cTID('Rd  '));
+  } else if (name === 'green') {
+    ref.putEnumerated(cTID('Chnl'), cTID('Chnl'), cTID('Grn '));
+  } else if (name === 'blue') {
+    ref.putEnumerated(cTID('Chnl'), cTID('Chnl'), cTID('Bl  '));
+  } else {
+    ref.putEnumerated(cTID('Chnl'), cTID('Chnl'), cTID('Cmps'));
+  }
+  return ref;
+}
+
+/**
+ * Curves adjustment layer with arbitrary points on one channel.
+ * points: array of { input: 0-255, output: 0-255 } (already sorted/clamped by TS).
+ */
+function __mcp_makeCurvesPointsLayer(channelName, points) {
+  var curvesAdjust = new ActionDescriptor();
+  var adjustments = new ActionList();
+  var pair = new ActionDescriptor();
+  var pointList = new ActionList();
+  for (var i = 0; i < points.length; i++) {
+    var pt = new ActionDescriptor();
+    pt.putDouble(cTID('Hrzn'), points[i].input);
+    pt.putDouble(cTID('Vrtc'), points[i].output);
+    pointList.putObject(cTID('Pnt '), pt);
+  }
+  pair.putList(cTID('Crv '), pointList);
+  pair.putReference(cTID('Chnl'), __mcp_channelRef(channelName));
+  adjustments.putObject(cTID('CrvA'), pair);
+  curvesAdjust.putList(cTID('Adjs'), adjustments);
+  return __mcp_makeAdjustmentLayer('curves', curvesAdjust);
+}
+
+/**
+ * Levels adjustment layer on one channel.
+ * inputBlack/inputWhite 0-255, gamma 0.1-9.99, outputBlack/outputWhite 0-255.
+ */
+function __mcp_makeLevelsLayer(channelName, inputBlack, inputWhite, gamma, outputBlack, outputWhite) {
+  var levelsDesc = new ActionDescriptor();
+  levelsDesc.putEnumerated(sTID('presetKind'), sTID('presetKindType'), sTID('presetKindCustom'));
+  var adjustments = new ActionList();
+  var entry = new ActionDescriptor();
+  entry.putReference(sTID('channel'), __mcp_channelRef(channelName));
+  var inputList = new ActionList();
+  inputList.putInteger(inputBlack);
+  inputList.putInteger(inputWhite);
+  entry.putList(sTID('input'), inputList);
+  entry.putDouble(sTID('gamma'), gamma);
+  var outputList = new ActionList();
+  outputList.putInteger(outputBlack);
+  outputList.putInteger(outputWhite);
+  entry.putList(sTID('output'), outputList);
+  adjustments.putObject(sTID('levelsAdjustment'), entry);
+  levelsDesc.putList(sTID('adjustment'), adjustments);
+  return __mcp_makeAdjustmentLayer('levels', levelsDesc);
+}
+
+/**
+ * Gradient Map adjustment layer from a start color to an end color.
+ * reverse flips the gradient. Colors are {r,g,b} 0-255.
+ */
+function __mcp_makeGradientMapLayer(startR, startG, startB, endR, endG, endB, reverse, dither) {
+  var typeDesc = new ActionDescriptor();
+  var gradient = new ActionDescriptor();
+  gradient.putString(sTID('name'), 'Custom');
+  gradient.putEnumerated(sTID('gradientForm'), sTID('gradientForm'), sTID('customStops'));
+  gradient.putDouble(sTID('interfaceIconFrameDimmed'), 4096.0);
+
+  var colors = new ActionList();
+  var startStop = new ActionDescriptor();
+  startStop.putObject(sTID('color'), sTID('RGBColor'), __mcp_adjRgbColor(startR, startG, startB));
+  startStop.putEnumerated(sTID('type'), sTID('colorStopType'), sTID('userStop'));
+  startStop.putInteger(sTID('location'), 0);
+  startStop.putInteger(sTID('midpoint'), 50);
+  colors.putObject(sTID('colorStop'), startStop);
+  var endStop = new ActionDescriptor();
+  endStop.putObject(sTID('color'), sTID('RGBColor'), __mcp_adjRgbColor(endR, endG, endB));
+  endStop.putEnumerated(sTID('type'), sTID('colorStopType'), sTID('userStop'));
+  endStop.putInteger(sTID('location'), 4096);
+  endStop.putInteger(sTID('midpoint'), 50);
+  colors.putObject(sTID('colorStop'), endStop);
+  gradient.putList(sTID('colors'), colors);
+
+  var transparency = new ActionList();
+  var startOpacity = new ActionDescriptor();
+  startOpacity.putUnitDouble(sTID('opacity'), sTID('percentUnit'), 100.0);
+  startOpacity.putInteger(sTID('location'), 0);
+  startOpacity.putInteger(sTID('midpoint'), 50);
+  transparency.putObject(sTID('transferSpec'), startOpacity);
+  var endOpacity = new ActionDescriptor();
+  endOpacity.putUnitDouble(sTID('opacity'), sTID('percentUnit'), 100.0);
+  endOpacity.putInteger(sTID('location'), 4096);
+  endOpacity.putInteger(sTID('midpoint'), 50);
+  transparency.putObject(sTID('transferSpec'), endOpacity);
+  gradient.putList(sTID('transparency'), transparency);
+
+  typeDesc.putObject(sTID('gradient'), sTID('gradientClassEvent'), gradient);
+  typeDesc.putBoolean(sTID('reverse'), !!reverse);
+  typeDesc.putBoolean(sTID('dither'), !!dither);
+  return __mcp_makeAdjustmentLayer('gradientMapClass', typeDesc);
+}
+
+/** Map a selective-color target name to its colors enum stringID. */
+function __mcp_selectiveColorEnum(target) {
+  var map = {
+    reds: 'reds', yellows: 'yellows', greens: 'greens', cyans: 'cyans',
+    blues: 'blues', magentas: 'magentas', whites: 'whites',
+    neutrals: 'neutrals', blacks: 'blacks'
+  };
+  var key = String(target || 'reds').toLowerCase();
+  return map[key] || 'reds';
+}
+
+/**
+ * Selective Color adjustment layer adjusting ONE target color band.
+ * cyan/magenta/yellow/black are -100..100 percent. relative=true uses the
+ * relative method, false uses absolute.
+ */
+function __mcp_makeSelectiveColorLayer(target, cyan, magenta, yellow, black, relative) {
+  var typeDesc = new ActionDescriptor();
+  typeDesc.putEnumerated(sTID('presetKind'), sTID('presetKindType'), sTID('presetKindCustom'));
+  typeDesc.putEnumerated(sTID('method'), sTID('correctionMethod'), sTID(relative ? 'relative' : 'absolute'));
+  var correctionList = new ActionList();
+  var entry = new ActionDescriptor();
+  entry.putEnumerated(sTID('colors'), sTID('colors'), sTID(__mcp_selectiveColorEnum(target)));
+  entry.putUnitDouble(sTID('cyan'), sTID('percentUnit'), cyan);
+  entry.putUnitDouble(sTID('magenta'), sTID('percentUnit'), magenta);
+  entry.putUnitDouble(sTID('yellowColor'), sTID('percentUnit'), yellow);
+  entry.putUnitDouble(sTID('black'), sTID('percentUnit'), black);
+  correctionList.putObject(sTID('colorCorrection'), entry);
+  typeDesc.putList(sTID('colorCorrection'), correctionList);
+  return __mcp_makeAdjustmentLayer('selectiveColor', typeDesc);
+}
+
+/**
+ * Photo Filter adjustment layer.
+ * useColor true -> custom RGB color; false -> named preset via presetId.
+ * density 0-100, preserveLuminosity boolean.
+ */
+function __mcp_makePhotoFilterLayer(useColor, red, green, blue, density, preserveLuminosity) {
+  var typeDesc = new ActionDescriptor();
+  if (useColor) {
+    typeDesc.putObject(sTID('color'), sTID('RGBColor'), __mcp_adjRgbColor(red, green, blue));
+  } else {
+    // Fallback: warming filter (85) preset color if no color supplied.
+    typeDesc.putObject(sTID('color'), sTID('RGBColor'), __mcp_adjRgbColor(red, green, blue));
+  }
+  typeDesc.putInteger(sTID('density'), density);
+  typeDesc.putBoolean(sTID('preserveLuminosity'), !!preserveLuminosity);
+  return __mcp_makeAdjustmentLayer('photoFilter', typeDesc);
+}
+
+/**
+ * Vibrance adjustment layer. vibrance/saturation are -100..100.
+ * Crib: adb-mcp addAdjustmentLayerVibrance.
+ */
+function __mcp_makeVibranceLayer(vibrance, saturation) {
+  var typeDesc = new ActionDescriptor();
+  typeDesc.putInteger(sTID('vibrance'), vibrance);
+  typeDesc.putInteger(sTID('saturation'), saturation);
+  return __mcp_makeAdjustmentLayer('vibrance', typeDesc);
+}
+
+/**
+ * Color Balance adjustment layer. Each of shadows/midtones/highlights is a
+ * 3-int array [cyanRed, magentaGreen, yellowBlue], -100..100.
+ * Crib: adb-mcp addColorBalanceAdjustmentLayer.
+ */
+function __mcp_makeColorBalanceLayer(shadows, midtones, highlights, preserveLuminosity) {
+  var typeDesc = new ActionDescriptor();
+  function levelsList(arr) {
+    var l = new ActionList();
+    l.putInteger(arr[0]);
+    l.putInteger(arr[1]);
+    l.putInteger(arr[2]);
+    return l;
+  }
+  typeDesc.putList(sTID('shadowLevels'), levelsList(shadows));
+  typeDesc.putList(sTID('midtoneLevels'), levelsList(midtones));
+  typeDesc.putList(sTID('highlightLevels'), levelsList(highlights));
+  typeDesc.putBoolean(sTID('preserveLuminosity'), !!preserveLuminosity);
+  return __mcp_makeAdjustmentLayer('colorBalance', typeDesc);
+}
+
+/**
+ * Black & White adjustment layer. colors holds per-channel mix (red/yellow/green/
+ * cyan/blue/magenta), -200..300. tint applies an RGB tintColor when useTint true.
+ * Crib: adb-mcp addAdjustmentLayerBlackAndWhite.
+ */
+function __mcp_makeBlackWhiteLayer(colors, useTint, tintR, tintG, tintB) {
+  var typeDesc = new ActionDescriptor();
+  typeDesc.putEnumerated(sTID('presetKind'), sTID('presetKindType'), sTID('presetKindDefault'));
+  typeDesc.putInteger(sTID('red'), colors.red);
+  typeDesc.putInteger(sTID('yellow'), colors.yellow);
+  typeDesc.putInteger(sTID('grain'), colors.green);
+  typeDesc.putInteger(sTID('cyan'), colors.cyan);
+  typeDesc.putInteger(sTID('blue'), colors.blue);
+  typeDesc.putInteger(sTID('magenta'), colors.magenta);
+  typeDesc.putBoolean(sTID('useTint'), !!useTint);
+  typeDesc.putObject(sTID('tintColor'), sTID('RGBColor'), __mcp_adjRgbColor(tintR, tintG, tintB));
+  return __mcp_makeAdjustmentLayer('blackAndWhite', typeDesc);
+}
+`;
+
 export type CurvesPreset = 'auto_tone' | 'neutral';
 
 export type GradientMaskDirection =
