@@ -803,7 +803,10 @@ function __mcp_selectiveColorEnum(target) {
 function __mcp_makeSelectiveColorLayer(target, cyan, magenta, yellow, black, relative) {
   var typeDesc = new ActionDescriptor();
   typeDesc.putEnumerated(sTID('presetKind'), sTID('presetKindType'), sTID('presetKindCustom'));
-  typeDesc.putEnumerated(sTID('method'), sTID('correctionMethod'), sTID(relative ? 'relative' : 'absolute'));
+  // Method: emit the ScriptingListener-canonical charID form (Mthd / Crrc / Abs |Rltv).
+  // This is the reliable form; omitting or mis-typing it makes PS silently fall back to
+  // Relative — the known "selective color reverts to Relative" bug.
+  typeDesc.putEnumerated(cTID('Mthd'), cTID('Crrc'), cTID(relative ? 'Rltv' : 'Abs '));
   var correctionList = new ActionList();
   var entry = new ActionDescriptor();
   entry.putEnumerated(sTID('colors'), sTID('colors'), sTID(__mcp_selectiveColorEnum(target)));
