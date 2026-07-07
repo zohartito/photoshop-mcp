@@ -3692,6 +3692,383 @@ export const ExtendScriptSnippets = {
 };
 
 /**
+ * Fill / gradient / pattern / paint helpers (Tier-2 fill-paint tools).
+ *
+ * Atomic drawing primitives used by src/tools/fill-paint-tools.ts:
+ *   - __mcp_applyGradient        — draw a gradient (linear/radial/angle/reflected/diamond)
+ *                                  across the active layer, OR make a Gradient fill layer.
+ *   - __mcp_applyPatternFill     — Pattern fill layer, OR draw a pattern onto pixels.
+ *   - __mcp_addSolidFillLayer    — Solid Color fill layer (non-destructive).
+ *   - __mcp_strokeSelection      — stroke the active selection edge.
+ *   - __mcp_fillSelectionWith    — fill the active selection from a named source.
+ *
+ * Descriptor shapes are cribbed from the layer-style gradient-overlay descriptor
+ * (__mcp_buildGradientOverlay above), the mask gradient-draw helper
+ * (__mcp_gradientFillLayerMask), and the UXP batchPlay reference in ~/adb-mcp
+ * (uxp/ps/commands/selection.js `fillSelection`, `stroke`). batchPlay JSON maps 1:1
+ * onto these ActionDescriptor putX calls.
+ *
+ * sTID/cTID come from RECIPE_ACTION_HELPERS (the suspendHistory wrap), so every tool
+ * that uses these helpers must run through executeRecipe. Each helper performs exactly
+ * one Photoshop operation (or a make + set pair), collapsing to a single undo.
+ *
+ * RGBColor QUIRK: __mcp_fpRgbColor writes the GREEN channel under the key `grain`
+ * (Action Manager quirk) — same as the layer-style / adjustment-layer helpers.
+ */
+export const MCP_FILL_PAINT_HELPERS = `
+/** Map a friendly blend-mode name to its Action Manager blendMode enum string. */
+function __mcp_fpBlendModeStr(name) {
+  var map = {
+    NORMAL: 'normal', DISSOLVE: 'dissolve', DARKEN: 'darken', MULTIPLY: 'multiply',
+    COLORBURN: 'colorBurn', LINEARBURN: 'linearBurn', DARKERCOLOR: 'darkerColor',
+    LIGHTEN: 'lighten', SCREEN: 'screen', COLORDODGE: 'colorDodge',
+    LINEARDODGE: 'linearDodge', LIGHTERCOLOR: 'lighterColor', OVERLAY: 'overlay',
+    SOFTLIGHT: 'softLight', HARDLIGHT: 'hardLight', VIVIDLIGHT: 'vividLight',
+    LINEARLIGHT: 'linearLight', PINLIGHT: 'pinLight', HARDMIX: 'hardMix',
+    DIFFERENCE: 'difference', EXCLUSION: 'exclusion', SUBTRACT: 'blendSubtraction',
+    DIVIDE: 'blendDivide', HUE: 'hue', SATURATION: 'saturation', COLOR: 'color',
+    LUMINOSITY: 'luminosity'
+  };
+  var key = String(name).toUpperCase();
+  return map[key] || 'normal';
+}
+
+function __mcp_fpClampNum(v, min, max) {
+  if (typeof v !== 'number' || isNaN(v)) return min;
+  return Math.max(min, Math.min(max, v));
+}
+
+/** Build an RGBColor descriptor. NOTE: green channel uses key "grain" (AM quirk). */
+function __mcp_fpRgbColor(red, green, blue) {
+  var c = new ActionDescriptor();
+  c.putDouble(sTID('red'), red);
+  c.putDouble(sTID('grain'), green);
+  c.putDouble(sTID('blue'), blue);
+  return c;
+}
+
+/** Throw unless the active document is RGB (fill/paint tools assume RGB channels). */
+function __mcp_fpAssertRgb() {
+  if (app.documents.length === 0) {
+    throw new Error('No active document. Open or create a document first.');
+  }
+  var doc = app.activeDocument;
+  if (doc.mode !== DocumentMode.RGB) {
+    throw new Error(
+      'This tool requires an RGB document. Active document mode is ' + String(doc.mode) +
+      '. Convert to RGB (Image > Mode > RGB Color) first.'
+    );
+  }
+  return doc;
+}
+
+/** Assert (and return) a pixel/normal active layer for destructive paint. Un-backgrounds it. */
+function __mcp_fpAssertPixelLayer() {
+  var doc = app.activeDocument;
+  var layer = doc.activeLayer;
+  if (!layer) {
+    throw new Error('No active layer. Select a layer first.');
+  }
+  if (layer.typename === 'LayerSet') {
+    throw new Error('Active item is a layer group — select a pixel/normal layer first.');
+  }
+  if (layer.kind !== LayerKind.NORMAL) {
+    throw new Error(
+      'This tool paints pixels and needs a normal (raster) active layer. The active layer kind is ' +
+      String(layer.kind) + '. Rasterize it or select a pixel layer first.'
+    );
+  }
+  if (layer.isBackgroundLayer) {
+    try { layer.isBackgroundLayer = false; } catch (eBg) {}
+  }
+  return layer;
+}
+
+/** True if the active document currently has a selection with bounds. */
+function __mcp_fpHasSelection() {
+  try { return !!app.activeDocument.selection.bounds; } catch (eSel) { return false; }
+}
+
+/** Assert an active selection exists (for stroke/fill selection tools). */
+function __mcp_fpAssertSelection() {
+  if (!__mcp_fpHasSelection()) {
+    throw new Error('This tool requires an active selection. Make a selection first (e.g. photoshop_select_rectangle).');
+  }
+}
+
+/**
+ * Build a gradientClassEvent descriptor from a stops array [{r,g,b,location 0-100}].
+ * Locations map 0..100 -> 0..4096 (the Action Manager gradient location scale).
+ */
+function __mcp_fpBuildGradient(stops) {
+  var gradient = new ActionDescriptor();
+  gradient.putString(sTID('name'), 'Custom');
+  gradient.putEnumerated(sTID('gradientForm'), sTID('gradientForm'), sTID('customStops'));
+  gradient.putDouble(sTID('interfaceIconFrameDimmed'), 4096.0);
+
+  var colors = new ActionList();
+  for (var i = 0; i < stops.length; i++) {
+    var s = stops[i];
+    var loc = Math.round(__mcp_fpClampNum(s.location, 0, 100) / 100 * 4096);
+    var stop = new ActionDescriptor();
+    stop.putObject(sTID('color'), sTID('RGBColor'), __mcp_fpRgbColor(s.r, s.g, s.b));
+    stop.putEnumerated(sTID('type'), sTID('colorStopType'), sTID('userStop'));
+    stop.putInteger(sTID('location'), loc);
+    stop.putInteger(sTID('midpoint'), 50);
+    colors.putObject(sTID('colorStop'), stop);
+  }
+  gradient.putList(sTID('colors'), colors);
+
+  // Opaque transparency stops at each end (gradient tool requires a transparency list).
+  var transparency = new ActionList();
+  var tA = new ActionDescriptor();
+  tA.putUnitDouble(sTID('opacity'), sTID('percentUnit'), 100.0);
+  tA.putInteger(sTID('location'), 0);
+  tA.putInteger(sTID('midpoint'), 50);
+  transparency.putObject(sTID('transferSpec'), tA);
+  var tB = new ActionDescriptor();
+  tB.putUnitDouble(sTID('opacity'), sTID('percentUnit'), 100.0);
+  tB.putInteger(sTID('location'), 4096);
+  tB.putInteger(sTID('midpoint'), 50);
+  transparency.putObject(sTID('transferSpec'), tB);
+  gradient.putList(sTID('transparency'), transparency);
+  return gradient;
+}
+
+function __mcp_fpGradientTypeEnum(type) {
+  var map = { linear: 'linear', radial: 'radial', angle: 'angle', reflected: 'reflected', diamond: 'diamond' };
+  return map[String(type)] || 'linear';
+}
+
+/**
+ * Draw a gradient across the active layer, or make a Gradient fill (content) layer.
+ * opts: type, stops[], angle, scale, reverse, dither, opacity, blendMode, asFillLayer.
+ * Returns { layer_name }.
+ */
+function __mcp_applyGradient(opts) {
+  var doc = __mcp_fpAssertRgb();
+  var gradient = __mcp_fpBuildGradient(opts.stops);
+  var typeEnum = __mcp_fpGradientTypeEnum(opts.type);
+
+  if (opts.asFillLayer) {
+    // Non-destructive Gradient fill content layer: make contentLayer -> type gradientLayer.
+    var makeDesc = new ActionDescriptor();
+    var ref = new ActionReference();
+    ref.putClass(sTID('contentLayer'));
+    makeDesc.putReference(sTID('null'), ref);
+    var typeDesc = new ActionDescriptor();
+    var gfill = new ActionDescriptor();
+    gfill.putUnitDouble(sTID('angle'), sTID('angleUnit'), opts.angle);
+    gfill.putEnumerated(sTID('type'), sTID('gradientType'), sTID(typeEnum));
+    gfill.putBoolean(sTID('reverse'), !!opts.reverse);
+    gfill.putBoolean(sTID('dither'), !!opts.dither);
+    gfill.putBoolean(sTID('align'), true);
+    gfill.putUnitDouble(sTID('scale'), sTID('percentUnit'), __mcp_fpClampNum(opts.scale, 10, 150));
+    gfill.putObject(sTID('gradient'), sTID('gradientClassEvent'), gradient);
+    typeDesc.putObject(sTID('type'), sTID('gradientLayer'), gfill);
+    makeDesc.putObject(sTID('using'), sTID('contentLayer'), typeDesc);
+    executeAction(sTID('make'), makeDesc, DialogModes.NO);
+    var flLayer = doc.activeLayer;
+    // Apply opacity/blend mode to the fill layer itself when non-default.
+    if (opts.opacity < 100) { try { flLayer.opacity = opts.opacity; } catch (eOp) {} }
+    return { layer_name: flLayer.name };
+  }
+
+  // Destructive draw onto the active pixel layer via the gradient (Grdn) event.
+  var layer = __mcp_fpAssertPixelLayer();
+  var b = doc.selection && __mcp_fpHasSelection() ? doc.selection.bounds : null;
+  // Endpoints: use the selection bounds when present, else the whole canvas. The angle
+  // rotates the from->to vector about the region center.
+  var x0, y0, x1, y1;
+  if (b) {
+    x0 = b[0].as('px'); y0 = b[1].as('px'); x1 = b[2].as('px'); y1 = b[3].as('px');
+  } else {
+    x0 = 0; y0 = 0; x1 = doc.width.as('px'); y1 = doc.height.as('px');
+  }
+  var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  var halfW = (x1 - x0) / 2, halfH = (y1 - y0) / 2;
+  var rad = (opts.angle) * Math.PI / 180;
+  // PS angle: 0deg points right, positive is counter-clockwise (y grows downward).
+  var dx = Math.cos(rad), dy = -Math.sin(rad);
+  var fromX = cx - dx * halfW, fromY = cy - dy * halfH;
+  var toX = cx + dx * halfW, toY = cy + dy * halfH;
+
+  var args = new ActionDescriptor();
+  var fromPt = new ActionDescriptor();
+  fromPt.putUnitDouble(sTID('horizontal'), sTID('pixelsUnit'), fromX);
+  fromPt.putUnitDouble(sTID('vertical'), sTID('pixelsUnit'), fromY);
+  args.putObject(sTID('from'), sTID('paint'), fromPt);
+  var toPt = new ActionDescriptor();
+  toPt.putUnitDouble(sTID('horizontal'), sTID('pixelsUnit'), toX);
+  toPt.putUnitDouble(sTID('vertical'), sTID('pixelsUnit'), toY);
+  args.putObject(sTID('to'), sTID('paint'), toPt);
+  args.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_fpBlendModeStr(opts.blendMode)));
+  args.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_fpClampNum(opts.opacity, 0, 100));
+  args.putEnumerated(sTID('type'), sTID('gradientType'), sTID(typeEnum));
+  args.putBoolean(sTID('dither'), !!opts.dither);
+  args.putBoolean(sTID('reverse'), !!opts.reverse);
+  args.putObject(sTID('gradient'), sTID('gradientClassEvent'), gradient);
+  executeAction(sTID('gradientClassEvent'), args, DialogModes.NO);
+  return { layer_name: layer.name };
+}
+
+/** Resolve a pattern preset by (case-insensitive substring) name. Returns { ID, name } or throws. */
+function __mcp_fpResolvePattern(patternName) {
+  var pats = app.patterns;
+  if (!pats || pats.length === 0) {
+    throw new Error('No pattern presets are loaded. Load a pattern set in Photoshop (Edit > Presets) first.');
+  }
+  if (patternName && String(patternName).length) {
+    var needle = String(patternName).toLowerCase();
+    for (var i = 0; i < pats.length; i++) {
+      var nm = pats[i].name || '';
+      if (nm.toLowerCase().indexOf(needle) !== -1) {
+        return { id: pats[i].ID, name: nm };
+      }
+    }
+    throw new Error('No loaded pattern preset matches "' + patternName + '". Available count: ' + pats.length + '.');
+  }
+  return { id: pats[0].ID, name: pats[0].name || 'Pattern 1' };
+}
+
+/** Build a pattern descriptor (name + ID) for use as a fill's pattern value. */
+function __mcp_fpPatternDesc(pat) {
+  var d = new ActionDescriptor();
+  d.putString(sTID('name'), pat.name);
+  d.putString(sTID('ID'), pat.id);
+  return d;
+}
+
+/**
+ * Pattern fill layer, or draw a pattern onto the active pixel layer.
+ * opts: patternName, scale, opacity, blendMode, asFillLayer. Returns { layer_name, pattern_name }.
+ */
+function __mcp_applyPatternFill(opts) {
+  var doc = __mcp_fpAssertRgb();
+  var pat = __mcp_fpResolvePattern(opts.patternName);
+
+  if (opts.asFillLayer) {
+    var makeDesc = new ActionDescriptor();
+    var ref = new ActionReference();
+    ref.putClass(sTID('contentLayer'));
+    makeDesc.putReference(sTID('null'), ref);
+    var typeDesc = new ActionDescriptor();
+    var pfill = new ActionDescriptor();
+    pfill.putObject(sTID('pattern'), sTID('pattern'), __mcp_fpPatternDesc(pat));
+    pfill.putUnitDouble(sTID('scale'), sTID('percentUnit'), __mcp_fpClampNum(opts.scale, 1, 1000));
+    pfill.putBoolean(sTID('align'), true);
+    typeDesc.putObject(sTID('type'), sTID('patternLayer'), pfill);
+    makeDesc.putObject(sTID('using'), sTID('contentLayer'), typeDesc);
+    executeAction(sTID('make'), makeDesc, DialogModes.NO);
+    var flLayer = doc.activeLayer;
+    if (opts.opacity < 100) { try { flLayer.opacity = opts.opacity; } catch (eOp) {} }
+    return { layer_name: flLayer.name, pattern_name: pat.name };
+  }
+
+  var layer = __mcp_fpAssertPixelLayer();
+  var fillDesc = new ActionDescriptor();
+  fillDesc.putEnumerated(sTID('using'), sTID('fillContents'), sTID('pattern'));
+  fillDesc.putObject(sTID('pattern'), sTID('pattern'), __mcp_fpPatternDesc(pat));
+  fillDesc.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_fpBlendModeStr(opts.blendMode)));
+  fillDesc.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_fpClampNum(opts.opacity, 0, 100));
+  executeAction(sTID('fill'), fillDesc, DialogModes.NO);
+  return { layer_name: layer.name, pattern_name: pat.name };
+}
+
+/**
+ * Solid Color fill layer (non-destructive). If a selection is active, the fill layer is
+ * created clipped to it (make contentLayer honors the active selection as its mask).
+ * opts: red, green, blue, opacity, blendMode, name. Returns { layer_name, clipped_to_selection }.
+ */
+function __mcp_addSolidFillLayer(opts) {
+  var doc = __mcp_fpAssertRgb();
+  var hadSelection = __mcp_fpHasSelection();
+  var makeDesc = new ActionDescriptor();
+  var ref = new ActionReference();
+  ref.putClass(sTID('contentLayer'));
+  makeDesc.putReference(sTID('null'), ref);
+  var typeDesc = new ActionDescriptor();
+  var color = new ActionDescriptor();
+  color.putObject(sTID('color'), sTID('RGBColor'), __mcp_fpRgbColor(opts.red, opts.green, opts.blue));
+  typeDesc.putObject(sTID('type'), sTID('solidColorLayer'), color);
+  makeDesc.putObject(sTID('using'), sTID('contentLayer'), typeDesc);
+  executeAction(sTID('make'), makeDesc, DialogModes.NO);
+  var layer = doc.activeLayer;
+  try { if (opts.name) { layer.name = opts.name; } } catch (eNm) {}
+  var blend = __mcp_fpBlendModeStr(opts.blendMode);
+  if (blend !== 'normal') {
+    try {
+      var setDesc = new ActionDescriptor();
+      var setRef = new ActionReference();
+      setRef.putEnumerated(sTID('layer'), sTID('ordinal'), sTID('targetEnum'));
+      setDesc.putReference(sTID('null'), setRef);
+      var props = new ActionDescriptor();
+      props.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(blend));
+      setDesc.putObject(sTID('to'), sTID('layer'), props);
+      executeAction(sTID('set'), setDesc, DialogModes.NO);
+    } catch (eBl) {}
+  }
+  if (opts.opacity < 100) { try { layer.opacity = opts.opacity; } catch (eOp) {} }
+  return { layer_name: layer.name, clipped_to_selection: !!hadSelection };
+}
+
+/** Map a stroke location name to the strokeLocation enum. */
+function __mcp_fpStrokeLocationEnum(location) {
+  var map = { inside: 'insetFrame', center: 'centeredFrame', outside: 'outsetFrame' };
+  return map[String(location)] || 'centeredFrame';
+}
+
+/**
+ * Stroke the active selection edge on the active pixel layer via the stroke event.
+ * opts: width, location, red, green, blue, opacity, blendMode. Returns layer name.
+ */
+function __mcp_strokeSelection(opts) {
+  __mcp_fpAssertRgb();
+  __mcp_fpAssertSelection();
+  var layer = __mcp_fpAssertPixelLayer();
+  var d = new ActionDescriptor();
+  d.putUnitDouble(sTID('width'), sTID('pixelsUnit'), Math.max(1, opts.width));
+  d.putEnumerated(sTID('location'), sTID('strokeLocation'), sTID(__mcp_fpStrokeLocationEnum(opts.location)));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_fpClampNum(opts.opacity, 0, 100));
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_fpBlendModeStr(opts.blendMode)));
+  d.putObject(sTID('color'), sTID('RGBColor'), __mcp_fpRgbColor(opts.red, opts.green, opts.blue));
+  executeAction(sTID('stroke'), d, DialogModes.NO);
+  return layer.name;
+}
+
+/** Map a fill source name to the fillContents enum (and whether it needs a color). */
+function __mcp_fpFillSourceEnum(source) {
+  var s = String(source).toLowerCase();
+  if (s === 'foreground') return 'foregroundColor';
+  if (s === 'background') return 'backgroundColor';
+  if (s === 'black') return 'black';
+  if (s === 'white') return 'white';
+  if (s === 'gray' || s === '50gray') return 'gray';
+  return 'color';
+}
+
+/**
+ * Fill the active selection on the active pixel layer via the fill event.
+ * opts: source, red, green, blue, opacity, blendMode. Returns layer name.
+ */
+function __mcp_fillSelectionWith(opts) {
+  __mcp_fpAssertRgb();
+  __mcp_fpAssertSelection();
+  var layer = __mcp_fpAssertPixelLayer();
+  var usingEnum = __mcp_fpFillSourceEnum(opts.source);
+  var d = new ActionDescriptor();
+  d.putEnumerated(sTID('using'), sTID('fillContents'), sTID(usingEnum));
+  if (usingEnum === 'color') {
+    d.putObject(sTID('color'), sTID('RGBColor'), __mcp_fpRgbColor(opts.red, opts.green, opts.blue));
+  }
+  d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_fpBlendModeStr(opts.blendMode)));
+  d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_fpClampNum(opts.opacity, 0, 100));
+  executeAction(sTID('fill'), d, DialogModes.NO);
+  return layer.name;
+}
+`;
+
+/**
  * Generate ExtendScript code with error handling
  */
 export function generateExtendScript(code: string): string {
