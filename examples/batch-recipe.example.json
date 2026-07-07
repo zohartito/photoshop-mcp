@@ -1,0 +1,20 @@
+{
+  "$comment": "Sample photoshop-mcp batch recipe (transport-layer.md §8). Each step's name/params match the individual photoshop_* MCP tools exactly. The engine wraps every file with open -> steps -> export -> close(no-save); do NOT add open/save/close steps yourself. These steps are dimension-independent so the recipe runs on any input. Run headless with: photoshop-mcp batch examples/batch-recipe.example.json  (Photoshop GUI must be running).",
+  "inputGlob": "./input/*.jpg",
+  "outputTemplate": "./output/{stem}-graded.png",
+  "errorPolicy": "skip",
+  "steps": [
+    {
+      "name": "photoshop_adjust_brightness_contrast",
+      "params": { "brightness": 8, "contrast": 12 }
+    },
+    {
+      "name": "photoshop_add_vibrance",
+      "params": { "vibrance": 20, "saturation": 5 }
+    },
+    {
+      "name": "photoshop_apply_sharpen",
+      "params": { "amount": 60, "radius": 1.0 }
+    }
+  ]
+}

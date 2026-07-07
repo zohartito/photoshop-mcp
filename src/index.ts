@@ -13,6 +13,7 @@ import {
 } from './analytics/index.js';
 import type { McpShutdownReason } from './analytics/mcp-session.js';
 import { PhotoshopMCPServer } from './core/server.js';
+import { runBatchCli } from './ui/batch-cli.js';
 import { Logger } from './utils/logger.js';
 
 const logger = new Logger('Main');
@@ -83,15 +84,31 @@ async function handleShutdown(signal: string): Promise<void> {
   process.exit(0);
 }
 
-process.on('SIGINT', () => {
-  void handleShutdown('SIGINT');
-});
-process.on('SIGTERM', () => {
-  void handleShutdown('SIGTERM');
-});
+/**
+ * Subcommand dispatch. `photoshop-mcp batch <recipe.json>` runs headless batch
+ * mode (transport-layer.md §8) and exits; with no subcommand the bin starts the
+ * stdio MCP server as before. Kept ahead of MCP boot so batch never opens the
+ * stdio protocol channel.
+ */
+async function dispatch(): Promise<void> {
+  const subcommand = process.argv[2];
+  if (subcommand === 'batch') {
+    const code = await runBatchCli(process.argv.slice(3));
+    process.exit(code);
+  }
 
-process.stdin.on('end', () => {
-  void handleShutdown('stdio_closed');
-});
+  process.on('SIGINT', () => {
+    void handleShutdown('SIGINT');
+  });
+  process.on('SIGTERM', () => {
+    void handleShutdown('SIGTERM');
+  });
 
-main();
+  process.stdin.on('end', () => {
+    void handleShutdown('stdio_closed');
+  });
+
+  await main();
+}
+
+void dispatch();

@@ -36,6 +36,7 @@
     "test:uxp-normalize": "tsx scripts/test-uxp-normalize.ts",
     "test:mutport-static": "tsx scripts/test-mutport-static.ts",
     "test:mutport-trace": "tsx scripts/test-mutport-trace.ts",
+    "test:batch-static": "tsx scripts/test-batch-static.ts",
     "parity:uxp": "tsx scripts/parity-uxp.ts",
     "test:intent-expansion": "tsx scripts/test-intent-expansion-local.ts",
     "prepare": "npm run build",
