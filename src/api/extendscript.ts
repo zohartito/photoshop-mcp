@@ -3738,6 +3738,24 @@ function __mcp_fpClampNum(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
+/** Apply blendMode + opacity to a just-created fill/content layer (the active layer). */
+function __mcp_fpApplyLayerLook(layer, blendModeName, opacity) {
+  var blend = __mcp_fpBlendModeStr(blendModeName);
+  if (blend !== 'normal') {
+    var setDesc = new ActionDescriptor();
+    var setRef = new ActionReference();
+    setRef.putEnumerated(sTID('layer'), sTID('ordinal'), sTID('targetEnum'));
+    setDesc.putReference(sTID('null'), setRef);
+    var props = new ActionDescriptor();
+    props.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(blend));
+    setDesc.putObject(sTID('to'), sTID('layer'), props);
+    try { executeAction(sTID('set'), setDesc, DialogModes.NO); } catch (eBl) {}
+  }
+  if (typeof opacity === 'number' && opacity < 100) {
+    try { layer.opacity = opacity; } catch (eOp) {}
+  }
+}
+
 /** Build an RGBColor descriptor. NOTE: green channel uses key "grain" (AM quirk). */
 function __mcp_fpRgbColor(red, green, blue) {
   var c = new ActionDescriptor();
@@ -3867,10 +3885,12 @@ function __mcp_applyGradient(opts) {
     gfill.putObject(sTID('gradient'), sTID('gradientClassEvent'), gradient);
     typeDesc.putObject(sTID('type'), sTID('gradientLayer'), gfill);
     makeDesc.putObject(sTID('using'), sTID('contentLayer'), typeDesc);
+    // A live selection would mask the fill layer to it; this tool's fill-layer mode is
+    // documented to cover the whole layer, so drop any selection first.
+    if (__mcp_fpHasSelection()) { try { doc.selection.deselect(); } catch (eDs) {} }
     executeAction(sTID('make'), makeDesc, DialogModes.NO);
     var flLayer = doc.activeLayer;
-    // Apply opacity/blend mode to the fill layer itself when non-default.
-    if (opts.opacity < 100) { try { flLayer.opacity = opts.opacity; } catch (eOp) {} }
+    __mcp_fpApplyLayerLook(flLayer, opts.blendMode, opts.opacity);
     return { layer_name: flLayer.name };
   }
 
@@ -3890,18 +3910,23 @@ function __mcp_applyGradient(opts) {
   var rad = (opts.angle) * Math.PI / 180;
   // PS angle: 0deg points right, positive is counter-clockwise (y grows downward).
   var dx = Math.cos(rad), dy = -Math.sin(rad);
-  var fromX = cx - dx * halfW, fromY = cy - dy * halfH;
-  var toX = cx + dx * halfW, toY = cy + dy * halfH;
+  // Project the region half-extents onto the gradient direction so the from->to line
+  // spans the full region at any angle (an inscribed halfW/halfH span would fall short
+  // on diagonals of non-square regions).
+  var span = halfW * Math.abs(dx) + halfH * Math.abs(dy);
+  var fromX = cx - dx * span, fromY = cy - dy * span;
+  var toX = cx + dx * span, toY = cy + dy * span;
 
+  // Point objects use charID 'Pnt ' with 'Hrzn'/'Vrtc' (matches __mcp_pointDescPx).
   var args = new ActionDescriptor();
   var fromPt = new ActionDescriptor();
-  fromPt.putUnitDouble(sTID('horizontal'), sTID('pixelsUnit'), fromX);
-  fromPt.putUnitDouble(sTID('vertical'), sTID('pixelsUnit'), fromY);
-  args.putObject(sTID('from'), sTID('paint'), fromPt);
+  fromPt.putUnitDouble(cTID('Hrzn'), cTID('#Pxl'), fromX);
+  fromPt.putUnitDouble(cTID('Vrtc'), cTID('#Pxl'), fromY);
+  args.putObject(sTID('from'), cTID('Pnt '), fromPt);
   var toPt = new ActionDescriptor();
-  toPt.putUnitDouble(sTID('horizontal'), sTID('pixelsUnit'), toX);
-  toPt.putUnitDouble(sTID('vertical'), sTID('pixelsUnit'), toY);
-  args.putObject(sTID('to'), sTID('paint'), toPt);
+  toPt.putUnitDouble(cTID('Hrzn'), cTID('#Pxl'), toX);
+  toPt.putUnitDouble(cTID('Vrtc'), cTID('#Pxl'), toY);
+  args.putObject(sTID('to'), cTID('Pnt '), toPt);
   args.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_fpBlendModeStr(opts.blendMode)));
   args.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_fpClampNum(opts.opacity, 0, 100));
   args.putEnumerated(sTID('type'), sTID('gradientType'), sTID(typeEnum));
@@ -3933,9 +3958,12 @@ function __mcp_fpResolvePattern(patternName) {
 
 /** Build a pattern descriptor (name + ID) for use as a fill's pattern value. */
 function __mcp_fpPatternDesc(pat) {
+  if (!pat.id) {
+    throw new Error('Resolved pattern has no ID — cannot reference it. Try a different pattern preset.');
+  }
   var d = new ActionDescriptor();
-  d.putString(sTID('name'), pat.name);
-  d.putString(sTID('ID'), pat.id);
+  d.putString(sTID('name'), String(pat.name || 'Pattern'));
+  d.putString(sTID('ID'), String(pat.id));
   return d;
 }
 
@@ -3959,9 +3987,10 @@ function __mcp_applyPatternFill(opts) {
     pfill.putBoolean(sTID('align'), true);
     typeDesc.putObject(sTID('type'), sTID('patternLayer'), pfill);
     makeDesc.putObject(sTID('using'), sTID('contentLayer'), typeDesc);
+    if (__mcp_fpHasSelection()) { try { doc.selection.deselect(); } catch (eDs) {} }
     executeAction(sTID('make'), makeDesc, DialogModes.NO);
     var flLayer = doc.activeLayer;
-    if (opts.opacity < 100) { try { flLayer.opacity = opts.opacity; } catch (eOp) {} }
+    __mcp_fpApplyLayerLook(flLayer, opts.blendMode, opts.opacity);
     return { layer_name: flLayer.name, pattern_name: pat.name };
   }
 
@@ -3995,27 +4024,14 @@ function __mcp_addSolidFillLayer(opts) {
   executeAction(sTID('make'), makeDesc, DialogModes.NO);
   var layer = doc.activeLayer;
   try { if (opts.name) { layer.name = opts.name; } } catch (eNm) {}
-  var blend = __mcp_fpBlendModeStr(opts.blendMode);
-  if (blend !== 'normal') {
-    try {
-      var setDesc = new ActionDescriptor();
-      var setRef = new ActionReference();
-      setRef.putEnumerated(sTID('layer'), sTID('ordinal'), sTID('targetEnum'));
-      setDesc.putReference(sTID('null'), setRef);
-      var props = new ActionDescriptor();
-      props.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(blend));
-      setDesc.putObject(sTID('to'), sTID('layer'), props);
-      executeAction(sTID('set'), setDesc, DialogModes.NO);
-    } catch (eBl) {}
-  }
-  if (opts.opacity < 100) { try { layer.opacity = opts.opacity; } catch (eOp) {} }
+  __mcp_fpApplyLayerLook(layer, opts.blendMode, opts.opacity);
   return { layer_name: layer.name, clipped_to_selection: !!hadSelection };
 }
 
-/** Map a stroke location name to the strokeLocation enum. */
+/** Map a stroke location name to the stroke event's strokeLength enum value. */
 function __mcp_fpStrokeLocationEnum(location) {
-  var map = { inside: 'insetFrame', center: 'centeredFrame', outside: 'outsetFrame' };
-  return map[String(location)] || 'centeredFrame';
+  var map = { inside: 'inside', center: 'center', outside: 'outside' };
+  return map[String(location)] || 'center';
 }
 
 /**
@@ -4027,8 +4043,8 @@ function __mcp_strokeSelection(opts) {
   __mcp_fpAssertSelection();
   var layer = __mcp_fpAssertPixelLayer();
   var d = new ActionDescriptor();
-  d.putUnitDouble(sTID('width'), sTID('pixelsUnit'), Math.max(1, opts.width));
-  d.putEnumerated(sTID('location'), sTID('strokeLocation'), sTID(__mcp_fpStrokeLocationEnum(opts.location)));
+  d.putInteger(sTID('width'), Math.round(Math.max(1, opts.width)));
+  d.putEnumerated(sTID('location'), sTID('strokeLength'), sTID(__mcp_fpStrokeLocationEnum(opts.location)));
   d.putUnitDouble(sTID('opacity'), sTID('percentUnit'), __mcp_fpClampNum(opts.opacity, 0, 100));
   d.putEnumerated(sTID('mode'), sTID('blendMode'), sTID(__mcp_fpBlendModeStr(opts.blendMode)));
   d.putObject(sTID('color'), sTID('RGBColor'), __mcp_fpRgbColor(opts.red, opts.green, opts.blue));
