@@ -3729,6 +3729,224 @@ export const ExtendScriptSnippets = {
     `;
   },
 };
+/**
+ * Tier-2 "heavy filter" helpers: Camera Raw Filter, Lighting Effects, Lens Correction, Liquify.
+ *
+ * Each function drives a filter on the ACTIVE LAYER through the Action Manager. Assumes the
+ * shared AM helpers (__mcp_s2t / __mcp_c2t / __mcp_ensureRasterActiveLayer) from
+ * RECIPE_ACTION_HELPERS are already in scope — these run only through executeRecipe(), so the
+ * whole body is one suspendHistory (one-undo) scope.
+ *
+ * HONESTY NOTE (read docs/tools/heavy-filters.md for the full matrix):
+ *  - Lens Correction (LnCr): fully scriptable, documented AM keys — reliable.
+ *  - Camera Raw Filter: invocable via executeAction('Adobe Camera Raw Filter'); the per-adjustment
+ *    keys are the recorded Action-Manager keys (PV2012). Well-known keys (Vibrance/Contrast) are
+ *    confirmed; the rest follow the same PV2012 pattern and are flagged for live verification.
+ *  - Lighting Effects: the modern (CC 2015+) GPU rewrite is NOT reliably recordable/scriptable.
+ *    We invoke the legacy '3DIO'/lighting event best-effort and otherwise surface a clear error.
+ *  - Liquify: the interactive warp is NOT scriptable. We support (a) applying a SAVED mesh file
+ *    and (b) opening the dialog for manual work. We never pretend to warp headlessly.
+ */
+export const MCP_HEAVY_FILTER_HELPERS = `
+/** Put a signed/float value under a 4-char legacy key. */
+function __mcp_hfPutDouble(desc, key4, value) { desc.putDouble(__mcp_c2t(key4), value); }
+function __mcp_hfPutInt(desc, key4, value) { desc.putInteger(__mcp_c2t(key4), value); }
+
+/** Throw unless the active document is RGB (ACR / Lighting Effects require RGB). */
+function __mcp_hfAssertRgb(filterLabel) {
+  var doc = app.activeDocument;
+  if (doc.mode !== DocumentMode.RGB) {
+    throw new Error(
+      filterLabel + ' requires an RGB document. Active document mode is ' + String(doc.mode) +
+      '. Convert with Image > Mode > RGB Color first.'
+    );
+  }
+}
+
+/**
+ * Camera Raw Filter. \`p\` is a plain object; each present key maps to a recorded PV2012
+ * Action-Manager key. Only keys the caller supplied are put, so unset adjustments keep their
+ * neutral default. Returns the (post-rasterize) layer name.
+ *
+ * KEY MAP (PV2012 recorded charID keys, cross-verified against ScriptingListener captures —
+ * Geppetto Luis 2019 + two corroborating threads). Every slider is putInteger EXCEPT Ex12
+ * (exposure) which is putDouble. Values map 1:1 to the ACR UI slider numbers. Two keys remain
+ * flagged for a 3-min live diff (see docs/tools/heavy-filters.md): 'Strt' (labeled saturation,
+ * code reads like "strength") and the exact saturation/strength split.
+ */
+function __mcp_applyCameraRawFilter(p) {
+  __mcp_hfAssertRgb('Camera Raw Filter');
+  var layer = __mcp_ensureRasterActiveLayer();
+  var d = new ActionDescriptor();
+  // Camera Raw + process version (PV2012) so the *12 tone keys are interpreted correctly.
+  d.putString(__mcp_c2t('CrVe'), '15.2');
+  d.putInteger(__mcp_c2t('PrVN'), 5);
+  d.putInteger(__mcp_c2t('PrVe'), 184549376);
+
+  // White balance (absolute values; only sent if provided).
+  if (typeof p.temperature === 'number') __mcp_hfPutInt(d, 'Temp', Math.round(p.temperature));
+  if (typeof p.tint === 'number')        __mcp_hfPutInt(d, 'Tint', Math.round(p.tint));
+
+  // Tone (PV2012). Exposure is a stop value (double); the rest are -100..100 integers.
+  if (typeof p.exposure === 'number')   __mcp_hfPutDouble(d, 'Ex12', p.exposure);
+  if (typeof p.contrast === 'number')   __mcp_hfPutInt(d, 'Cr12', Math.round(p.contrast));
+  if (typeof p.highlights === 'number') __mcp_hfPutInt(d, 'Hi12', Math.round(p.highlights));
+  if (typeof p.shadows === 'number')    __mcp_hfPutInt(d, 'Sh12', Math.round(p.shadows));
+  if (typeof p.whites === 'number')     __mcp_hfPutInt(d, 'Wh12', Math.round(p.whites));
+  if (typeof p.blacks === 'number')     __mcp_hfPutInt(d, 'Bk12', Math.round(p.blacks));
+
+  // Presence.
+  if (typeof p.clarity === 'number')    __mcp_hfPutInt(d, 'Cl12', Math.round(p.clarity));
+  if (typeof p.dehaze === 'number')     __mcp_hfPutInt(d, 'Dhze', Math.round(p.dehaze));
+  if (typeof p.vibrance === 'number')   __mcp_hfPutInt(d, 'Vibr', Math.round(p.vibrance));
+  if (typeof p.saturation === 'number') __mcp_hfPutInt(d, 'Strt', Math.round(p.saturation));
+
+  // Detail: sharpening amount 0..150.
+  if (typeof p.sharpenAmount === 'number') __mcp_hfPutInt(d, 'Shrp', Math.round(p.sharpenAmount));
+
+  executeAction(__mcp_s2t('Adobe Camera Raw Filter'), d, DialogModes.NO);
+  return layer.name;
+}
+
+/** Map a friendly lens-correction edge-fill name to Photoshop's LnFt integer. */
+function __mcp_hfEdgeFill(mode) {
+  // 1=Edge Extension, 2=Transparency, 3=Black, 4=White (recorded convention).
+  if (mode === 'transparency') return 2;
+  if (mode === 'black') return 3;
+  if (mode === 'white') return 4;
+  return 1; // edge_extension
+}
+
+/**
+ * Lens Correction (LnCr). Supports auto-correction booleans and manual distortion/vignette/
+ * perspective. Only supplied params are put. Fully documented AM keys. Returns the layer name.
+ */
+function __mcp_applyLensCorrection(p) {
+  var layer = __mcp_ensureRasterActiveLayer();
+  var d = new ActionDescriptor();
+
+  // Auto-correction toggles.
+  if (typeof p.autoDistortion === 'boolean') d.putBoolean(__mcp_c2t('LnAg'), p.autoDistortion);
+  if (typeof p.autoChromaticAberration === 'boolean') d.putBoolean(__mcp_c2t('LnAc'), p.autoChromaticAberration);
+  if (typeof p.autoVignette === 'boolean') d.putBoolean(__mcp_c2t('LnAv'), p.autoVignette);
+  if (typeof p.autoScale === 'boolean') d.putBoolean(__mcp_c2t('LnAs'), p.autoScale);
+
+  // Manual geometric distortion amount (-100..100).
+  if (typeof p.distortionAmount === 'number') __mcp_hfPutDouble(d, 'LnIa', p.distortionAmount);
+
+  // Manual vignette: amount (-100..100 double) + midpoint (0..100 integer).
+  if (typeof p.vignetteAmount === 'number') __mcp_hfPutDouble(d, 'LnSb', p.vignetteAmount);
+  if (typeof p.vignetteMidpoint === 'number') __mcp_hfPutInt(d, 'LnSt', Math.round(p.vignetteMidpoint));
+
+  // Perspective + rotation + scale (all doubles).
+  if (typeof p.verticalPerspective === 'number') __mcp_hfPutDouble(d, 'LnVp', p.verticalPerspective);
+  if (typeof p.horizontalPerspective === 'number') __mcp_hfPutDouble(d, 'LnHp', p.horizontalPerspective);
+  if (typeof p.rotationAngle === 'number') __mcp_hfPutDouble(d, 'LnRa', p.rotationAngle);
+  if (typeof p.scale === 'number') __mcp_hfPutDouble(d, 'LnSi', p.scale);
+
+  // Edge fill for revealed areas after geometric correction.
+  if (typeof p.edgeFill === 'string') __mcp_hfPutInt(d, 'LnFt', __mcp_hfEdgeFill(p.edgeFill));
+
+  executeAction(__mcp_c2t('LnCr'), d, DialogModes.NO);
+  return layer.name;
+}
+
+/**
+ * Liquify — SAVED MESH APPLY. Applies a previously saved Liquify mesh (.msh/.psp) file to the
+ * active layer via the LqFy event + LqMD (mesh-data path). This is the ONLY headless Liquify
+ * path Photoshop exposes. Throws a clear error if the mesh file does not exist.
+ */
+function __mcp_applyLiquifyMesh(meshPath) {
+  var layer = __mcp_ensureRasterActiveLayer();
+  var f = new File(meshPath);
+  if (!f.exists) {
+    throw new Error(
+      'Liquify mesh file not found: ' + meshPath + '. Save a mesh from the Liquify dialog first ' +
+      '(Liquify > Save Mesh), or use mode "dialog" to warp interactively.'
+    );
+  }
+  var d = new ActionDescriptor();
+  d.putPath(__mcp_c2t('LqMD'), f);
+  executeAction(__mcp_c2t('LqFy'), d, DialogModes.NO);
+  return layer.name;
+}
+
+/**
+ * Liquify — OPEN DIALOG for manual warping. Opens the interactive Liquify dialog on the active
+ * layer. This is NOT headless automation — Photoshop blocks until the user finishes. Provided
+ * because the forward-warp brush is genuinely non-scriptable.
+ */
+function __mcp_openLiquifyDialog() {
+  var layer = __mcp_ensureRasterActiveLayer();
+  var d = new ActionDescriptor();
+  executeAction(__mcp_c2t('LqFy'), d, DialogModes.ALL);
+  return layer.name;
+}
+
+/**
+ * Lighting Effects (Render > Lighting Effects). BEST-EFFORT / FRAGILE — read this carefully.
+ *
+ * The modern CC 2015+ Lighting Effects is a GPU "workspace" that records as TWO action steps:
+ * the first (entering the workspace + building the light rig) does NOT replay from a script; only
+ * the second — executeAction(stringIDToTypeID('lightFilterLightingEffects'), ...) — renders. That
+ * second descriptor is a large nested light-array whose full structure (position, focus, ambience)
+ * is image-dependent and ~50 keys. Hand-authoring a from-scratch single-light descriptor is
+ * therefore inherently fragile: it may render, or Photoshop may reject/ignore it depending on
+ * version and GPU state.
+ *
+ * We build a minimal single-light descriptor using the CONFIRMED keys from a ScriptingListener
+ * capture (Type=putInteger, hots=putDouble intensity, 'Rd  '/'Grn '/'Bl ' = putDouble color in
+ * 0..1). If executeAction throws, we surface a clear "not reliably scriptable — do it manually"
+ * error and the suspendHistory scope rolls back. We never fake success.
+ *
+ * Confirmed color-key quirk: red key is 'Rd  ' (TWO trailing spaces), green 'Grn ' (one),
+ * blue 'Bl  ' (two). Color components are 0..1 floats, not 0..255.
+ */
+function __mcp_lightTypeInt(lightType) {
+  // Enum values (spot/omni/directional -> 1/2/3) are the conventional recorded order but were
+  // NOT diff-verified in captures; flagged in docs/tools/heavy-filters.md.
+  if (lightType === 'omni') return 2;
+  if (lightType === 'directional') return 3;
+  return 1; // spot
+}
+
+function __mcp_applyLightingEffects(p) {
+  __mcp_hfAssertRgb('Lighting Effects');
+  var layer = __mcp_ensureRasterActiveLayer();
+  try {
+    var d = new ActionDescriptor();
+    var light = new ActionDescriptor();
+    __mcp_hfPutInt(light, 'Type', __mcp_lightTypeInt(p.lightType));
+    // Intensity: UI is roughly -100..100; the recorded 'hots' is a float multiplier (~2.0 default).
+    // Map -100..100 -> ~0..4 so 0 -> 2.0 (neutral), keeping it inside the observed range.
+    var hots = 2.0 + (__mcp_clampNumHF(p.intensity, -100, 100) / 100) * 2.0;
+    light.putDouble(__mcp_c2t('hots'), hots);
+    // Color as 0..1 floats under the space-padded keys.
+    light.putDouble(__mcp_c2t('Rd  '), __mcp_clampNumHF(p.red, 0, 255) / 255);
+    light.putDouble(__mcp_c2t('Grn '), __mcp_clampNumHF(p.green, 0, 255) / 255);
+    light.putDouble(__mcp_c2t('Bl  '), __mcp_clampNumHF(p.blue, 0, 255) / 255);
+
+    var lightList = new ActionList();
+    lightList.putObject(__mcp_c2t('Lght'), light);
+    d.putList(__mcp_s2t('lights'), lightList);
+    executeAction(__mcp_s2t('lightFilterLightingEffects'), d, DialogModes.NO);
+    return layer.name;
+  } catch (eLight) {
+    throw new Error(
+      'Lighting Effects is not reliably scriptable in this Photoshop build. The modern GPU ' +
+      'Lighting Effects workspace records a setup step that does not replay from a script, and the ' +
+      'render descriptor is image-dependent. Underlying error: ' +
+      (eLight.message || String(eLight)) +
+      '. Apply Filter > Render > Lighting Effects manually, or record + clean a full action once.'
+    );
+  }
+}
+
+function __mcp_clampNumHF(v, min, max) {
+  if (typeof v !== 'number' || isNaN(v)) return min;
+  return Math.max(min, Math.min(max, v));
+}
+`;
 
 /**
  * Fill / gradient / pattern / paint helpers (Tier-2 fill-paint tools).
