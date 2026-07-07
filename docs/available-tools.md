@@ -138,6 +138,8 @@ photoshop_fill_layer({
 })
 ```
 
+> For **gradients, patterns, solid color fill layers, selection strokes, and named-source selection fills** (foreground/background/black/white/50%-gray), see the dedicated **[Fill / Gradient / Pattern / Paint Tools](tools/fill-paint.md)** — `photoshop_apply_gradient` (the real gradient fill tool), `photoshop_apply_pattern_fill`, `photoshop_add_solid_fill_layer`, `photoshop_stroke_selection`, `photoshop_fill_selection_with`. Each is one undo, RGB only.
+
 #### `photoshop_get_layers`
 Get list of all layers in the active document.
 
