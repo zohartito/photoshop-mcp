@@ -1092,46 +1092,54 @@ function __mcp_layerBoundsPx() {
   return { left: left, top: top, right: right, bottom: bottom, width: right - left, height: bottom - top };
 }
 
-/** Put a pixel-unit distance value. */
-function __mcp_putPx(desc, key, value) {
-  desc.putUnitDouble(__mcp_s2t(key), __mcp_s2t('pixelsUnit'), value);
-}
-
 /**
- * Free-distort by four absolute corner points. Photoshop's \`transform\` event with a
- * quadrilateral is expressed as offsets from the layer's current corners; we compute
- * the mapping by translating each source corner to its target via the transform matrix
- * built from the freeTransformQuadrilateral keys.
+ * Free-distort by four absolute corner points. This is the ONE quad primitive that
+ * skew / distort / perspective all route through — they differ only in how the four
+ * destination corners are computed.
+ *
+ * Uses the transform event \`Trnf\` (charID) with two ActionLists:
+ *   - 'rectangle'    = SOURCE quad (current layer bounds): 4 pixel doubles L, T, R, B.
+ *   - 'quadrilateral'= DEST corners: 8 pixel doubles TLx,TLy, TRx,TRy, BRx,BRy, BLx,BLy
+ *                      (alternating X,Y, clockwise from top-left).
+ * List entries carry the unit (pixelsUnit) and have no per-entry key. Ruler units are
+ * forced to pixels around the call because the quad math is unit-sensitive.
  */
 function __mcp_transformCorners(tl, tr, br, bl) {
-  // Establish the layer's current corners as the free-transform source quad, then
-  // move each corner to its target. Photoshop records a free distort as a 'transform'
-  // event whose destination corners are 'point' sub-objects keyed by corner name; the
-  // freeTransformCenterState + rectangle (source bounds) anchor the mapping.
-  var bnds = __mcp_layerBoundsPx();
-  var d = new ActionDescriptor();
-  var ref = new ActionReference();
-  ref.putEnumerated(__mcp_s2t('layer'), __mcp_s2t('ordinal'), __mcp_s2t('targetEnum'));
-  d.putReference(__mcp_s2t('null'), ref);
-  d.putEnumerated(__mcp_s2t('freeTransformCenterState'), __mcp_s2t('quadCenterState'), __mcp_s2t('QCSAverage'));
-  // Source rectangle = current layer bounds.
-  var q = new ActionDescriptor();
-  __mcp_putPx(q, 'top', bnds.top);
-  __mcp_putPx(q, 'left', bnds.left);
-  __mcp_putPx(q, 'bottom', bnds.bottom);
-  __mcp_putPx(q, 'right', bnds.right);
-  d.putObject(__mcp_s2t('rectangle'), __mcp_s2t('rectangle'), q);
-  // Destination quadrilateral corners as 'point' objects.
-  var corners = [tl, tr, br, bl];
-  var keys = ['topLeft', 'topRight', 'bottomRight', 'bottomLeft'];
-  for (var i = 0; i < 4; i++) {
-    var c = new ActionDescriptor();
-    __mcp_putPx(c, 'horizontal', corners[i].x);
-    __mcp_putPx(c, 'vertical', corners[i].y);
-    d.putObject(__mcp_s2t(keys[i]), __mcp_s2t('point'), c);
+  if (app.activeDocument.activeLayer.isBackgroundLayer) {
+    throw new Error('Cannot transform the background layer. Duplicate it or convert it to a normal layer first.');
   }
-  d.putEnumerated(__mcp_s2t('interpolation'), __mcp_s2t('interpolationType'), __mcp_s2t('bicubic'));
-  executeAction(__mcp_s2t('transform'), d, DialogModes.NO);
+  var __savedUnits = app.preferences.rulerUnits;
+  app.preferences.rulerUnits = Units.PIXELS;
+  try {
+    var bnds = __mcp_layerBoundsPx();
+    var d = new ActionDescriptor();
+    var ref = new ActionReference();
+    ref.putEnumerated(__mcp_c2t('Lyr '), __mcp_c2t('Ordn'), __mcp_c2t('Trgt'));
+    d.putReference(__mcp_c2t('null'), ref);
+    d.putEnumerated(__mcp_c2t('FTcs'), __mcp_c2t('QCSt'), __mcp_c2t('Qcsa'));
+
+    // Source rectangle = current layer bounds, order left, top, right, bottom.
+    var rect = new ActionList();
+    rect.putUnitDouble(__mcp_c2t('#Pxl'), bnds.left);
+    rect.putUnitDouble(__mcp_c2t('#Pxl'), bnds.top);
+    rect.putUnitDouble(__mcp_c2t('#Pxl'), bnds.right);
+    rect.putUnitDouble(__mcp_c2t('#Pxl'), bnds.bottom);
+    d.putList(__mcp_s2t('rectangle'), rect);
+
+    // Destination quadrilateral = 8 doubles, clockwise from top-left.
+    var corners = [tl, tr, br, bl];
+    var quad = new ActionList();
+    for (var i = 0; i < 4; i++) {
+      quad.putUnitDouble(__mcp_c2t('#Pxl'), corners[i].x);
+      quad.putUnitDouble(__mcp_c2t('#Pxl'), corners[i].y);
+    }
+    d.putList(__mcp_s2t('quadrilateral'), quad);
+
+    d.putEnumerated(__mcp_s2t('interpolation'), __mcp_s2t('interpolationType'), __mcp_s2t('bicubic'));
+    executeAction(__mcp_c2t('Trnf'), d, DialogModes.NO);
+  } finally {
+    app.preferences.rulerUnits = __savedUnits;
+  }
 }
 
 /**
@@ -1146,37 +1154,34 @@ function __mcp_affineTransform(scaleX, scaleY, angle, skewH, offsetX, offsetY) {
   }
   var d = new ActionDescriptor();
   var ref = new ActionReference();
-  ref.putEnumerated(__mcp_s2t('layer'), __mcp_s2t('ordinal'), __mcp_s2t('targetEnum'));
-  d.putReference(__mcp_s2t('null'), ref);
-  d.putEnumerated(__mcp_s2t('freeTransformCenterState'), __mcp_s2t('quadCenterState'), __mcp_s2t('QCSAverage'));
+  ref.putEnumerated(__mcp_c2t('Lyr '), __mcp_c2t('Ordn'), __mcp_c2t('Trgt'));
+  d.putReference(__mcp_c2t('null'), ref);
+  d.putEnumerated(__mcp_c2t('FTcs'), __mcp_c2t('QCSt'), __mcp_c2t('Qcsa'));
   var offset = new ActionDescriptor();
-  __mcp_putPx(offset, 'horizontal', offsetX);
-  __mcp_putPx(offset, 'vertical', offsetY);
-  d.putObject(__mcp_s2t('offset'), __mcp_s2t('offset'), offset);
-  d.putUnitDouble(__mcp_s2t('width'), __mcp_s2t('percentUnit'), scaleX);
-  d.putUnitDouble(__mcp_s2t('height'), __mcp_s2t('percentUnit'), scaleY);
-  d.putUnitDouble(__mcp_s2t('angle'), __mcp_s2t('angleUnit'), angle);
-  d.putUnitDouble(__mcp_s2t('skew'), __mcp_s2t('angleUnit'), skewH);
+  offset.putUnitDouble(__mcp_c2t('Hrzn'), __mcp_c2t('#Pxl'), offsetX);
+  offset.putUnitDouble(__mcp_c2t('Vrtc'), __mcp_c2t('#Pxl'), offsetY);
+  d.putObject(__mcp_c2t('Ofst'), __mcp_c2t('Ofst'), offset);
+  d.putUnitDouble(__mcp_c2t('Wdth'), __mcp_c2t('#Prc'), scaleX);
+  d.putUnitDouble(__mcp_c2t('Hght'), __mcp_c2t('#Prc'), scaleY);
+  d.putUnitDouble(__mcp_c2t('Angl'), __mcp_c2t('#Ang'), angle);
+  d.putUnitDouble(__mcp_c2t('Skew'), __mcp_c2t('#Ang'), skewH);
   d.putEnumerated(__mcp_s2t('interpolation'), __mcp_s2t('interpolationType'), __mcp_s2t('bicubic'));
-  executeAction(__mcp_s2t('transform'), d, DialogModes.NO);
+  executeAction(__mcp_c2t('Trnf'), d, DialogModes.NO);
 }
 
 /**
- * Skew the active layer by horizontal/vertical angles (degrees), anchored at center.
- * If only a horizontal skew is requested, use the reliable affine 'skew' key; if a
- * vertical skew is present, map the four corners to a parallelogram (corner quad).
+ * Skew the active layer by horizontal/vertical angles (degrees). Routed through the
+ * corner-quad primitive (research §1B) for both axes — this gives reliable, consistent
+ * "which edge is anchored" semantics vs. the anchor-dependent numeric 'Skew' key.
+ *
+ * Skew maps a rectangle to a parallelogram: a horizontal skew shifts x proportional to
+ * vertical position; a vertical skew shifts y proportional to horizontal position. The
+ * top-left corner is the anchor.
  */
 function __mcp_skew(hAngle, vAngle) {
-  if (vAngle === 0) {
-    __mcp_affineTransform(100, 100, 0, hAngle, 0, 0);
-    return;
-  }
   var bnds = __mcp_layerBoundsPx();
   var hRad = hAngle * Math.PI / 180;
   var vRad = vAngle * Math.PI / 180;
-  // Skew maps a rectangle to a parallelogram; derive the 4 target corners.
-  // Horizontal skew shifts x proportional to vertical position; vertical skew shifts
-  // y proportional to horizontal position. Anchor the top-left corner.
   var dx = bnds.height * Math.tan(hRad);
   var dy = bnds.width * Math.tan(vRad);
   var tl = { x: bnds.left,        y: bnds.top };
