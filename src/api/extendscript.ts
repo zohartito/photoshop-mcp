@@ -4190,7 +4190,7 @@ function __mcp_applyGradient(opts) {
   args.putBoolean(sTID('dither'), !!opts.dither);
   args.putBoolean(sTID('reverse'), !!opts.reverse);
   args.putObject(sTID('gradient'), sTID('gradientClassEvent'), gradient);
-  executeAction(sTID('gradientClassEvent'), args, DialogModes.NO);
+  executeAction(cTID('Grdn'), args, DialogModes.NO);
   return { layer_name: layer.name };
 }
 
