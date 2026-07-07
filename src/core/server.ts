@@ -14,29 +14,8 @@ import { Session } from './session.js';
 import { wrapToolHandler } from '../errors/envelope.js';
 import { buildPhotoshopInstructions } from '../prompts/instructions.js';
 import { registerPhotoshopPrompts } from '../prompts/registry.js';
-import { createDocumentTools } from '../tools/document-tools.js';
-import { createLayerTools } from '../tools/layer-tools.js';
-import { createImageTools } from '../tools/image-tools.js';
-import { createImagePlacementTools } from '../tools/image-placement-tools.js';
-import { createLayerTransformTools } from '../tools/layer-transform-tools.js';
-import { createLayerPropertiesTools } from '../tools/layer-properties-tools.js';
-import { createFilterTools } from '../tools/filter-tools.js';
-import { createFilterGalleryTools } from '../tools/filter-gallery-tools.js';
-import { createTransformExtraTools } from '../tools/transform-extra-tools.js';
-import { createAdjustmentTools } from '../tools/adjustment-tools.js';
-import { createAdjustmentLayerTools } from '../tools/adjustment-layer-tools.js';
-import { createTextTools } from '../tools/text-tools.js';
-import { createLayerStyleTools } from '../tools/layer-style-tools.js';
-import { createSmartObjectTools } from '../tools/smart-object-tools.js';
-import { createSelectionTools } from '../tools/selection-tools.js';
-import { createMaskTools } from '../tools/mask-tools.js';
-import { createActionTools } from '../tools/action-tools.js';
-import { createHistoryTools } from '../tools/history-tools.js';
-import { createLayerOrderingTools } from '../tools/layer-ordering-tools.js';
-import { createStateTools } from '../tools/state-tools.js';
-import { createRecipeTools } from '../tools/recipes/index.js';
-import { createGenerativeTools } from '../tools/generative-tools.js';
-import { createNeuralTools } from '../tools/neural-tools.js';
+import { buildCommandToolDefinitions } from '../tools/tool-roster.js';
+import { createBatchTools } from '../tools/batch-tools.js';
 import { ensureUxpBridgeServer } from '../platform/uxp-bridge-server.js';
 import { TransportRouter } from '../transport/index.js';
 
@@ -126,29 +105,13 @@ export class PhotoshopMCPServer {
       this.logger.debug('UXP bridge server not started:', err);
     });
 
-    this.registerToolDefinitions(createDocumentTools(transport));
-    this.registerToolDefinitions(createLayerTools(transport));
-    this.registerToolDefinitions(createImageTools(transport));
-    this.registerToolDefinitions(createImagePlacementTools(transport));
-    this.registerToolDefinitions(createLayerTransformTools(transport));
-    this.registerToolDefinitions(createLayerPropertiesTools(transport));
-    this.registerToolDefinitions(createFilterTools(transport));
-    this.registerToolDefinitions(createFilterGalleryTools(transport));
-    this.registerToolDefinitions(createTransformExtraTools(transport));
-    this.registerToolDefinitions(createAdjustmentTools(transport));
-    this.registerToolDefinitions(createAdjustmentLayerTools(transport));
-    this.registerToolDefinitions(createTextTools(transport));
-    this.registerToolDefinitions(createLayerStyleTools(transport));
-    this.registerToolDefinitions(createSmartObjectTools(transport));
-    this.registerToolDefinitions(createSelectionTools(transport));
-    this.registerToolDefinitions(createMaskTools(transport));
-    this.registerToolDefinitions(createActionTools(transport));
-    this.registerToolDefinitions(createHistoryTools(transport));
-    this.registerToolDefinitions(createLayerOrderingTools(transport));
-    this.registerToolDefinitions(createStateTools(transport));
-    this.registerToolDefinitions(createGenerativeTools(transport));
-    this.registerToolDefinitions(createNeuralTools(transport));
-    this.registerToolDefinitions(createRecipeTools(transport));
+    // All command tools, from the shared roster (src/tools/tool-roster.ts) so
+    // batch mode drives the identical handler set.
+    this.registerToolDefinitions(buildCommandToolDefinitions(transport));
+
+    // Headless batch mode (transport-layer.md §8): sits above the transport and
+    // reuses the command handlers from the same roster.
+    this.registerToolDefinitions(createBatchTools(transport));
 
     this.logger.info(
       `Registered ${this.toolRegistry.count()} tools and ${this.promptRegistry.count()} prompts`
