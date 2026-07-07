@@ -1216,13 +1216,17 @@ function __mcp_perspective(axis, amount) {
   __mcp_transformCorners(tl, tr, br, bl);
 }
 
-/** Warp preset style names → AM warpStyle enum strings. */
+/**
+ * Warp preset style names → AM warpStyle enum stringIDs. These are stringID-only
+ * (not in the 4-char dictionary): the 'warp' prefix + the style name PascalCased,
+ * matching the UXP WarpStyle enum. Note 'Fisheye' is one word -> 'warpFisheye'.
+ */
 function __mcp_warpStyleEnum(style) {
   var map = {
-    arc: 'arc', arc_lower: 'arcLower', arc_upper: 'arcUpper', arch: 'arch',
-    bulge: 'bulge', shell_lower: 'shellLower', shell_upper: 'shellUpper',
-    flag: 'flag', wave: 'wave', fish: 'fish', rise: 'rise',
-    fisheye: 'fishEye', inflate: 'inflate', squeeze: 'squeeze', twist: 'twist'
+    arc: 'warpArc', arc_lower: 'warpArcLower', arc_upper: 'warpArcUpper', arch: 'warpArch',
+    bulge: 'warpBulge', shell_lower: 'warpShellLower', shell_upper: 'warpShellUpper',
+    flag: 'warpFlag', wave: 'warpWave', fish: 'warpFish', rise: 'warpRise',
+    fisheye: 'warpFisheye', inflate: 'warpInflate', squeeze: 'warpSqueeze', twist: 'warpTwist'
   };
   var v = map[style];
   if (!v) throw new Error('Unknown warp style "' + style + '"');
@@ -1230,24 +1234,51 @@ function __mcp_warpStyleEnum(style) {
 }
 
 /**
- * Warp the active layer with a preset style. \`bend\` is -100..100, \`hDistort\`/\`vDistort\`
- * are -100..100. Orientation 'horizontal' | 'vertical'. Bend/distortion are stored as
- * 0-1 fractions in the warp descriptor, so percent inputs are divided by 100.
+ * Warp the active layer with a preset style via the transform event \`Trnf\`, carrying a
+ * 'warp' sub-descriptor (research §4). \`bend\` is the Bend slider percent (-100..100);
+ * \`hDistort\`/\`vDistort\` are the horizontal/vertical distortion percents (-100..100).
+ * These are stored as PERCENT doubles (NOT 0-1 fractions). Orientation toggles the warp's
+ * principal axis. The layer bounds are supplied as the warp bounds, with spline order 4/4.
  */
 function __mcp_warp(style, bend, hDistort, vDistort, orientation) {
-  var d = new ActionDescriptor();
-  var ref = new ActionReference();
-  ref.putEnumerated(__mcp_s2t('layer'), __mcp_s2t('ordinal'), __mcp_s2t('targetEnum'));
-  d.putReference(__mcp_s2t('null'), ref);
-  var w = new ActionDescriptor();
-  w.putEnumerated(__mcp_s2t('warpStyle'), __mcp_s2t('warpStyle'), __mcp_s2t(__mcp_warpStyleEnum(style)));
-  w.putDouble(__mcp_s2t('warpValue'), bend / 100);
-  w.putDouble(__mcp_s2t('warpPerspective'), hDistort / 100);
-  w.putDouble(__mcp_s2t('warpPerspectiveOther'), vDistort / 100);
-  var orient = (orientation === 'vertical') ? 'vertical' : 'horizontal';
-  w.putEnumerated(__mcp_s2t('warpRotate'), __mcp_s2t('orientation'), __mcp_s2t(orient));
-  d.putObject(__mcp_s2t('warp'), __mcp_s2t('warp'), w);
-  executeAction(__mcp_s2t('transform'), d, DialogModes.NO);
+  if (app.activeDocument.activeLayer.isBackgroundLayer) {
+    throw new Error('Cannot transform the background layer. Duplicate it or convert it to a normal layer first.');
+  }
+  var __savedUnits = app.preferences.rulerUnits;
+  app.preferences.rulerUnits = Units.PIXELS;
+  try {
+    var bnds = __mcp_layerBoundsPx();
+    var d = new ActionDescriptor();
+    var ref = new ActionReference();
+    ref.putEnumerated(__mcp_c2t('Lyr '), __mcp_c2t('Ordn'), __mcp_c2t('Trgt'));
+    d.putReference(__mcp_c2t('null'), ref);
+    d.putEnumerated(__mcp_c2t('FTcs'), __mcp_c2t('QCSt'), __mcp_c2t('Qcsa'));
+
+    var w = new ActionDescriptor();
+    // warpStyle: class AND enum are both stringID('warpStyle'); value is a warp* stringID.
+    w.putEnumerated(__mcp_s2t('warpStyle'), __mcp_s2t('warpStyle'), __mcp_s2t(__mcp_warpStyleEnum(style)));
+    w.putDouble(__mcp_s2t('warpValue'), bend);               // Bend slider (percent, -100..100)
+    w.putDouble(__mcp_s2t('warpPerspective'), hDistort);     // Horizontal distortion (percent)
+    w.putDouble(__mcp_s2t('warpPerspectiveOther'), vDistort);// Vertical distortion (percent)
+    w.putEnumerated(__mcp_s2t('warpRotate'), __mcp_c2t('Ornt'),
+      (orientation === 'vertical') ? __mcp_c2t('Vrtc') : __mcp_c2t('Hrzn'));
+
+    // bounds = the transform bounds the warp is applied over (object class 'Rctn').
+    var boundsDesc = new ActionDescriptor();
+    boundsDesc.putUnitDouble(__mcp_c2t('Top '), __mcp_c2t('#Pxl'), bnds.top);
+    boundsDesc.putUnitDouble(__mcp_c2t('Left'), __mcp_c2t('#Pxl'), bnds.left);
+    boundsDesc.putUnitDouble(__mcp_c2t('Btom'), __mcp_c2t('#Pxl'), bnds.bottom);
+    boundsDesc.putUnitDouble(__mcp_c2t('Rght'), __mcp_c2t('#Pxl'), bnds.right);
+    w.putObject(__mcp_s2t('bounds'), __mcp_c2t('Rctn'), boundsDesc);
+
+    w.putInteger(__mcp_s2t('uOrder'), 4);
+    w.putInteger(__mcp_s2t('vOrder'), 4);
+
+    d.putObject(__mcp_s2t('warp'), __mcp_s2t('warp'), w);
+    executeAction(__mcp_c2t('Trnf'), d, DialogModes.NO);
+  } finally {
+    app.preferences.rulerUnits = __savedUnits;
+  }
 }
 
 /**
