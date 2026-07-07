@@ -662,6 +662,8 @@ photoshop_apply_gradient_mask({
 })
 ```
 
+For the **advanced selection / channels / paths** set — `photoshop_select_color_range` (tonal/color-preset or sampled selection), `photoshop_refine_selection` (grow/shrink/feather/smooth/border), `photoshop_save_selection_as_channel` / `photoshop_load_channel_as_selection` (alpha-channel store/restore), `photoshop_make_work_path_from_selection`, and `photoshop_create_clipping_mask` — see **[Channels, Paths & Advanced Selection Tools](tools/channels-paths.md)**. Each is one undo.
+
 ### History & Undo/Redo
 
 #### `photoshop_undo`

@@ -30,6 +30,7 @@ import { createLayerStyleTools } from '../tools/layer-style-tools.js';
 import { createSmartObjectTools } from '../tools/smart-object-tools.js';
 import { createSelectionTools } from '../tools/selection-tools.js';
 import { createMaskTools } from '../tools/mask-tools.js';
+import { createChannelPathTools } from '../tools/channel-path-tools.js';
 import { createActionTools } from '../tools/action-tools.js';
 import { createHistoryTools } from '../tools/history-tools.js';
 import { createLayerOrderingTools } from '../tools/layer-ordering-tools.js';
@@ -142,6 +143,7 @@ export class PhotoshopMCPServer {
     this.registerToolDefinitions(createSmartObjectTools(transport));
     this.registerToolDefinitions(createSelectionTools(transport));
     this.registerToolDefinitions(createMaskTools(transport));
+    this.registerToolDefinitions(createChannelPathTools(transport));
     this.registerToolDefinitions(createActionTools(transport));
     this.registerToolDefinitions(createHistoryTools(transport));
     this.registerToolDefinitions(createLayerOrderingTools(transport));
