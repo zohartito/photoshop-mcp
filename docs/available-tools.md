@@ -858,3 +858,10 @@ Set case display + faux styles. **Parameters:** `case` (allCaps|smallCaps|normal
 
 #### `photoshop_warp_text`
 Warp the text layer or remove the warp. **Parameters:** `style` (required: none|arc|arcLower|arcUpper|arch|bulge|flag|wave|fish|rise|fisheye|inflate|squeeze|twist), `bend`, `horizontalDistortion`, `verticalDistortion`
+
+### Batch Mode
+
+Full reference: [tools/batch-mode.md](tools/batch-mode.md). Apply a **recipe** (ordered `photoshop_*` steps) to a folder of images headlessly — the same engine backs the MCP tool and the `photoshop-mcp batch <recipe.json>` CLI subcommand. Per file: open → steps → export → close(no-save), serial. "Headless" = agentless, **not** Photoshop-less (the GUI must be running); unit of undo is the file.
+
+#### `photoshop_batch_run`
+Run a recipe over an input glob, exporting each result via an `{stem}`/`{index}` output template. **Parameters:** `recipe` (required: object | JSON string | path to `.json`), `inputGlob`, `outputTemplate`, `errorPolicy` (skip|abort). Returns a per-file JSON report.
