@@ -422,10 +422,14 @@ async function loadChannelAsSelection(
     var doc = app.activeDocument;
     var name = "${jsString(channelName)}";
 
+    // Only match saved-selection alpha channels — never a component (RGB) or
+    // spot channel, which cannot be loaded as a selection and would throw.
     var alpha = null;
     for (var i = 0; i < doc.channels.length; i++) {
-      if (doc.channels[i].name === name) {
-        alpha = doc.channels[i];
+      var candidate = doc.channels[i];
+      if (candidate.name !== name) continue;
+      if (candidate.kind === ChannelType.MASKEDAREA || candidate.kind === ChannelType.SELECTEDAREA) {
+        alpha = candidate;
         break;
       }
     }
@@ -505,6 +509,18 @@ async function createClippingMask(transport: TransportRouter): Promise<ToolResul
     if (layer.isBackgroundLayer) {
       return { ok: false, code: 'invalid_target', message: 'Background layer cannot be clipped.', suggested_next_tool: 'photoshop_get_layers' };
     }
+
+    // Clipping needs a sibling directly below in the same container. The
+    // bottommost item has itemIndex === parent.layers.length (itemIndex is
+    // 1-based within its parent, doc or LayerSet). Guard so we return
+    // invalid_target instead of letting groupEvent throw. If the position
+    // read fails on some build, fall through and let the action attempt run.
+    try {
+      var parent = layer.parent;
+      if (parent && parent.layers && layer.itemIndex >= parent.layers.length) {
+        return { ok: false, code: 'invalid_target', message: 'No layer below to clip to — the active layer is the bottom of its group.', suggested_next_tool: 'photoshop_get_layers' };
+      }
+    } catch (ePos) {}
 
     app.displayDialogs = DialogModes.NO;
     var desc = new ActionDescriptor();
