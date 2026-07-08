@@ -244,6 +244,19 @@ async function main(): Promise<void> {
   await t.run('photoshop_set_layer_blend_mode', { blendMode: 'MULTIPLY' });
   await t.run('photoshop_set_layer_visibility', { visible: true });
   await t.run('photoshop_rename_layer', { name: 'MCP_Paint_Renamed' });
+  await t.run('photoshop_rename_layers_batch', {
+    renames: [
+      { currentName: 'MCP_Paint_Renamed', newName: 'MCP_Paint_Batch' },
+      { currentName: 'MCP Test', newName: 'MCP_Text_Batch' },
+    ],
+  });
+  // Restore names subsequent phases expect (ordering / transforms target MCP_Paint_Renamed).
+  await t.run('photoshop_rename_layers_batch', {
+    renames: [
+      { currentName: 'MCP_Paint_Batch', newName: 'MCP_Paint_Renamed' },
+      { currentName: 'MCP_Text_Batch', newName: 'MCP Test' },
+    ],
+  });
   await t.run('photoshop_duplicate_layer');
   await t.run('photoshop_set_layer_locked', { locked: false });
   await t.run('photoshop_execute_script', {

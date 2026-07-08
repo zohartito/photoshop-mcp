@@ -256,3 +256,24 @@ export function normalizeGetLayers(
 
   return { layerCount: layers.length, layers, context };
 }
+
+/**
+ * rename_layers_batch twin: the set descriptors don't return the applied names, so
+ * the normalizer rebuilds the ExtendScript envelope from the entries that were
+ * sent (same shape: { renamedCount, renames:[{ oldName?, newName, layerId? }] }).
+ */
+export function normalizeRenameLayersBatch(
+  renames: Array<{ newName: string; currentName?: string; layerId?: number }>
+): {
+  renamedCount: number;
+  renames: Array<{ oldName: string | undefined; newName: string; layerId: number | undefined }>;
+} {
+  return {
+    renamedCount: renames.length,
+    renames: renames.map((r) => ({
+      oldName: typeof r.currentName === 'string' ? r.currentName : undefined,
+      newName: r.newName,
+      layerId: typeof r.layerId === 'number' ? r.layerId : undefined,
+    })),
+  };
+}

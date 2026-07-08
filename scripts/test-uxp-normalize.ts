@@ -61,7 +61,7 @@ check('context: document + active layer maps to getContextInfo shape', () => {
   const layerDesc = {
     name: 'MCP_Paint',
     layerKind: 1,
-    opacity: { _unit: 'percentUnit', _value: 85 },
+    opacity: { _value: 217 }, // raw AM opacity is 0–255 (§12); 217 → 85%
     mode: { _enum: 'blendMode', _value: 'multiply' },
     visible: true,
     background: false,

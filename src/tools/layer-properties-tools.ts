@@ -133,6 +133,43 @@ export function createLayerPropertiesTools(transport: TransportRouter): ToolDefi
     },
     {
       tool: {
+        name: 'photoshop_rename_layers_batch',
+        description:
+          'Rename multiple layers in one call. Each entry targets a layer by currentName or layerId and sets newName. Fail-fast on the first missing layer.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            renames: {
+              type: 'array',
+              description: 'List of renames to apply, in order',
+              items: {
+                type: 'object',
+                properties: {
+                  newName: {
+                    type: 'string',
+                    description: 'New name for the layer',
+                  },
+                  currentName: {
+                    type: 'string',
+                    description: 'Current layer name to find (recursive). Required if layerId is omitted.',
+                  },
+                  layerId: {
+                    type: 'number',
+                    description: 'Native layer id to target (from a prior tool result). Preferred when available.',
+                  },
+                },
+                required: ['newName'],
+              },
+              minItems: 1,
+            },
+          },
+          required: ['renames'],
+        },
+      },
+      handler: async (args) => renameLayersBatch(transport, args),
+    },
+    {
+      tool: {
         name: 'photoshop_duplicate_layer',
         description: 'Duplicate the active layer',
         inputSchema: {
@@ -325,6 +362,78 @@ async function renameLayer(
       isError: true,
     };
   }
+}
+
+async function renameLayersBatch(
+  transport: TransportRouter,
+  args: Record<string, unknown>
+): Promise<ToolResult> {
+  try {
+    const renames = parseRenameEntries(args.renames);
+    const result = await transport.run({
+      name: 'rename_layers_batch',
+      params: {
+        script: ExtendScriptSnippets.renameLayersBatch(renames),
+        renames,
+      },
+    });
+
+    const count =
+      result && typeof result === 'object' && typeof (result as { renamedCount?: unknown }).renamedCount === 'number'
+        ? (result as { renamedCount: number }).renamedCount
+        : renames.length;
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(
+            {
+              ok: true,
+              summary: `Renamed ${count} layer${count === 1 ? '' : 's'}`,
+              details: result,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Error renaming layers: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+function parseRenameEntries(
+  raw: unknown
+): Array<{ newName: string; currentName?: string; layerId?: number }> {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('renames must be a non-empty array');
+  }
+  return raw.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`renames[${index}] must be an object`);
+    }
+    const e = entry as Record<string, unknown>;
+    const newName = e.newName;
+    if (typeof newName !== 'string' || newName.length === 0) {
+      throw new Error(`renames[${index}] requires a non-empty newName`);
+    }
+    const currentName = typeof e.currentName === 'string' ? e.currentName : undefined;
+    const layerId = typeof e.layerId === 'number' ? e.layerId : undefined;
+    if (layerId === undefined && (currentName === undefined || currentName.length === 0)) {
+      throw new Error(`renames[${index}] requires currentName or layerId`);
+    }
+    return { newName, currentName, layerId };
+  });
 }
 
 async function duplicateLayer(

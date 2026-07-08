@@ -148,3 +148,40 @@ export function setLayerPropertiesDescriptor(params: {
   });
   return descriptors;
 }
+
+/** One entry for rename_layers_batch — target by native id or by current name. */
+export interface RenameLayerBatchEntry {
+  newName: string;
+  currentName?: string;
+  layerId?: number;
+}
+
+/**
+ * Batch rename: one `set` descriptor per entry, targeting the layer by `_id` or
+ * `_name` (AM supports both). No pre-select — the set carries its own target so
+ * the whole array is one batch_play call and order is preserved.
+ */
+export function renameLayersBatchDescriptor(
+  renames: RenameLayerBatchEntry[]
+): ActionDescriptor[] {
+  const descriptors: ActionDescriptor[] = [];
+  for (const entry of renames) {
+    let target: Record<string, unknown>;
+    if (typeof entry.layerId === 'number') {
+      target = layerById(entry.layerId);
+    } else if (typeof entry.currentName === 'string' && entry.currentName.length > 0) {
+      target = { _ref: 'layer', _name: entry.currentName };
+    } else {
+      throw new Error('Each rename requires currentName or layerId');
+    }
+    if (typeof entry.newName !== 'string' || entry.newName.length === 0) {
+      throw new Error('Each rename requires a non-empty newName');
+    }
+    descriptors.push({
+      _obj: 'set',
+      _target: [target],
+      to: { _obj: 'layer', name: entry.newName },
+    });
+  }
+  return descriptors;
+}

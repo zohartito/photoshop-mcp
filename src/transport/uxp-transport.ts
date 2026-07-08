@@ -15,6 +15,9 @@
  * against the ExtendScript twins (masked-layer + active-selection fixture). See
  * docs/design/transport-layer.md §12 for the verification record and the
  * Action Manager quirk catalog these implementations encode.
+ *
+ * Also ported: rename_layers_batch (mutating; descriptor builders + normalizer
+ * share the ExtendScript envelope so tools cannot tell which backend answered).
  */
 import {
   ensureUxpBridgeServer,
@@ -27,11 +30,14 @@ import {
   getDocumentDescriptor,
   getLayerByIndexDescriptor,
   getSelectionDescriptor,
+  renameLayersBatchDescriptor,
+  type RenameLayerBatchEntry,
 } from './uxp-commands/descriptors.js';
 import {
   normalizeGetDocumentInfo,
   normalizeGetLayers,
   normalizeGetState,
+  normalizeRenameLayersBatch,
 } from './uxp-commands/normalize.js';
 import type {
   PhotoshopTransport,
@@ -58,10 +64,34 @@ const UXP_COMMANDS = [
   'get_state',
   'get_layers',
   'get_document_info',
+  'rename_layers_batch',
 ] as const;
 
 /** A raw batchPlay result is an array of ActionDescriptor objects. */
 type BatchPlayResult = Record<string, unknown>[];
+
+/** Coerce tool/router params.renames into typed batch entries (throws on bad shape). */
+function parseRenameBatchEntries(raw: unknown): RenameLayerBatchEntry[] {
+  if (!Array.isArray(raw)) {
+    throw new Error('renames must be an array');
+  }
+  return raw.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`renames[${index}] must be an object`);
+    }
+    const e = entry as Record<string, unknown>;
+    const newName = e.newName;
+    if (typeof newName !== 'string' || newName.length === 0) {
+      throw new Error(`renames[${index}] requires a non-empty newName`);
+    }
+    const currentName = typeof e.currentName === 'string' ? e.currentName : undefined;
+    const layerId = typeof e.layerId === 'number' ? e.layerId : undefined;
+    if (layerId === undefined && (currentName === undefined || currentName.length === 0)) {
+      throw new Error(`renames[${index}] requires currentName or layerId`);
+    }
+    return { newName, currentName, layerId };
+  });
+}
 
 export class UxpTransport implements PhotoshopTransport {
   readonly id = 'uxp' as const;
@@ -105,6 +135,8 @@ export class UxpTransport implements PhotoshopTransport {
         return this.getDocumentInfo(command.timeoutMs);
       case 'get_layers':
         return this.getLayers(command.timeoutMs);
+      case 'rename_layers_batch':
+        return this.renameLayersBatch(command.params ?? {}, command.timeoutMs);
       case 'neural_filter':
         return this.invokeRaw(command.name, command.params ?? {}, command.timeoutMs ?? 90_000);
       default:
@@ -187,6 +219,25 @@ export class UxpTransport implements PhotoshopTransport {
       layerDescs = await this.runBatchPlay(gets, 'walk_layers', timeoutMs);
     }
     return normalizeGetLayers(layerDescs, context);
+  }
+
+  // --- ported mutating commands ---
+
+  /**
+   * rename_layers_batch: one set-descriptor per entry, normalized to the
+   * ExtendScript twin envelope ({ renamedCount, renames:[...] }).
+   */
+  private async renameLayersBatch(
+    params: Record<string, unknown>,
+    timeoutMs?: number
+  ): Promise<unknown> {
+    const renames = parseRenameBatchEntries(params.renames);
+    if (renames.length === 0) {
+      throw new Error('renames array is empty');
+    }
+    const descriptors = renameLayersBatchDescriptor(renames);
+    await this.runBatchPlay(descriptors, 'rename_layers_batch', timeoutMs);
+    return normalizeRenameLayersBatch(renames);
   }
 
   // --- bridge plumbing ---

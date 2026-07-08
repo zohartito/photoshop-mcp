@@ -910,6 +910,96 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
+   * Rename multiple layers in one call. Each entry must supply newName plus either
+   * currentName (find by name, recursive) or layerId (native id). Fail-fast on the
+   * first missing layer so partial renames never leave the stack half-applied without
+   * a clear error — callers can re-run after fixing the bad entry.
+   */
+  renameLayersBatch: (
+    renames: Array<{ newName: string; currentName?: string; layerId?: number }>
+  ) => {
+    const renamesJson = JSON.stringify(
+      renames.map((r) => ({
+        newName: r.newName,
+        ...(typeof r.currentName === 'string' ? { currentName: r.currentName } : {}),
+        ...(typeof r.layerId === 'number' ? { layerId: r.layerId } : {}),
+      }))
+    );
+    return `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var doc = app.activeDocument;
+    var renames = ${renamesJson};
+    if (!renames || renames.length === 0) {
+      throw new Error('renames array is empty');
+    }
+
+    function findLayerByName(container, name) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var l = container.layers[i];
+        if (l.name === name) return l;
+      }
+      for (var j = 0; j < container.layerSets.length; j++) {
+        var nested = findLayerByName(container.layerSets[j], name);
+        if (nested) return nested;
+      }
+      return null;
+    }
+
+    function findLayerById(container, layerId) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var l = container.layers[i];
+        try {
+          if (l.id === layerId) return l;
+        } catch (eId) {}
+      }
+      for (var j = 0; j < container.layerSets.length; j++) {
+        var nested = findLayerById(container.layerSets[j], layerId);
+        if (nested) return nested;
+      }
+      return null;
+    }
+
+    var applied = [];
+    for (var r = 0; r < renames.length; r++) {
+      var entry = renames[r];
+      var target = null;
+      if (typeof entry.layerId === 'number') {
+        target = findLayerById(doc, entry.layerId);
+        if (!target) {
+          throw new Error('Layer not found: id ' + entry.layerId);
+        }
+      } else if (typeof entry.currentName === 'string' && entry.currentName.length > 0) {
+        target = findLayerByName(doc, entry.currentName);
+        if (!target) {
+          throw new Error('Layer not found: ' + entry.currentName);
+        }
+      } else {
+        throw new Error('Each rename requires currentName or layerId');
+      }
+      if (typeof entry.newName !== 'string' || entry.newName.length === 0) {
+        throw new Error('Each rename requires a non-empty newName');
+      }
+      var oldName = target.name;
+      target.name = entry.newName;
+      var layerIdSafe = null;
+      try { layerIdSafe = target.id; } catch (eSafe) { layerIdSafe = null; }
+      applied.push({
+        oldName: oldName,
+        newName: target.name,
+        layerId: layerIdSafe
+      });
+    }
+
+    return {
+      renamedCount: applied.length,
+      renames: applied
+    };
+  `;
+  },
+
+  /**
    * Duplicate active layer
    */
   duplicateLayer: (newName?: string) => `
