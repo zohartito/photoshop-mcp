@@ -82,6 +82,23 @@ export function selectLayerByIdDescriptor(layerId: number): ActionDescriptor[] {
 }
 
 /**
+ * Rename one layer by exact current name (`set` of the layer's `name`). AM
+ * `_name` references resolve the first matching layer like the ExtendScript
+ * twin's depth-first search; a missing name errors the whole sync batchPlay
+ * (continueOnError:false), so the transport runs each rename as its own bridge
+ * call and maps failure → notFound.
+ */
+export function renameLayerByNameDescriptor(from: string, to: string): ActionDescriptor[] {
+  return [
+    {
+      _obj: 'set',
+      _target: [{ _ref: 'layer', _name: from }],
+      to: { _obj: 'layer', name: to },
+    },
+  ];
+}
+
+/**
  * §6.8 — duplicate a layer by id and (optionally) name the copy. batchPlay returns
  * the new layer's `layerID` so the mutating command can report the affected
  * `layerId` (contract: mutating layer commands return layerId). When `layerId` is

@@ -14,6 +14,7 @@ import {
   normalizeDocumentMode,
   normalizeGetLayers,
   normalizeLayerKind,
+  normalizeRenameLayersBatch,
 } from '../src/transport/uxp-commands/normalize.js';
 
 let passed = 0;
@@ -61,7 +62,7 @@ check('context: document + active layer maps to getContextInfo shape', () => {
   const layerDesc = {
     name: 'MCP_Paint',
     layerKind: 1,
-    opacity: { _unit: 'percentUnit', _value: 85 },
+    opacity: 204, // AM raw 0–255 (live-verified): 204 ↔ DOM 80%
     mode: { _enum: 'blendMode', _value: 'multiply' },
     visible: true,
     background: false,
@@ -86,7 +87,7 @@ check('context: document + active layer maps to getContextInfo shape', () => {
   const al = ctx.activeLayer as Record<string, unknown>;
   assert.equal(al.name, 'MCP_Paint');
   assert.equal(al.kind, 'LayerKind.NORMAL');
-  assert.equal(al.opacity, 85);
+  assert.equal(al.opacity, 80);
   assert.equal(al.blendMode, 'BlendMode.MULTIPLY');
   assert.equal(al.visible, true);
   assert.equal(al.isBackground, false);
@@ -102,8 +103,8 @@ check('getLayers: maps layers + embeds hasMask (§6.6)', () => {
   );
   const out = normalizeGetLayers(
     [
-      { name: 'A', layerKind: 1, visible: true, opacity: { _value: 100 }, mode: { _value: 'normal' }, hasUserMask: true },
-      { name: 'B', layerKind: 2, visible: false, opacity: { _value: 50 }, mode: { _value: 'screen' }, hasUserMask: false },
+      { name: 'A', layerKind: 1, visible: true, opacity: 255, mode: { _value: 'normal' }, hasUserMask: true },
+      { name: 'B', layerKind: 2, visible: false, opacity: 128, mode: { _value: 'screen' }, hasUserMask: false },
     ],
     context
   );
@@ -117,6 +118,30 @@ check('getLayers: maps layers + embeds hasMask (§6.6)', () => {
   assert.equal(out.layers[1].hasMask, false);
   // The getLayerNames envelope embeds the getContextInfo context.
   assert.equal((out.context as { hasDocument: boolean }).hasDocument, true);
+});
+
+// --- rename_layers_batch envelope (ExtendScript twin: renameLayersBatch) ---
+check('renameLayersBatch: partial success → renamed + notFound', () => {
+  const out = normalizeRenameLayersBatch([
+    { from: 'A', to: 'A2', ok: true },
+    { from: 'Missing', to: 'X', ok: false },
+    { from: 'B', to: 'B2', ok: true },
+  ]);
+  assert.deepEqual(out, {
+    renamedCount: 2,
+    renamed: [
+      { from: 'A', to: 'A2' },
+      { from: 'B', to: 'B2' },
+    ],
+    notFound: ['Missing'],
+  });
+});
+check('renameLayersBatch: empty input → zero envelope', () => {
+  assert.deepEqual(normalizeRenameLayersBatch([]), {
+    renamedCount: 0,
+    renamed: [],
+    notFound: [],
+  });
 });
 
 console.log(`\n${passed} normalization checks passed.`);

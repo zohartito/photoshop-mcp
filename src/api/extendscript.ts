@@ -910,6 +910,49 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
+   * Rename multiple layers in one call. Each entry targets a layer by exact
+   * current name (recursive search including layer groups, first depth-first
+   * match — same semantics as selectLayerByName). Missing names land in
+   * notFound instead of failing the whole batch.
+   */
+  renameLayersBatch: (renames: Array<{ from: string; to: string }>) => `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var doc = app.activeDocument;
+    var renames = [${renames
+      .map((r) => `{ from: "${jsString(r.from)}", to: "${jsString(r.to)}" }`)
+      .join(', ')}];
+    function findLayer(container, name) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var l = container.layers[i];
+        if (l.name === name) return l;
+      }
+      for (var j = 0; j < container.layerSets.length; j++) {
+        var nested = findLayer(container.layerSets[j], name);
+        if (nested) return nested;
+      }
+      return null;
+    }
+    var renamed = [];
+    var notFound = [];
+    for (var k = 0; k < renames.length; k++) {
+      var target = findLayer(doc, renames[k].from);
+      if (target) {
+        target.name = renames[k].to;
+        renamed.push({ from: renames[k].from, to: target.name });
+      } else {
+        notFound.push(renames[k].from);
+      }
+    }
+    return {
+      renamedCount: renamed.length,
+      renamed: renamed,
+      notFound: notFound
+    };
+  `,
+
+  /**
    * Duplicate active layer
    */
   duplicateLayer: (newName?: string) => `
@@ -2219,7 +2262,7 @@ export const ExtendScriptSnippets = {
   `,
 
   generativeFill: (prompt: string) => {
-    const escaped = jsString(prompt);
+    const escaped = `"${jsString(prompt)}"`;
     return `
       ${helperFunctions}
       ${ExtendScriptSnippets.generativeHelpers()}
@@ -2258,7 +2301,7 @@ export const ExtendScriptSnippets = {
       return {
         ok: true,
         summary: 'Generative fill invoked via ' + result.action_id,
-        details: { action_id: result.action_id, prompt: ${escaped}, wait },
+        details: { action_id: result.action_id, prompt: ${escaped}, wait: wait },
         next_suggested_tool: 'photoshop_get_preview'
       };
     `;
@@ -2309,14 +2352,14 @@ export const ExtendScriptSnippets = {
     return {
       ok: true,
       summary: 'Generative remove invoked via ' + result.action_id,
-      details: { action_id: result.action_id, feather_px: ${featherPx}, wait },
+      details: { action_id: result.action_id, feather_px: ${featherPx}, wait: wait },
       next_suggested_tool: 'photoshop_get_preview'
     };
   `,
 
   generativeExpand: (direction: string, prompt: string) => {
-    const escaped = jsString(prompt);
-    const dir = jsString(direction);
+    const escaped = `"${jsString(prompt)}"`;
+    const dir = `"${jsString(direction)}"`;
     return `
       ${helperFunctions}
       ${ExtendScriptSnippets.generativeHelpers()}
@@ -2345,7 +2388,7 @@ export const ExtendScriptSnippets = {
       return {
         ok: true,
         summary: 'Generative expand invoked via ' + result.action_id,
-        details: { action_id: result.action_id, direction: ${dir}, prompt: ${escaped}, wait },
+        details: { action_id: result.action_id, direction: ${dir}, prompt: ${escaped}, wait: wait },
         next_suggested_tool: 'photoshop_get_preview'
       };
     `;
@@ -2378,13 +2421,13 @@ export const ExtendScriptSnippets = {
     return {
       ok: true,
       summary: 'Generative upscale invoked via ' + result.action_id,
-      details: { action_id: result.action_id, target_scale: ${targetScale}, wait },
+      details: { action_id: result.action_id, target_scale: ${targetScale}, wait: wait },
       next_suggested_tool: 'photoshop_get_preview'
     };
   `,
 
   skyReplacement: (skyImagePath: string) => {
-    const escaped = jsString(skyImagePath);
+    const escaped = `"${jsString(skyImagePath)}"`;
     return `
       ${helperFunctions}
       ${ExtendScriptSnippets.generativeHelpers()}
@@ -2416,14 +2459,14 @@ export const ExtendScriptSnippets = {
       return {
         ok: true,
         summary: 'Sky replacement invoked via ' + result.action_id,
-        details: { action_id: result.action_id, sky_image_path: ${escaped}, wait },
+        details: { action_id: result.action_id, sky_image_path: ${escaped}, wait: wait },
         next_suggested_tool: 'photoshop_get_preview'
       };
     `;
   },
 
   generateImage: (prompt: string, width: number, height: number) => {
-    const escaped = jsString(prompt);
+    const escaped = `"${jsString(prompt)}"`;
     return `
       ${helperFunctions}
       ${ExtendScriptSnippets.generativeHelpers()}
@@ -2464,7 +2507,7 @@ export const ExtendScriptSnippets = {
       return {
         ok: true,
         summary: 'Generate image invoked via ' + result.action_id,
-        details: { action_id: result.action_id, prompt: ${escaped}, width: ${width}, height: ${height}, wait },
+        details: { action_id: result.action_id, prompt: ${escaped}, width: ${width}, height: ${height}, wait: wait },
         next_suggested_tool: 'photoshop_get_preview'
       };
     `;

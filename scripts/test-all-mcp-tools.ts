@@ -244,6 +244,24 @@ async function main(): Promise<void> {
   await t.run('photoshop_set_layer_blend_mode', { blendMode: 'MULTIPLY' });
   await t.run('photoshop_set_layer_visibility', { visible: true });
   await t.run('photoshop_rename_layer', { name: 'MCP_Paint_Renamed' });
+  await t.run('photoshop_rename_layers_batch', {
+    renames: [
+      { from: 'MCP_Paint_Renamed', to: 'MCP_Paint_Batch' },
+      { from: 'MCP Test', to: 'MCP_Text_Batch' },
+    ],
+  });
+  await t.run('photoshop_execute_script', {
+    code: `return { paint: app.activeDocument.artLayers.getByName("MCP_Paint_Batch").name, text: app.activeDocument.artLayers.getByName("MCP_Text_Batch").name };`,
+  });
+  // Rename back (restores fixture names for later phases); the missing entry
+  // exercises the partial-success notFound envelope — reported, not an error.
+  await t.run('photoshop_rename_layers_batch', {
+    renames: [
+      { from: 'MCP_Paint_Batch', to: 'MCP_Paint_Renamed' },
+      { from: 'MCP_Text_Batch', to: 'MCP Test' },
+      { from: '__MCP_MISSING_LAYER__', to: 'MCP_Never' },
+    ],
+  });
   await t.run('photoshop_duplicate_layer');
   await t.run('photoshop_set_layer_locked', { locked: false });
   await t.run('photoshop_execute_script', {

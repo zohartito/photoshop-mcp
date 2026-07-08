@@ -256,3 +256,25 @@ export function normalizeGetLayers(
 
   return { layerCount: layers.length, layers, context };
 }
+
+/** One rename attempt's outcome, as observed by the transport (backend B). */
+export interface RenameAttempt {
+  from: string;
+  to: string;
+  ok: boolean;
+}
+
+/**
+ * rename_layers_batch → the SAME envelope the ExtendScript twin
+ * (ExtendScriptSnippets.renameLayersBatch) returns:
+ * { renamedCount, renamed:[{from,to}], notFound:[names] }.
+ */
+export function normalizeRenameLayersBatch(attempts: RenameAttempt[]): {
+  renamedCount: number;
+  renamed: Array<{ from: string; to: string }>;
+  notFound: string[];
+} {
+  const renamed = attempts.filter((a) => a.ok).map((a) => ({ from: a.from, to: a.to }));
+  const notFound = attempts.filter((a) => !a.ok).map((a) => a.from);
+  return { renamedCount: renamed.length, renamed, notFound };
+}

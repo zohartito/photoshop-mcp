@@ -133,6 +133,44 @@ export function createLayerPropertiesTools(transport: TransportRouter): ToolDefi
     },
     {
       tool: {
+        name: 'photoshop_rename_layers_batch',
+        description:
+          'Rename multiple layers in one call, each targeted by exact current name.\n\n' +
+          'Use when: renaming several layers at once — one call instead of repeated photoshop_rename_layer.\n' +
+          'Do NOT use when: renaming only the active layer — use photoshop_rename_layer.\n\n' +
+          'Returns: renamedCount, renamed [{from, to}], notFound (names with no match — reported, not an error).\n' +
+          'First depth-first name match wins when duplicate names exist in different groups.\n' +
+          'Preconditions: active document. Side effects: adds history steps for renamed layers.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            renames: {
+              type: 'array',
+              description: 'Renames to apply, in order',
+              minItems: 1,
+              items: {
+                type: 'object',
+                properties: {
+                  from: {
+                    type: 'string',
+                    description: 'Exact current layer name (case-sensitive)',
+                  },
+                  to: {
+                    type: 'string',
+                    description: 'New name for the layer',
+                  },
+                },
+                required: ['from', 'to'],
+              },
+            },
+          },
+          required: ['renames'],
+        },
+      },
+      handler: async (args) => renameLayersBatch(transport, args),
+    },
+    {
+      tool: {
         name: 'photoshop_duplicate_layer',
         description: 'Duplicate the active layer',
         inputSchema: {
@@ -320,6 +358,48 @@ async function renameLayer(
         {
           type: 'text' as const,
           text: `Error renaming layer: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+async function renameLayersBatch(
+  transport: TransportRouter,
+  args: Record<string, unknown>
+): Promise<ToolResult> {
+  const renames = (args.renames ?? []) as Array<{ from: string; to: string }>;
+
+  try {
+    const result = await transport.run({
+      name: 'rename_layers_batch',
+      params: { script: ExtendScriptSnippets.renameLayersBatch(renames), renames },
+    });
+
+    const renamedCount = (result as { renamedCount?: number } | null)?.renamedCount ?? 0;
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(
+            {
+              ok: true,
+              summary: `Renamed ${renamedCount} of ${renames.length} layer(s)`,
+              details: result,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Error renaming layers: ${error instanceof Error ? error.message : String(error)}`,
         },
       ],
       isError: true,

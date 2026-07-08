@@ -27,11 +27,14 @@ import {
   getDocumentDescriptor,
   getLayerByIndexDescriptor,
   getSelectionDescriptor,
+  renameLayerByNameDescriptor,
 } from './uxp-commands/descriptors.js';
 import {
   normalizeGetDocumentInfo,
   normalizeGetLayers,
   normalizeGetState,
+  normalizeRenameLayersBatch,
+  type RenameAttempt,
 } from './uxp-commands/normalize.js';
 import type {
   PhotoshopTransport,
@@ -47,17 +50,20 @@ import type {
 const POLL_FRESHNESS_MS = 2_000;
 
 /**
- * Commands the UXP backend serves in M3. neural_filter is the original path;
- * the three read-only commands are the first descriptor ports (§5). Mutating
- * layer-family commands (duplicate/select/mask/properties) have descriptor
- * builders in ./uxp-commands/descriptors.ts (§6.8 groundwork) but are not routed
- * through run() until a plugin-connected session verifies their result parsing.
+ * Commands the UXP backend serves. neural_filter is the original path; the three
+ * read-only commands are the first descriptor ports (§5); rename_layers_batch is
+ * the first mutating port (name-targeted `set`, no result parsing beyond
+ * success/failure). The remaining mutating layer-family commands
+ * (duplicate/select/mask/properties) have descriptor builders in
+ * ./uxp-commands/descriptors.ts (§6.8 groundwork) but are not routed through
+ * run() until a plugin-connected session verifies their result parsing.
  */
 const UXP_COMMANDS = [
   'neural_filter',
   'get_state',
   'get_layers',
   'get_document_info',
+  'rename_layers_batch',
 ] as const;
 
 /** A raw batchPlay result is an array of ActionDescriptor objects. */
@@ -105,6 +111,8 @@ export class UxpTransport implements PhotoshopTransport {
         return this.getDocumentInfo(command.timeoutMs);
       case 'get_layers':
         return this.getLayers(command.timeoutMs);
+      case 'rename_layers_batch':
+        return this.renameLayersBatch(command.params ?? {}, command.timeoutMs);
       case 'neural_filter':
         return this.invokeRaw(command.name, command.params ?? {}, command.timeoutMs ?? 90_000);
       default:
@@ -187,6 +195,32 @@ export class UxpTransport implements PhotoshopTransport {
       layerDescs = await this.runBatchPlay(gets, 'walk_layers', timeoutMs);
     }
     return normalizeGetLayers(layerDescs, context);
+  }
+
+  /**
+   * rename_layers_batch — one `set` descriptor per rename, each as its OWN bridge
+   * call: a missing `_name` target errors the whole sync batchPlay
+   * (continueOnError:false, same constraint as the selection probe), and per-call
+   * isolation is what lets a miss map to notFound instead of failing the batch.
+   * Result matches the ExtendScript twin's partial-success envelope (§4.2).
+   */
+  private async renameLayersBatch(
+    params: Record<string, unknown>,
+    timeoutMs?: number
+  ): Promise<unknown> {
+    const renames = Array.isArray(params.renames)
+      ? (params.renames as Array<{ from: string; to: string }>)
+      : [];
+    const attempts: RenameAttempt[] = [];
+    for (const { from, to } of renames) {
+      try {
+        await this.runBatchPlay(renameLayerByNameDescriptor(from, to), 'rename_layer', timeoutMs);
+        attempts.push({ from, to, ok: true });
+      } catch {
+        attempts.push({ from, to, ok: false });
+      }
+    }
+    return normalizeRenameLayersBatch(attempts);
   }
 
   // --- bridge plumbing ---
