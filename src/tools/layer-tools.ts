@@ -149,6 +149,37 @@ export function createLayerTools(transport: TransportRouter): ToolDefinition[] {
       },
       handler: async (args) => selectLayerByName(transport, args),
     },
+    {
+      tool: {
+        name: 'photoshop_rename_layers_batch',
+        description:
+          'Rename multiple layers in one call by current name.\n\n' +
+          'Use when: bulk renaming layers (e.g. prefixing, organizing) to avoid N round-trips.\n' +
+          'Do NOT use when: renaming a single layer — use photoshop_rename_layer.\n\n' +
+          'Returns: ok, renamed count, per-item results with ok flag and optional error.\n' +
+          'Preconditions: active document. Side effects: changes layer names; missing names return per-item failure, not a transport error.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            renames: {
+              type: 'array',
+              description: 'Array of renames { oldName, newName }',
+              items: {
+                type: 'object',
+                properties: {
+                  oldName: { type: 'string', description: 'Current exact layer name' },
+                  newName: { type: 'string', description: 'Desired new name' },
+                },
+                required: ['oldName', 'newName'],
+              },
+              minItems: 1,
+            },
+          },
+          required: ['renames'],
+        },
+      },
+      handler: async (args) => renameLayersBatch(transport, args),
+    },
   ];
 }
 
@@ -329,6 +360,65 @@ async function selectLayerByName(
         {
           type: 'text' as const,
           text: `Error selecting layer: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+async function renameLayersBatch(
+  transport: TransportRouter,
+  args: Record<string, unknown>
+): Promise<ToolResult> {
+  const renames = args.renames as Array<{ oldName: string; newName: string }>;
+
+  try {
+    if (!Array.isArray(renames) || renames.length === 0) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Error: renames array is required and must be non-empty' },
+        ],
+        isError: true,
+      };
+    }
+
+    for (const r of renames) {
+      if (!r.oldName || !r.newName) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'Error: each rename entry requires oldName and newName',
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    const result = await transport.run({
+      name: 'rename_layers_batch',
+      params: {
+        renames,
+        script: ExtendScriptSnippets.renameLayersBatch(renames),
+      },
+    });
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Error renaming layers batch: ${error instanceof Error ? error.message : String(error)}`,
         },
       ],
       isError: true,

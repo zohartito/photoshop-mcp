@@ -122,6 +122,51 @@ export function addLayerMaskDescriptor(
 }
 
 /**
+ * Target a layer by its current name (case-sensitive exact match).
+ */
+function layerByName(name: string): Record<string, unknown> {
+  return { _ref: 'layer', _name: name };
+}
+
+/**
+ * Rename a layer by id (or active layer) via `set` descriptor.
+ */
+export function renameLayerDescriptor(params: { layerId?: number; newName: string }): ActionDescriptor[] {
+  const descriptors: ActionDescriptor[] = [];
+  if (typeof params.layerId === 'number') {
+    descriptors.push(...selectLayerByIdDescriptor(params.layerId));
+  }
+  descriptors.push({
+    _obj: 'set',
+    _target: [ACTIVE_LAYER],
+    to: { _obj: 'layer', name: params.newName },
+  });
+  return descriptors;
+}
+
+/**
+ * Rename a layer by its current name — select by name, then set new name.
+ * Used for batch rename where caller only knows old name, not layerId.
+ */
+export function renameLayerDescriptorByName(params: {
+  oldName: string;
+  newName: string;
+}): ActionDescriptor[] {
+  return [
+    {
+      _obj: 'select',
+      _target: [layerByName(params.oldName)],
+      makeVisible: false,
+    },
+    {
+      _obj: 'set',
+      _target: [ACTIVE_LAYER],
+      to: { _obj: 'layer', name: params.newName },
+    },
+  ];
+}
+
+/**
  * §6.8 — set opacity / blend mode on a target layer. Opacity carries the explicit
  * percentUnit per §6.4. Selects the layer by id first when provided.
  */

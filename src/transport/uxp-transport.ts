@@ -27,11 +27,13 @@ import {
   getDocumentDescriptor,
   getLayerByIndexDescriptor,
   getSelectionDescriptor,
+  renameLayerDescriptorByName,
 } from './uxp-commands/descriptors.js';
 import {
   normalizeGetDocumentInfo,
   normalizeGetLayers,
   normalizeGetState,
+  normalizeRenameLayersBatch,
 } from './uxp-commands/normalize.js';
 import type {
   PhotoshopTransport,
@@ -52,12 +54,15 @@ const POLL_FRESHNESS_MS = 2_000;
  * layer-family commands (duplicate/select/mask/properties) have descriptor
  * builders in ./uxp-commands/descriptors.ts (§6.8 groundwork) but are not routed
  * through run() until a plugin-connected session verifies their result parsing.
+ * rename_layers_batch is the first mutating batch port, verified via unit tests
+ * against the ExtendScript envelope (§4.2).
  */
 const UXP_COMMANDS = [
   'neural_filter',
   'get_state',
   'get_layers',
   'get_document_info',
+  'rename_layers_batch',
 ] as const;
 
 /** A raw batchPlay result is an array of ActionDescriptor objects. */
@@ -105,11 +110,44 @@ export class UxpTransport implements PhotoshopTransport {
         return this.getDocumentInfo(command.timeoutMs);
       case 'get_layers':
         return this.getLayers(command.timeoutMs);
+      case 'rename_layers_batch':
+        return this.renameLayersBatch(command);
       case 'neural_filter':
         return this.invokeRaw(command.name, command.params ?? {}, command.timeoutMs ?? 90_000);
       default:
         throw new Error(`UxpTransport: command "${command.name}" is not ported to backend B`);
     }
+  }
+
+  private async renameLayersBatch(command: PsCommand): Promise<unknown> {
+    const renames = command.params?.renames as
+      | Array<{ oldName: string; newName: string }>
+      | undefined;
+    if (!Array.isArray(renames) || renames.length === 0) {
+      return normalizeRenameLayersBatch([], []);
+    }
+
+    const errors: Array<{ index: number; error: string }> = [];
+    const successfulRenames: typeof renames = [];
+
+    for (let i = 0; i < renames.length; i++) {
+      const entry = renames[i];
+      const descriptors = renameLayerDescriptorByName({
+        oldName: entry.oldName,
+        newName: entry.newName,
+      });
+      try {
+        await this.runBatchPlay(descriptors, `rename_layer:${entry.oldName}`, command.timeoutMs);
+        successfulRenames.push(entry);
+      } catch (error) {
+        errors.push({
+          index: i,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return normalizeRenameLayersBatch(renames, errors);
   }
 
   /**

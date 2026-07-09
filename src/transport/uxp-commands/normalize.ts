@@ -123,8 +123,22 @@ function enumValue(v: unknown): string | undefined {
  * Live-verified on PS 27.8: raw 255 ↔ DOM 100.
  */
 function opacityPercent(v: unknown): number | undefined {
+  if (v && typeof v === 'object' && '_unit' in v) {
+    const wrapped = v as { _unit?: unknown; _value?: unknown };
+    const raw = typeof wrapped._value === 'number' ? wrapped._value : undefined;
+    if (raw === undefined) return undefined;
+    const unit = typeof wrapped._unit === 'string' ? wrapped._unit : '';
+    if (unit === 'percentUnit') {
+      return Math.round(raw);
+    }
+    return Math.round((raw / 255) * 100);
+  }
+  if (typeof v === 'number') {
+    return v > 100 ? Math.round((v / 255) * 100) : Math.round(v);
+  }
   const raw = unitValue(v);
-  return raw === undefined ? undefined : Math.round((raw / 255) * 100);
+  if (raw === undefined) return undefined;
+  return raw > 100 ? Math.round((raw / 255) * 100) : Math.round(raw);
 }
 
 /**
@@ -233,6 +247,41 @@ interface NormalizedLayer {
   opacity: number | undefined;
   blendMode: string;
   hasMask: boolean;
+}
+
+export interface RenameLayersBatchResult {
+  ok: true;
+  renamed: number;
+  total: number;
+  results: Array<{
+    oldName: string;
+    newName: string;
+    ok: boolean;
+    error?: string;
+  }>;
+  hasFailures: boolean;
+}
+
+export function normalizeRenameLayersBatch(
+  renames: Array<{ oldName: string; newName: string }>,
+  errors: Array<{ index: number; error: string }>
+): RenameLayersBatchResult {
+  const errorMap = new Map(errors.map((e) => [e.index, e.error]));
+  const results = renames.map((r, i) => {
+    const err = errorMap.get(i);
+    if (err !== undefined) {
+      return { oldName: r.oldName, newName: r.newName, ok: false as const, error: err };
+    }
+    return { oldName: r.oldName, newName: r.newName, ok: true as const };
+  });
+  const failed = results.filter((r) => !r.ok).length;
+  return {
+    ok: true,
+    renamed: results.length - failed,
+    total: results.length,
+    results,
+    hasFailures: failed > 0,
+  };
 }
 
 /**

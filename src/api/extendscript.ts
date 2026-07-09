@@ -910,6 +910,63 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
+   * Batch rename layers: accepts an array of { oldName, newName } renames.
+   * Depth-first search across groups; collects per-item result with success flag.
+   */
+  renameLayersBatch: (renames: Array<{ oldName: string; newName: string }>) => {
+    const renamesLiteral = JSON.stringify(
+      renames.map((r) => ({ oldName: r.oldName, newName: r.newName }))
+    );
+    return `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var doc = app.activeDocument;
+    var __batchRenames = ${renamesLiteral};
+    var results = [];
+
+    function __findLayerRecursive(container, name) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var l = container.layers[i];
+        if (l.name === name) return l;
+      }
+      for (var j = 0; j < container.layerSets.length; j++) {
+        var nested = __findLayerRecursive(container.layerSets[j], name);
+        if (nested) return nested;
+      }
+      return null;
+    }
+
+    for (var k = 0; k < __batchRenames.length; k++) {
+      var entry = __batchRenames[k];
+      var target = __findLayerRecursive(doc, entry.oldName);
+      if (!target) {
+        results.push({ oldName: entry.oldName, newName: entry.newName, ok: false, error: 'Layer not found: ' + entry.oldName });
+        continue;
+      }
+      var prevName = target.name;
+      try {
+        target.name = entry.newName;
+        results.push({ oldName: prevName, newName: target.name, ok: true });
+      } catch (e) {
+        results.push({ oldName: entry.oldName, newName: entry.newName, ok: false, error: e.message || String(e) });
+      }
+    }
+
+    var failed = [];
+    for (var f = 0; f < results.length; f++) { if (!results[f].ok) failed.push(results[f]); }
+
+    return {
+      ok: true,
+      renamed: results.length - failed.length,
+      total: results.length,
+      results: results,
+      hasFailures: failed.length > 0
+    };
+  `;
+  },
+
+  /**
    * Duplicate active layer
    */
   duplicateLayer: (newName?: string) => `

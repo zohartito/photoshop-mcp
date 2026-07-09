@@ -59,6 +59,7 @@ const COMMAND_REGISTRY: Record<string, CommandMeta> = {
   select_layer: { mutatesActiveLayer: true },
   create_layer_mask: { requiresSelection: true, requiresNonBackgroundLayer: true },
   set_layer_properties: { mutatesActiveLayer: true },
+  rename_layers_batch: { mutatesActiveLayer: true },
 };
 
 function readPreference(): TransportPreference {
