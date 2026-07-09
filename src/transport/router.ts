@@ -50,6 +50,10 @@ const COMMAND_REGISTRY: Record<string, CommandMeta> = {
   get_document_info: {},
   get_layers: {},
 
+  // Direct name/id targets do not change the active layer. Implemented by both
+  // backends and therefore left unpinned for normal preference/auto routing.
+  rename_layers_batch: {},
+
   // §6.8 target-identity metadata for the layer family. These carry descriptor
   // builders in ../transport/uxp-commands/descriptors.ts and accept an optional
   // layerId (resolved per backend) / return the affected layerId. The metadata is

@@ -256,3 +256,22 @@ export function normalizeGetLayers(
 
   return { layerCount: layers.length, layers, context };
 }
+
+export interface RenameLayersBatchResult {
+  renamedCount: number;
+  renames: Array<{ oldName: string; newName: string }>;
+}
+
+/**
+ * Normalize a successful UXP batch rename to the ExtendScript twin's envelope.
+ * The mutation call is fail-fast, so reaching this function means every requested
+ * rename was applied and the requested names are the authoritative result.
+ */
+export function normalizeRenameLayersBatch(
+  renames: Array<{ oldName: string; newName: string }>
+): RenameLayersBatchResult {
+  return {
+    renamedCount: renames.length,
+    renames: renames.map(({ oldName, newName }) => ({ oldName, newName })),
+  };
+}

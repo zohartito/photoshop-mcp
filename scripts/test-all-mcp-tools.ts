@@ -244,6 +244,51 @@ async function main(): Promise<void> {
   await t.run('photoshop_set_layer_blend_mode', { blendMode: 'MULTIPLY' });
   await t.run('photoshop_set_layer_visibility', { visible: true });
   await t.run('photoshop_rename_layer', { name: 'MCP_Paint_Renamed' });
+  await t.run(
+    'photoshop_rename_layers_batch',
+    {
+      renames: [
+        { oldName: 'MCP_Paint_Renamed', newName: 'MCP_Paint_Batch' },
+        { oldName: 'MCP Test', newName: 'MCP_Text_Batch' },
+      ],
+    },
+    { required: true }
+  );
+  await t.run(
+    'photoshop_select_layer_by_name',
+    { name: 'MCP_Paint_Batch' },
+    { required: true }
+  );
+  await t.run(
+    'photoshop_select_layer_by_name',
+    { name: 'MCP_Text_Batch' },
+    { required: true }
+  );
+  await t.run(
+    'photoshop_rename_layers_batch',
+    {
+      renames: [
+        { oldName: 'MCP_Paint_Batch', newName: 'MCP_Paint_Renamed' },
+        { oldName: 'MCP_Text_Batch', newName: 'MCP Test' },
+      ],
+    },
+    { required: true }
+  );
+  await t.run(
+    'photoshop_rename_layers_batch',
+    {
+      renames: [
+        { oldName: 'MCP_Paint_Renamed', newName: 'MCP_Should_Not_Exist' },
+        { oldName: '__MCP_MISSING_LAYER__', newName: 'MCP_Never' },
+      ],
+    },
+    { expectError: true, required: true }
+  );
+  await t.run(
+    'photoshop_select_layer_by_name',
+    { name: 'MCP_Paint_Renamed' },
+    { required: true }
+  );
   await t.run('photoshop_duplicate_layer');
   await t.run('photoshop_set_layer_locked', { locked: false });
   await t.run('photoshop_execute_script', {

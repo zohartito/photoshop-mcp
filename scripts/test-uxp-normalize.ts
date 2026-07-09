@@ -61,7 +61,7 @@ check('context: document + active layer maps to getContextInfo shape', () => {
   const layerDesc = {
     name: 'MCP_Paint',
     layerKind: 1,
-    opacity: { _unit: 'percentUnit', _value: 85 },
+    opacity: 217, // AM raw 0–255 (217 normalizes to 85%)
     mode: { _enum: 'blendMode', _value: 'multiply' },
     visible: true,
     background: false,
@@ -102,8 +102,8 @@ check('getLayers: maps layers + embeds hasMask (§6.6)', () => {
   );
   const out = normalizeGetLayers(
     [
-      { name: 'A', layerKind: 1, visible: true, opacity: { _value: 100 }, mode: { _value: 'normal' }, hasUserMask: true },
-      { name: 'B', layerKind: 2, visible: false, opacity: { _value: 50 }, mode: { _value: 'screen' }, hasUserMask: false },
+      { name: 'A', layerKind: 1, visible: true, opacity: 255, mode: { _value: 'normal' }, hasUserMask: true },
+      { name: 'B', layerKind: 2, visible: false, opacity: 128, mode: { _value: 'screen' }, hasUserMask: false },
     ],
     context
   );

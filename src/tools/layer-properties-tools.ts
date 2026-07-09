@@ -133,6 +133,45 @@ export function createLayerPropertiesTools(transport: TransportRouter): ToolDefi
     },
     {
       tool: {
+        name: 'photoshop_rename_layers_batch',
+        description:
+          'Rename multiple layers in one call by exact current name.\n\n' +
+          'Use when: several known layers need new names.\n' +
+          'Do NOT use when: renaming only the active layer — use photoshop_rename_layer.\n\n' +
+          'Returns: the number of renamed layers and each old/new name pair.\n' +
+          'Preconditions: active document; every source name must exist. Side effects: changes layer names.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            renames: {
+              type: 'array',
+              description: 'Layer renames to apply',
+              minItems: 1,
+              items: {
+                type: 'object',
+                properties: {
+                  oldName: {
+                    type: 'string',
+                    description: 'Exact current layer name (case-sensitive)',
+                    minLength: 1,
+                  },
+                  newName: {
+                    type: 'string',
+                    description: 'New layer name',
+                    minLength: 1,
+                  },
+                },
+                required: ['oldName', 'newName'],
+              },
+            },
+          },
+          required: ['renames'],
+        },
+      },
+      handler: async (args) => renameLayersBatch(transport, args),
+    },
+    {
+      tool: {
         name: 'photoshop_duplicate_layer',
         description: 'Duplicate the active layer',
         inputSchema: {
@@ -320,6 +359,82 @@ async function renameLayer(
         {
           type: 'text' as const,
           text: `Error renaming layer: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+interface LayerRename {
+  oldName: string;
+  newName: string;
+}
+
+async function renameLayersBatch(
+  transport: TransportRouter,
+  args: Record<string, unknown>
+): Promise<ToolResult> {
+  try {
+    if (!Array.isArray(args.renames) || args.renames.length === 0) {
+      throw new Error('renames must be a non-empty array');
+    }
+
+    const renames: LayerRename[] = [];
+    const sourceNames = new Set<string>();
+    for (let index = 0; index < args.renames.length; index++) {
+      const entry = args.renames[index];
+      if (!entry || typeof entry !== 'object') {
+        throw new Error(`renames[${index}] must be an object`);
+      }
+
+      const { oldName, newName } = entry as Record<string, unknown>;
+      if (typeof oldName !== 'string' || oldName.length === 0) {
+        throw new Error(`renames[${index}].oldName must be a non-empty string`);
+      }
+      if (typeof newName !== 'string' || newName.length === 0) {
+        throw new Error(`renames[${index}].newName must be a non-empty string`);
+      }
+      if (sourceNames.has(oldName)) {
+        throw new Error(`Duplicate source layer name: ${oldName}`);
+      }
+
+      sourceNames.add(oldName);
+      renames.push({ oldName, newName });
+    }
+
+    const result = await transport.run({
+      name: 'rename_layers_batch',
+      params: {
+        renames,
+        script: ExtendScriptSnippets.renameLayersBatch(renames),
+      },
+    });
+    const renamedCount =
+      (result as { renamedCount?: number } | null)?.renamedCount ?? renames.length;
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(
+            {
+              ok: true,
+              summary: `Renamed ${renamedCount} layer(s)`,
+              details: result,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Error renaming layers: ${error instanceof Error ? error.message : String(error)}`,
         },
       ],
       isError: true,

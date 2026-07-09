@@ -10,7 +10,7 @@
  * (in-process HTTP long-poll) stays internal to this backend — callers get a
  * parsed result, never the raw bridge envelope (§4.1).
  *
- * PORTED IN M3 (read-only first, per §5): get_state, get_layers, get_document_info.
+ * PORTED: get_state, get_layers, get_document_info, and rename_layers_batch.
  * LIVE-VERIFIED 2026-07-05 on PS 27.8 — scripts/parity-uxp.ts reports 3/3 CLEAN
  * against the ExtendScript twins (masked-layer + active-selection fixture). See
  * docs/design/transport-layer.md §12 for the verification record and the
@@ -26,12 +26,16 @@ import {
   getActiveLayerDescriptor,
   getDocumentDescriptor,
   getLayerByIndexDescriptor,
+  getLayerByNameDescriptor,
   getSelectionDescriptor,
+  renameLayersBatchDescriptor,
+  type RenameLayerBatchEntry,
 } from './uxp-commands/descriptors.js';
 import {
   normalizeGetDocumentInfo,
   normalizeGetLayers,
   normalizeGetState,
+  normalizeRenameLayersBatch,
 } from './uxp-commands/normalize.js';
 import type {
   PhotoshopTransport,
@@ -47,21 +51,59 @@ import type {
 const POLL_FRESHNESS_MS = 2_000;
 
 /**
- * Commands the UXP backend serves in M3. neural_filter is the original path;
- * the three read-only commands are the first descriptor ports (§5). Mutating
- * layer-family commands (duplicate/select/mask/properties) have descriptor
- * builders in ./uxp-commands/descriptors.ts (§6.8 groundwork) but are not routed
- * through run() until a plugin-connected session verifies their result parsing.
+ * Commands the UXP backend serves. neural_filter is the original path; the three
+ * read-only commands are the first descriptor ports (§5); rename_layers_batch is
+ * the first mutating layer command. Other mutating layer-family commands have
+ * descriptor groundwork but are not routed through run() yet.
  */
 const UXP_COMMANDS = [
   'neural_filter',
   'get_state',
   'get_layers',
   'get_document_info',
+  'rename_layers_batch',
 ] as const;
 
 /** A raw batchPlay result is an array of ActionDescriptor objects. */
 type BatchPlayResult = Record<string, unknown>[];
+
+type RenameRequest = Pick<RenameLayerBatchEntry, 'oldName' | 'newName'>;
+
+/** Validate the transport boundary even when a caller bypasses the MCP schema. */
+function parseRenameBatchEntries(raw: unknown): RenameRequest[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('renames must be a non-empty array');
+  }
+
+  return raw.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`renames[${index}] must be an object`);
+    }
+    const candidate = entry as Record<string, unknown>;
+    if (typeof candidate.oldName !== 'string' || candidate.oldName.length === 0) {
+      throw new Error(`renames[${index}] requires a non-empty oldName`);
+    }
+    if (typeof candidate.newName !== 'string' || candidate.newName.length === 0) {
+      throw new Error(`renames[${index}] requires a non-empty newName`);
+    }
+    return { oldName: candidate.oldName, newName: candidate.newName };
+  });
+}
+
+/** Photoshop's Action Manager wording for a missing document/layer target. */
+function isUnavailableTargetError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  // Infrastructure failures must retain their original message so the standard
+  // error classifier can distinguish a dead bridge or watchdog timeout.
+  if (
+    /uxp.?bridge|plugin_watchdog|timeout|unknown_action|ECONN|EADDR|fetch failed/i.test(message)
+  ) {
+    return false;
+  }
+  return /not currently available|not available|could not find|does not exist|not found/i.test(
+    message
+  );
+}
 
 export class UxpTransport implements PhotoshopTransport {
   readonly id = 'uxp' as const;
@@ -92,10 +134,10 @@ export class UxpTransport implements PhotoshopTransport {
 
   /**
    * Route one command to the plugin. neural_filter passes its params straight to
-   * the bridge (the plugin builds the descriptors). The ported read-only commands
-   * build descriptors server-side, run them via the generic `batch_play` action,
-   * and normalize to the ExtendScript envelope (§4.2). Throws on bridge failure so
-   * the router/tool sees a normal Error, never a leaked `{ ok:false }`.
+   * the bridge (the plugin builds the descriptors). Ported commands build
+   * descriptors server-side, run them via the generic `batch_play` action, and
+   * normalize to the ExtendScript envelope (§4.2). Throws on bridge failure so the
+   * router/tool sees a normal Error, never a leaked `{ ok:false }`.
    */
   async run(command: PsCommand): Promise<unknown> {
     switch (command.name) {
@@ -105,6 +147,8 @@ export class UxpTransport implements PhotoshopTransport {
         return this.getDocumentInfo(command.timeoutMs);
       case 'get_layers':
         return this.getLayers(command.timeoutMs);
+      case 'rename_layers_batch':
+        return this.renameLayersBatch(command.params?.renames, command.timeoutMs);
       case 'neural_filter':
         return this.invokeRaw(command.name, command.params ?? {}, command.timeoutMs ?? 90_000);
       default:
@@ -187,6 +231,65 @@ export class UxpTransport implements PhotoshopTransport {
       layerDescs = await this.runBatchPlay(gets, 'walk_layers', timeoutMs);
     }
     return normalizeGetLayers(layerDescs, context);
+  }
+
+  // --- ported mutating commands ---
+
+  /**
+   * Resolve every name to a stable native id before changing anything, then send
+   * every `set` descriptor in one batchPlay call. This makes missing targets
+   * fail before mutation and keeps swaps/chains bound to their original layers.
+   * Mutation and bridge failures deliberately propagate to the standard envelope.
+   */
+  private async renameLayersBatch(rawRenames: unknown, timeoutMs?: number): Promise<unknown> {
+    const renames = parseRenameBatchEntries(rawRenames);
+
+    let documentResult: BatchPlayResult;
+    try {
+      documentResult = await this.runBatchPlay(
+        getDocumentDescriptor(),
+        'rename_layers_batch:preflight_document',
+        timeoutMs
+      );
+    } catch (error) {
+      if (isUnavailableTargetError(error)) {
+        throw new Error('No active document');
+      }
+      throw error;
+    }
+    if (!documentResult[0]) {
+      throw new Error('No active document');
+    }
+
+    const resolved: RenameLayerBatchEntry[] = [];
+    for (const rename of renames) {
+      let layerResult: BatchPlayResult;
+      try {
+        layerResult = await this.runBatchPlay(
+          [getLayerByNameDescriptor(rename.oldName)],
+          `rename_layers_batch:preflight_layer:${rename.oldName}`,
+          timeoutMs
+        );
+      } catch (error) {
+        if (isUnavailableTargetError(error)) {
+          throw new Error(`Layer not found: ${rename.oldName}`);
+        }
+        throw error;
+      }
+
+      const layerId = layerResult[0]?.layerID;
+      if (typeof layerId !== 'number') {
+        throw new Error(`Layer not found: ${rename.oldName}`);
+      }
+      resolved.push({ ...rename, layerId });
+    }
+
+    await this.runBatchPlay(
+      renameLayersBatchDescriptor(resolved),
+      'rename_layers_batch',
+      timeoutMs
+    );
+    return normalizeRenameLayersBatch(renames);
   }
 
   // --- bridge plumbing ---

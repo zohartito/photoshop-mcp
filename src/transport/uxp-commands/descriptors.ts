@@ -26,6 +26,11 @@ function layerById(layerId: number): Record<string, unknown> {
   return { _ref: 'layer', _id: layerId };
 }
 
+/** Target a layer by its exact current name. */
+function layerByName(name: string): Record<string, unknown> {
+  return { _ref: 'layer', _name: name };
+}
+
 /**
  * A batchPlay `get` of the whole active-document descriptor. Returns keys the
  * normalizer maps to the getContextInfo envelope: `width`, `height`, `resolution`,
@@ -63,6 +68,37 @@ export function getSelectionDescriptor(): ActionDescriptor[] {
  */
 export function getLayerByIndexDescriptor(index: number): ActionDescriptor {
   return { _obj: 'get', _target: [{ _ref: 'layer', _index: index }] };
+}
+
+/**
+ * Resolve a named layer before a batch mutation. The returned descriptor includes
+ * the native `layerID`; callers can then target every rename by stable id so swaps
+ * and rename chains cannot retarget a layer renamed earlier in the same batch.
+ */
+export function getLayerByNameDescriptor(name: string): ActionDescriptor {
+  return { _obj: 'get', _target: [layerByName(name)] };
+}
+
+/** One requested batch rename plus its optional pre-resolved native target id. */
+export interface RenameLayerBatchEntry {
+  oldName: string;
+  newName: string;
+  layerId?: number;
+}
+
+/**
+ * Build one direct `set` per rename. Pre-resolved ids are preferred; name targets
+ * remain available for callers that only need descriptor construction. Direct
+ * targets avoid changing the active layer as a side effect.
+ */
+export function renameLayersBatchDescriptor(renames: RenameLayerBatchEntry[]): ActionDescriptor[] {
+  return renames.map((rename) => ({
+    _obj: 'set',
+    _target: [
+      typeof rename.layerId === 'number' ? layerById(rename.layerId) : layerByName(rename.oldName),
+    ],
+    to: { _obj: 'layer', name: rename.newName },
+  }));
 }
 
 /**

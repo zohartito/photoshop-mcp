@@ -910,6 +910,58 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
+   * Rename multiple layers by exact current name. Resolve every target before
+   * mutating so a missing layer cannot leave a partially renamed document.
+   */
+  renameLayersBatch: (renames: Array<{ oldName: string; newName: string }>) => `
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var doc = app.activeDocument;
+    var renames = [${renames
+      .map(
+        ({ oldName, newName }) =>
+          `{ oldName: "${jsString(oldName)}", newName: "${jsString(newName)}" }`
+      )
+      .join(', ')}];
+
+    function findLayer(container, name) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var layer = container.layers[i];
+        if (layer.name === name) return layer;
+      }
+      for (var j = 0; j < container.layerSets.length; j++) {
+        var nested = findLayer(container.layerSets[j], name);
+        if (nested) return nested;
+      }
+      return null;
+    }
+
+    var targets = [];
+    for (var k = 0; k < renames.length; k++) {
+      var target = findLayer(doc, renames[k].oldName);
+      if (!target) {
+        throw new Error('Layer not found: ' + renames[k].oldName);
+      }
+      targets.push(target);
+    }
+
+    var applied = [];
+    for (var m = 0; m < renames.length; m++) {
+      targets[m].name = renames[m].newName;
+      applied.push({
+        oldName: renames[m].oldName,
+        newName: targets[m].name
+      });
+    }
+
+    return {
+      renamedCount: applied.length,
+      renames: applied
+    };
+  `,
+
+  /**
    * Duplicate active layer
    */
   duplicateLayer: (newName?: string) => `

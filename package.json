@@ -34,6 +34,7 @@
     "test:mcp-local": "tsx scripts/test-mcp-local.ts",
     "test:mcp-all": "tsx scripts/test-all-mcp-tools.ts",
     "test:uxp-normalize": "tsx scripts/test-uxp-normalize.ts",
+    "test:rename-layers-batch": "tsx scripts/test-rename-layers-batch.ts",
     "test:intent-expansion": "tsx scripts/test-intent-expansion-local.ts",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build"
