@@ -11,18 +11,15 @@ export default defineConfig({
     },
   },
   server: {
+    host: '127.0.0.1',
     port: 5173,
     strictPort: true,
     open: true,
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:5174',
-        changeOrigin: true,
+        changeOrigin: false,
         configure: (proxy) => {
-          // Rewrite Origin so Hono's loopback-origin guard accepts proxied requests in dev.
-          proxy.on('proxyReq', (proxyReq) => {
-            proxyReq.setHeader('origin', 'http://127.0.0.1:5174');
-          });
           proxy.on('proxyRes', (proxyRes) => {
             proxyRes.headers['x-accel-buffering'] = 'no';
             proxyRes.headers['cache-control'] = 'no-cache';

@@ -15,6 +15,7 @@ import { startUIServer } from './server.js';
 interface CliFlags {
   port?: number;
   host: string;
+  devOrigin?: string;
   noOpen: boolean;
 }
 
@@ -27,6 +28,8 @@ function parseFlags(argv: string[]): CliFlags {
       if (Number.isFinite(val) && val > 0) flags.port = val;
     } else if (arg === '--host') {
       flags.host = argv[++i] ?? flags.host;
+    } else if (arg === '--dev-origin') {
+      flags.devOrigin = argv[++i] ?? '';
     } else if (arg === '--no-open') {
       flags.noOpen = true;
     } else if (arg === '--help' || arg === '-h') {
@@ -50,6 +53,7 @@ function printHelp(): void {
       'Options:',
       '  -p, --port <number>   Port to listen on (default: random free port)',
       '      --host <host>     Host to bind to (default: 127.0.0.1)',
+      '      --dev-origin <origin>  Exact Vite development origin (loopback only)',
       '      --no-open         Do not auto-open the browser',
       '  -h, --help            Show this help',
       '  -v, --version         Show version',
@@ -80,6 +84,7 @@ async function main(): Promise<void> {
   const server = await startUIServer({
     host: flags.host,
     port,
+    devOrigin: flags.devOrigin,
   });
 
   capture('ui_server_started', {

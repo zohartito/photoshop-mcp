@@ -18,7 +18,7 @@
   "scripts": {
     "dev": "tsc --watch",
     "dev:ui": "concurrently -n server,web -c blue,green \"npm:dev:ui:server\" \"npm:dev:ui:web\"",
-    "dev:ui:server": "tsx watch src/ui/cli.ts --port 5174 --no-open",
+    "dev:ui:server": "tsx watch src/ui/cli.ts --port 5174 --dev-origin http://127.0.0.1:5173 --no-open",
     "dev:ui:web": "npm --prefix web run dev",
     "build": "npm run build:server && npm run build:web",
     "build:server": "tsc",
@@ -38,6 +38,7 @@
     "test:extendscript-literals": "tsx scripts/test-extendscript-literals.ts",
     "test:extendscript-result": "tsx scripts/test-extendscript-result.ts",
     "test:tool-input-validation": "tsx scripts/test-tool-input-validation.ts",
+    "test:ui-origin-policy": "tsx scripts/test-ui-origin-policy.ts",
     "test:cli-account-capability-boundary": "tsx scripts/test-cli-account-capability-boundary.ts",
     "test:gemini-env-settings": "tsx scripts/test-gemini-env-settings.ts",
     "prepare": "npm run build",

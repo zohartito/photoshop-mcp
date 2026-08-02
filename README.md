@@ -121,7 +121,7 @@ Auth method is stored per provider in `~/.photoshop-mcp/data.db` (`authMethod`:
 ### CLI flags
 
 ```
-photoshop-mcp-ui [--port 5174] [--host 127.0.0.1] [--no-open]
+photoshop-mcp-ui [--port 5174] [--host 127.0.0.1] [--dev-origin http://127.0.0.1:5173] [--no-open]
 ```
 
 ### Notes

@@ -1,5 +1,5 @@
 import { serve, type ServerType } from '@hono/node-server';
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, join, normalize, resolve } from 'node:path';
@@ -49,6 +49,7 @@ import {
   updateChatModel,
 } from './store/chats.js';
 import { getDB } from './store/db.js';
+import { isLoopbackOrigin, validateDevOrigin } from './origin-policy.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // dist/ui/server.js -> ../../web/dist
@@ -76,6 +77,7 @@ const MIME: Record<string, string> = {
 export interface UIServerOptions {
   port: number;
   host: string;
+  devOrigin?: string;
 }
 
 export interface UIServer {
@@ -83,9 +85,23 @@ export interface UIServer {
   close(): Promise<void>;
 }
 
+export function createUiOriginGuard(opts: UIServerOptions): MiddlewareHandler {
+  const devOrigin =
+    opts.devOrigin === undefined ? undefined : validateDevOrigin(opts.devOrigin, opts.host);
+
+  return async (c, next) => {
+    const origin = c.req.header('origin');
+    if (origin && !isLoopbackOrigin(origin, opts.port) && origin !== devOrigin) {
+      return c.json({ error: 'invalid_origin' }, 403);
+    }
+    return next();
+  };
+}
+
 export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
   const logger = new Logger('UIServer');
   const app = new Hono();
+  const originGuard = createUiOriginGuard(opts);
 
   // Initialize the SQLite database eagerly so the first request is fast and
   // any migration error surfaces during startup instead of mid-request.
@@ -94,13 +110,7 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
 
   const abortControllers = new Map<string, AbortController>();
 
-  app.use('/api/*', async (c, next) => {
-    const origin = c.req.header('origin');
-    if (origin && !isLoopbackOrigin(origin, opts.port)) {
-      return c.json({ error: 'invalid_origin' }, 403);
-    }
-    return next();
-  });
+  app.use('/api/*', originGuard);
 
   // ---- Analytics ----------------------------------------------------------
 
@@ -641,15 +651,4 @@ export async function startUIServer(opts: UIServerOptions): Promise<UIServer> {
         server.close(() => resolveClose());
       }),
   };
-}
-
-function isLoopbackOrigin(origin: string, port: number): boolean {
-  try {
-    const u = new URL(origin);
-    const isLoopback =
-      u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '[::1]';
-    return isLoopback && (u.port === '' || u.port === String(port));
-  } catch {
-    return false;
-  }
 }
