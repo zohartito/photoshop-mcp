@@ -1,5 +1,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import Ajv from 'ajv';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
@@ -45,12 +47,23 @@ export class PhotoshopMCPServer {
   private toolRegistry: ToolRegistry;
   private promptRegistry: PromptRegistry;
   private session: Session;
+  private inputSchemaValidator: AjvJsonSchemaValidator;
 
   constructor(options: PhotoshopMCPServerOptions) {
     this.logger = new Logger('PhotoshopMCPServer');
     this.toolRegistry = new ToolRegistry();
     this.promptRegistry = new PromptRegistry();
     this.session = new Session();
+    this.inputSchemaValidator = new AjvJsonSchemaValidator(
+      new Ajv({
+        allErrors: true,
+        strict: false,
+        strictNumbers: true,
+        coerceTypes: false,
+        useDefaults: false,
+        removeAdditional: false,
+      })
+    );
 
     this.server = new Server(
       {
@@ -72,9 +85,24 @@ export class PhotoshopMCPServer {
   }
 
   private registerToolDefinition(definition: ToolDefinition): void {
+    const inputSchema =
+      definition.tool.inputSchema.type === 'object'
+        ? { ...definition.tool.inputSchema, additionalProperties: false }
+        : definition.tool.inputSchema;
+    const validateInput =
+      this.inputSchemaValidator.getValidator<Record<string, unknown>>(inputSchema);
+    const validatedHandler = async (args: Record<string, unknown>) => {
+      const validation = validateInput(args);
+      if (!validation.valid) {
+        throw new Error(`Invalid tool arguments: ${validation.errorMessage}`);
+      }
+
+      return definition.handler(args);
+    };
+
     this.toolRegistry.register(definition.tool.name, {
-      tool: definition.tool,
-      handler: wrapToolHandler(definition.tool.name, definition.handler),
+      tool: { ...definition.tool, inputSchema },
+      handler: wrapToolHandler(definition.tool.name, validatedHandler),
     });
   }
 

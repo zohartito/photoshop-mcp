@@ -17,6 +17,7 @@ export type PhotoshopErrorCode =
   | 'file_not_found'
   | 'font_not_found'
   | 'unsupported_color_mode'
+  | 'invalid_tool_arguments'
   | 'unknown';
 
 export interface PhotoshopErrorEnvelope {
@@ -32,6 +33,7 @@ const ERROR_PATTERNS: Array<{
   code: PhotoshopErrorCode;
   suggested_next_tool?: string;
 }> = [
+  { pattern: /^Invalid tool arguments:/i, code: 'invalid_tool_arguments' },
   { pattern: /no active document/i, code: 'no_active_document', suggested_next_tool: 'photoshop_get_state' },
   { pattern: /no documents/i, code: 'no_active_document', suggested_next_tool: 'photoshop_get_state' },
   { pattern: /no active layer/i, code: 'no_active_layer', suggested_next_tool: 'photoshop_get_layers' },
