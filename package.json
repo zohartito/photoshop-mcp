@@ -35,6 +35,7 @@
     "test:mcp-all": "tsx scripts/test-all-mcp-tools.ts",
     "test:uxp-normalize": "tsx scripts/test-uxp-normalize.ts",
     "test:intent-expansion": "tsx scripts/test-intent-expansion-local.ts",
+    "test:extendscript-result": "tsx scripts/test-extendscript-result.ts",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build"
   },
