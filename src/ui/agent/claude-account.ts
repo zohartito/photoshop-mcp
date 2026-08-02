@@ -1,6 +1,11 @@
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query, type Options as ClaudeQueryOptions } from '@anthropic-ai/claude-agent-sdk';
 import type { ModelMessage } from 'ai';
 import type { ProviderAdapter } from '../providers/registry.js';
+import {
+  buildClaudeAccountSecurityOptions,
+  createCliAccountWorkspace,
+  type CliAccountWorkspace,
+} from './cli-account-security.js';
 import { buildMcpServerConfig } from './mcp-transport.js';
 import {
   buildPromptWithHistory,
@@ -23,6 +28,35 @@ export interface RunChatViaClaudeAccountOptions {
   onFinish?: (info: RunChatFinishInfo) => void;
 }
 
+export async function createClaudeAccountWorkspace(): Promise<CliAccountWorkspace> {
+  return createCliAccountWorkspace('claude-account');
+}
+
+export function buildClaudeAccountQueryOptions({
+  modelId,
+  systemPrompt,
+  chatId,
+  workspaceDir,
+  abortController,
+}: {
+  modelId: string;
+  systemPrompt: string;
+  chatId?: string;
+  workspaceDir: string;
+  abortController: AbortController;
+}): ClaudeQueryOptions {
+  return {
+    model: modelId,
+    systemPrompt,
+    maxTurns: 20,
+    abortController,
+    ...buildClaudeAccountSecurityOptions({
+      workspaceDir,
+      photoshopMcpServer: buildMcpServerConfig(chatId),
+    }),
+  };
+}
+
 export async function* runChatViaClaudeAccount(
   opts: RunChatViaClaudeAccountOptions
 ): AsyncGenerator<RunChatStreamEvent> {
@@ -32,29 +66,27 @@ export async function* runChatViaClaudeAccount(
   const abortController = new AbortController();
   let sawStreamText = false;
   let emittedThinking = false;
-
+  const workspace = await createClaudeAccountWorkspace();
   const onAbort = () => abortController.abort();
-  opts.abortSignal.addEventListener('abort', onAbort);
-
-  const prompt = buildPromptWithHistory(opts.history, opts.prompt);
-  const q = query({
-    prompt,
-    options: {
-      model: opts.modelId,
-      systemPrompt: opts.systemPrompt,
-      maxTurns: 20,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      strictMcpConfig: true,
-      mcpServers: {
-        photoshop: buildMcpServerConfig(opts.chatId),
-      },
-      allowedTools: ['mcp__photoshop__*'],
-      abortController,
-    },
-  });
+  let q: ReturnType<typeof query> | undefined;
+  let listeningForAbort = false;
 
   try {
+    opts.abortSignal.addEventListener('abort', onAbort);
+    listeningForAbort = true;
+    const prompt = buildPromptWithHistory(opts.history, opts.prompt);
+
+    q = query({
+      prompt,
+      options: buildClaudeAccountQueryOptions({
+        modelId: opts.modelId,
+        systemPrompt: opts.systemPrompt,
+        chatId: opts.chatId,
+        workspaceDir: workspace.workspaceDir,
+        abortController,
+      }),
+    });
+
     for await (const message of q) {
       if (opts.abortSignal.aborted) break;
 
@@ -169,8 +201,7 @@ export async function* runChatViaClaudeAccount(
           },
         };
         if (message.subtype !== 'success') {
-          const errors =
-            'errors' in message && Array.isArray(message.errors) ? message.errors : [];
+          const errors = 'errors' in message && Array.isArray(message.errors) ? message.errors : [];
           if (errors.length) {
             yield { type: 'error', payload: { message: errors.join('; ') } };
           }
@@ -178,8 +209,12 @@ export async function* runChatViaClaudeAccount(
       }
     }
   } finally {
-    opts.abortSignal.removeEventListener('abort', onAbort);
-    q.close();
+    if (listeningForAbort) opts.abortSignal.removeEventListener('abort', onAbort);
+    try {
+      q?.close();
+    } finally {
+      await workspace.cleanup();
+    }
   }
 }
 
@@ -200,4 +235,3 @@ function extractToolUseId(message: { message: { content: unknown } }): string | 
   }
   return null;
 }
-

@@ -1,10 +1,14 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import { resolveCliBinary } from '../providers/cli-utils.js';
+import {
+  buildGeminiChatCliInvocation,
+  createCliAccountWorkspace,
+  type CliAccountWorkspace,
+  type GeminiChatWorkspaceFiles,
+  writeGeminiChatWorkspaceFiles,
+} from './cli-account-security.js';
 import { buildMcpServerConfig } from './mcp-transport.js';
 import {
   buildPromptWithHistory,
@@ -44,6 +48,22 @@ interface GeminiStreamEvent {
   };
 }
 
+export interface GeminiAccountWorkspace extends CliAccountWorkspace, GeminiChatWorkspaceFiles {}
+
+export async function createGeminiAccountWorkspace(
+  chatId?: string
+): Promise<GeminiAccountWorkspace> {
+  const workspace = await createCliAccountWorkspace('gemini-account');
+
+  try {
+    const files = await writeGeminiChatWorkspaceFiles(workspace, buildMcpServerConfig(chatId));
+    return { ...workspace, ...files };
+  } catch (error) {
+    await workspace.cleanup();
+    throw error;
+  }
+}
+
 export async function* runChatViaGeminiAccount(
   opts: RunChatViaGeminiAccountOptions
 ): AsyncGenerator<RunChatStreamEvent> {
@@ -59,34 +79,32 @@ export async function* runChatViaGeminiAccount(
   }
 
   const buffer: AssistantBuffer = { text: '', toolCalls: [] };
-  const workspaceDir = await createGeminiWorkspace(opts.chatId);
-  const fullPrompt = `${opts.systemPrompt}\n\n${buildPromptWithHistory(opts.history, opts.prompt)}`;
-
-  const args = [
-    '-p',
-    fullPrompt,
-    '-m',
-    opts.modelId,
-    '--output-format',
-    'stream-json',
-    '--approval-mode',
-    'yolo',
-    '--skip-trust',
-  ];
-
-  const child = spawn(geminiPath, args, {
-    cwd: workspaceDir,
-    env: {
-      ...process.env,
-      GEMINI_CLI_TRUST_WORKSPACE: 'true',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  const onAbort = () => child.kill('SIGTERM');
-  opts.abortSignal.addEventListener('abort', onAbort);
+  const workspace = await createGeminiAccountWorkspace(opts.chatId);
+  let child: ReturnType<typeof spawn> | undefined;
+  let childClose: Promise<number> | undefined;
+  let listeningForAbort = false;
+  const onAbort = () => child?.kill('SIGTERM');
 
   try {
+    const fullPrompt = `${opts.systemPrompt}\n\n${buildPromptWithHistory(opts.history, opts.prompt)}`;
+    const invocation = buildGeminiChatCliInvocation({
+      fullPrompt,
+      modelId: opts.modelId,
+      workspace,
+    });
+    child = spawn(geminiPath, invocation.args, {
+      cwd: invocation.cwd,
+      env: {
+        ...process.env,
+        ...invocation.env,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    childClose = waitForChild(child);
+    opts.abortSignal.addEventListener('abort', onAbort);
+    listeningForAbort = true;
+    if (opts.abortSignal.aborted) onAbort();
+
     const geminiState = { sawMessage: false };
     const events = readJsonLines(child.stdout!);
     for await (const raw of events) {
@@ -101,7 +119,7 @@ export async function* runChatViaGeminiAccount(
       }
     }
 
-    const exitCode = await waitForChild(child);
+    const exitCode = await childClose;
     if (exitCode === 41) {
       yield {
         type: 'error',
@@ -116,30 +134,20 @@ export async function* runChatViaGeminiAccount(
       };
     }
   } finally {
-    opts.abortSignal.removeEventListener('abort', onAbort);
-    if (!child.killed) child.kill('SIGTERM');
-    opts.onAssistantBuffer?.(buffer);
+    try {
+      if (listeningForAbort) opts.abortSignal.removeEventListener('abort', onAbort);
+      if (child) {
+        try {
+          if (!child.killed) child.kill('SIGTERM');
+        } finally {
+          await childClose;
+        }
+      }
+      opts.onAssistantBuffer?.(buffer);
+    } finally {
+      await workspace.cleanup();
+    }
   }
-}
-
-async function createGeminiWorkspace(chatId?: string): Promise<string> {
-  const root = join(tmpdir(), `photoshop-mcp-gemini-${randomUUID()}`);
-  const geminiDir = join(root, '.gemini');
-  await mkdir(geminiDir, { recursive: true });
-  const mcp = buildMcpServerConfig(chatId);
-  const settings = {
-    mcpServers: {
-      photoshop: {
-        command: mcp.command,
-        args: mcp.args,
-        env: mcp.env,
-        trust: true,
-        timeout: 120_000,
-      },
-    },
-  };
-  await writeFile(join(geminiDir, 'settings.json'), JSON.stringify(settings, null, 2));
-  return root;
 }
 
 function mapGeminiEvent(
@@ -185,9 +193,7 @@ function mapGeminiEvent(
     case 'tool_result': {
       const id = event.id ?? '';
       const content =
-        typeof event.output === 'string'
-          ? event.output
-          : JSON.stringify(event.output ?? '');
+        typeof event.output === 'string' ? event.output : JSON.stringify(event.output ?? '');
       const ok = isToolOutputOk(event.output) && event.ok !== false;
       const tc = buffer.toolCalls.find((c) => c.id === id);
       if (tc) {
@@ -202,7 +208,7 @@ function mapGeminiEvent(
       const message =
         typeof event.error === 'string'
           ? event.error
-          : event.error?.message ?? 'Gemini CLI error';
+          : (event.error?.message ?? 'Gemini CLI error');
       events.push({ type: 'error', payload: { message } });
       break;
     }
@@ -238,9 +244,7 @@ function mapGeminiEvent(
   return { events, finish };
 }
 
-async function* readJsonLines(
-  stream: NodeJS.ReadableStream
-): AsyncGenerator<unknown, void, void> {
+async function* readJsonLines(stream: NodeJS.ReadableStream): AsyncGenerator<unknown, void, void> {
   let pending = '';
   for await (const chunk of stream) {
     pending += chunk.toString();

@@ -1,4 +1,11 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import {
+  buildGeminiProbeCliInvocation,
+  createCliAccountWorkspace,
+  type CliAccountWorkspace,
+  type GeminiCliWorkspaceFiles,
+  writeGeminiProbeWorkspaceFiles,
+} from '../agent/cli-account-security.js';
 import { resolveCliBinary, runCommand } from './cli-utils.js';
 import type { ProviderAdapter, ProviderModel } from './types.js';
 
@@ -38,6 +45,20 @@ const MODELS: ProviderModel[] = [
   },
 ];
 
+export interface GoogleCliProbeWorkspace extends CliAccountWorkspace, GeminiCliWorkspaceFiles {}
+
+export async function createGoogleCliProbeWorkspace(): Promise<GoogleCliProbeWorkspace> {
+  const workspace = await createCliAccountWorkspace('gemini-probe');
+
+  try {
+    const files = await writeGeminiProbeWorkspaceFiles(workspace);
+    return { ...workspace, ...files };
+  } catch (error) {
+    await workspace.cleanup();
+    throw error;
+  }
+}
+
 export const googleAdapter: ProviderAdapter = {
   id: 'google',
   label: 'Google AI Studio',
@@ -67,19 +88,25 @@ export const googleAdapter: ProviderAdapter = {
     if (!binary) {
       return { ok: false, error: 'cli_not_found' };
     }
-    const result = await runCommand(
-      binary,
-      ['-p', 'ping', '--output-format', 'json', '--approval-mode', 'yolo'],
-      { timeoutMs: 60_000, env: { GEMINI_CLI_TRUST_WORKSPACE: 'true' } }
-    );
-    if (result.exitCode === 41) {
-      return { ok: false, error: 'not_authenticated' };
+    const workspace = await createGoogleCliProbeWorkspace();
+    try {
+      const invocation = buildGeminiProbeCliInvocation(workspace);
+      const result = await runCommand(binary, invocation.args, {
+        timeoutMs: 60_000,
+        cwd: invocation.cwd,
+        env: invocation.env,
+      });
+      if (result.exitCode === 41) {
+        return { ok: false, error: 'not_authenticated' };
+      }
+      if (result.exitCode !== 0) {
+        const detail = result.stderr.trim() || result.stdout.trim();
+        return { ok: false, error: detail || 'cli_probe_failed' };
+      }
+      return { ok: true };
+    } finally {
+      await workspace.cleanup();
     }
-    if (result.exitCode !== 0) {
-      const detail = result.stderr.trim() || result.stdout.trim();
-      return { ok: false, error: detail || 'cli_probe_failed' };
-    }
-    return { ok: true };
   },
   listModels() {
     return MODELS.map((m) => ({ ...m }));
