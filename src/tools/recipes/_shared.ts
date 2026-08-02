@@ -285,7 +285,7 @@ export function clampInt(value: unknown, min: number, max: number, fallback: num
   return Math.max(min, Math.min(max, Math.round(value)));
 }
 
-export { jsString } from '../../utils/js-string.js';
+export { jsString, jsxStringLiteral } from '../../utils/js-string.js';
 
 export function gradientMaskAxisPercents(
   direction: GradientMaskDirection,

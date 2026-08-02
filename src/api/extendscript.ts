@@ -3,7 +3,7 @@
  * ExtendScript is the legacy scripting API for Photoshop
  */
 
-import { jsString } from '../utils/js-string.js';
+import { jsxStringLiteral } from '../utils/js-string.js';
 
 /**
  * Helper functions for character/string ID conversion
@@ -312,21 +312,25 @@ export const ExtendScriptSnippets = {
     var doc = app.activeDocument;
     var textLayer = doc.artLayers.add();
     textLayer.kind = LayerKind.TEXT;
-    textLayer.textItem.contents = "${jsString(text)}";
+    textLayer.textItem.contents = ${jsxStringLiteral(text)};
     textLayer.textItem.position = [${x}, ${y}];
     textLayer.textItem.size = ${fontSize};
-    ${fontName ? `
-    var __psFont = resolveFontPostScriptName("${jsString(fontName)}");
+    ${
+      fontName
+        ? `
+    var __psFont = resolveFontPostScriptName(${jsxStringLiteral(fontName)});
     if (!__psFont) {
-      throw new Error('font_not_found: ${jsString(fontName)}');
+      throw new Error('font_not_found: ' + ${jsxStringLiteral(fontName)});
     }
     textLayer.textItem.font = __psFont;
-    ` : ''}
+    `
+        : ''
+    }
     
     var result = {
       created: true,
       layerName: textLayer.name,
-      text: "${jsString(text)}",
+      text: ${jsxStringLiteral(text)},
       position: { x: ${x}, y: ${y} },
       fontSize: ${fontSize},
       ${fontName ? `font: textLayer.textItem.font,` : ''}
@@ -346,9 +350,9 @@ export const ExtendScriptSnippets = {
       throw new Error('No active document');
     }
     
-    var imageFile = new File("${jsString(filePath)}");
+    var imageFile = new File(${jsxStringLiteral(filePath)});
     if (!imageFile.exists) {
-      throw new Error('Image file not found: ${jsString(filePath)}');
+      throw new Error('Image file not found: ' + ${jsxStringLiteral(filePath)});
     }
     
     // Place image using ActionDescriptor
@@ -365,7 +369,7 @@ export const ExtendScriptSnippets = {
     
     var result = {
       placed: true,
-      filePath: "${jsString(filePath)}",
+      filePath: ${jsxStringLiteral(filePath)},
       position: { x: ${x}, y: ${y} },
       context: getContextInfo()
     };
@@ -387,9 +391,9 @@ export const ExtendScriptSnippets = {
    * Open an image file as a new document
    */
   openImage: (filePath: string) => `
-    var imageFile = new File("${jsString(filePath)}");
+    var imageFile = new File(${jsxStringLiteral(filePath)});
     if (!imageFile.exists) {
-      throw new Error('Image file not found: ${jsString(filePath)}');
+      throw new Error('Image file not found: ' + ${jsxStringLiteral(filePath)});
     }
     
     var doc = app.open(imageFile);
@@ -409,7 +413,7 @@ export const ExtendScriptSnippets = {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var saveFile = new File("${path.replace(/\\/g, '\\\\')}");
+    var saveFile = new File(${jsxStringLiteral(path)});
     var psdOptions = new PhotoshopSaveOptions();
     psdOptions.embedColorProfile = true;
     doc.saveAs(saveFile, psdOptions, true);
@@ -424,7 +428,7 @@ export const ExtendScriptSnippets = {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var saveFile = new File("${path.replace(/\\/g, '\\\\')}");
+    var saveFile = new File(${jsxStringLiteral(path)});
     var jpegOptions = new JPEGSaveOptions();
     jpegOptions.quality = ${quality};
     jpegOptions.embedColorProfile = true;
@@ -440,7 +444,7 @@ export const ExtendScriptSnippets = {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var saveFile = new File("${path.replace(/\\/g, '\\\\')}");
+    var saveFile = new File(${jsxStringLiteral(path)});
     var pngOptions = new PNGSaveOptions();
     pngOptions.compression = 9;
     doc.saveAs(saveFile, pngOptions, true);
@@ -470,7 +474,7 @@ export const ExtendScriptSnippets = {
     }
     var doc = app.activeDocument;
     var layer = doc.artLayers.add();
-    ${name ? `layer.name = "${jsString(name)}";` : ''}
+    ${name ? `layer.name = ${jsxStringLiteral(name)};` : ''}
     
     var result = { 
       created: true,
@@ -636,7 +640,7 @@ export const ExtendScriptSnippets = {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var targetName = "${jsString(name)}";
+    var targetName = ${jsxStringLiteral(name)};
     var target = null;
     function findLayer(container, name) {
       for (var i = 0; i < container.layers.length; i++) {
@@ -901,7 +905,7 @@ export const ExtendScriptSnippets = {
     var layer = doc.activeLayer;
     
     var oldName = layer.name;
-    layer.name = "${jsString(newName)}";
+    layer.name = ${jsxStringLiteral(newName)};
     
     return { 
       oldName: oldName,
@@ -920,7 +924,7 @@ export const ExtendScriptSnippets = {
     var layer = doc.activeLayer;
     
     var duplicated = layer.duplicate();
-    ${newName ? `duplicated.name = "${jsString(newName)}";` : ''}
+    ${newName ? `duplicated.name = ${jsxStringLiteral(newName)};` : ''}
     
     return { 
       originalName: layer.name,
@@ -1333,9 +1337,9 @@ export const ExtendScriptSnippets = {
       throw new Error('Active layer is not a text layer');
     }
     
-    var __psFont = resolveFontPostScriptName("${jsString(fontName)}");
+    var __psFont = resolveFontPostScriptName(${jsxStringLiteral(fontName)});
     if (!__psFont) {
-      throw new Error('font_not_found: ${jsString(fontName)}');
+      throw new Error('font_not_found: ' + ${jsxStringLiteral(fontName)});
     }
     layer.textItem.font = __psFont;
     ${fontSize ? `layer.textItem.size = ${fontSize};` : ''}
@@ -1350,7 +1354,7 @@ export const ExtendScriptSnippets = {
    * List installed fonts (PostScript names required for TextItem.font).
    */
   listFonts: (query?: string, limit = 200) => `
-    var query = ${query !== undefined ? `"${jsString(query)}"` : 'null'};
+    var query = ${query !== undefined ? jsxStringLiteral(query) : 'null'};
     var limit = ${limit};
     var fonts = [];
     var total = app.fonts.length;
@@ -1445,7 +1449,7 @@ export const ExtendScriptSnippets = {
       throw new Error('Active layer is not a text layer');
     }
     
-    layer.textItem.contents = "${jsString(newText)}";
+    layer.textItem.contents = ${jsxStringLiteral(newText)};
     
     return { 
       text: layer.textItem.contents
@@ -1744,11 +1748,11 @@ export const ExtendScriptSnippets = {
    * Play an action from Actions palette
    */
   playAction: (actionName: string, actionSetName: string) => `
-    app.doAction("${jsString(actionName)}", "${jsString(actionSetName)}");
+    app.doAction(${jsxStringLiteral(actionName)}, ${jsxStringLiteral(actionSetName)});
     
     return { 
-      action: '${actionName}',
-      set: '${actionSetName}'
+      action: ${jsxStringLiteral(actionName)},
+      set: ${jsxStringLiteral(actionSetName)}
     };
   `,
 
@@ -1946,14 +1950,14 @@ export const ExtendScriptSnippets = {
     // Find target layer
     var targetLayer = null;
     for (var i = 0; i < doc.layers.length; i++) {
-      if (doc.layers[i].name === "${jsString(targetLayerName)}") {
+      if (doc.layers[i].name === ${jsxStringLiteral(targetLayerName)}) {
         targetLayer = doc.layers[i];
         break;
       }
     }
     
     if (!targetLayer) {
-      throw new Error('Target layer not found: ${targetLayerName}');
+      throw new Error('Target layer not found: ' + ${jsxStringLiteral(targetLayerName)});
     }
     
     // Determine ElementPlacement
@@ -2219,7 +2223,7 @@ export const ExtendScriptSnippets = {
   `,
 
   generativeFill: (prompt: string) => {
-    const escaped = jsString(prompt);
+    const promptLiteral = jsxStringLiteral(prompt);
     return `
       ${helperFunctions}
       ${ExtendScriptSnippets.generativeHelpers()}
@@ -2237,9 +2241,9 @@ export const ExtendScriptSnippets = {
         ['generativeFill', 'generativeLayerFill', 'firefly'],
         function(actionId) {
           var desc = new ActionDescriptor();
-          try { desc.putString(sTID('prompt'), ${escaped}); } catch (eP) {}
-          try { desc.putString(sTID('text'), ${escaped}); } catch (eT) {}
-          try { desc.putString(sTID('promptText'), ${escaped}); } catch (ePT) {}
+          try { desc.putString(sTID('prompt'), ${promptLiteral}); } catch (eP) {}
+          try { desc.putString(sTID('text'), ${promptLiteral}); } catch (eT) {}
+          try { desc.putString(sTID('promptText'), ${promptLiteral}); } catch (ePT) {}
           return desc;
         }
       );
@@ -2258,7 +2262,7 @@ export const ExtendScriptSnippets = {
       return {
         ok: true,
         summary: 'Generative fill invoked via ' + result.action_id,
-        details: { action_id: result.action_id, prompt: ${escaped}, wait },
+        details: { action_id: result.action_id, prompt: ${promptLiteral}, wait },
         next_suggested_tool: 'photoshop_get_preview'
       };
     `;
@@ -2315,8 +2319,8 @@ export const ExtendScriptSnippets = {
   `,
 
   generativeExpand: (direction: string, prompt: string) => {
-    const escaped = jsString(prompt);
-    const dir = jsString(direction);
+    const promptLiteral = jsxStringLiteral(prompt);
+    const directionLiteral = jsxStringLiteral(direction);
     return `
       ${helperFunctions}
       ${ExtendScriptSnippets.generativeHelpers()}
@@ -2330,8 +2334,8 @@ export const ExtendScriptSnippets = {
         ['generativeExpand', 'expandCanvas', 'generativeCanvasExpand'],
         function(actionId) {
           var desc = new ActionDescriptor();
-          try { desc.putString(sTID('prompt'), ${escaped}); } catch (eP) {}
-          try { desc.putString(sTID('direction'), ${dir}); } catch (eD) {}
+          try { desc.putString(sTID('prompt'), ${promptLiteral}); } catch (eP) {}
+          try { desc.putString(sTID('direction'), ${directionLiteral}); } catch (eD) {}
           return desc;
         }
       );
@@ -2345,7 +2349,7 @@ export const ExtendScriptSnippets = {
       return {
         ok: true,
         summary: 'Generative expand invoked via ' + result.action_id,
-        details: { action_id: result.action_id, direction: ${dir}, prompt: ${escaped}, wait },
+        details: { action_id: result.action_id, direction: ${directionLiteral}, prompt: ${promptLiteral}, wait },
         next_suggested_tool: 'photoshop_get_preview'
       };
     `;
@@ -2384,7 +2388,7 @@ export const ExtendScriptSnippets = {
   `,
 
   skyReplacement: (skyImagePath: string) => {
-    const escaped = jsString(skyImagePath);
+    const pathLiteral = jsxStringLiteral(skyImagePath);
     return `
       ${helperFunctions}
       ${ExtendScriptSnippets.generativeHelpers()}
@@ -2393,7 +2397,7 @@ export const ExtendScriptSnippets = {
       var doc = app.activeDocument;
       app.displayDialogs = DialogModes.NO;
 
-      var skyFile = new File(${escaped});
+      var skyFile = new File(${pathLiteral});
       var baselineHist = doc.activeHistoryState.index;
       var result = __mcp_tryGenerativeAction(
         ['skyReplacement', 'replaceSky', 'replaceSkyBackground'],
@@ -2416,14 +2420,14 @@ export const ExtendScriptSnippets = {
       return {
         ok: true,
         summary: 'Sky replacement invoked via ' + result.action_id,
-        details: { action_id: result.action_id, sky_image_path: ${escaped}, wait },
+        details: { action_id: result.action_id, sky_image_path: ${pathLiteral}, wait },
         next_suggested_tool: 'photoshop_get_preview'
       };
     `;
   },
 
   generateImage: (prompt: string, width: number, height: number) => {
-    const escaped = jsString(prompt);
+    const promptLiteral = jsxStringLiteral(prompt);
     return `
       ${helperFunctions}
       ${ExtendScriptSnippets.generativeHelpers()}
@@ -2449,8 +2453,8 @@ export const ExtendScriptSnippets = {
         ['textToImage', 'generateImage', 'fireflyTextToImage', 'generativeFill'],
         function(actionId) {
           var desc = new ActionDescriptor();
-          try { desc.putString(sTID('prompt'), ${escaped}); } catch (eP) {}
-          try { desc.putString(sTID('text'), ${escaped}); } catch (eT) {}
+          try { desc.putString(sTID('prompt'), ${promptLiteral}); } catch (eP) {}
+          try { desc.putString(sTID('text'), ${promptLiteral}); } catch (eT) {}
           return desc;
         }
       );
@@ -2464,7 +2468,7 @@ export const ExtendScriptSnippets = {
       return {
         ok: true,
         summary: 'Generate image invoked via ' + result.action_id,
-        details: { action_id: result.action_id, prompt: ${escaped}, width: ${width}, height: ${height}, wait },
+        details: { action_id: result.action_id, prompt: ${promptLiteral}, width: ${width}, height: ${height}, wait },
         next_suggested_tool: 'photoshop_get_preview'
       };
     `;

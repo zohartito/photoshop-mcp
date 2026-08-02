@@ -2,15 +2,12 @@ import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
 import { ExtendScriptSnippets } from '../../api/extendscript.js';
 import { getPhotoshopCapabilities } from '../../platform/capabilities.js';
 import type { TransportRouter } from '../../transport/index.js';
-import {
-  parseGenerativeResult,
-  runGenerativeSnippet,
-} from '../generative/_shared.js';
+import { parseGenerativeResult, runGenerativeSnippet } from '../generative/_shared.js';
 import {
   clampInt,
   executeRecipe,
   gradientMaskAxisPercents,
-  jsString,
+  jsxStringLiteral,
   toolFailure,
 } from './_shared.js';
 
@@ -95,14 +92,10 @@ async function runSkyBlend(
   const tryNative = args.use_native_sky !== false && caps.features.sky_replacement_native;
 
   if (tryNative) {
-    const raw = await runGenerativeSnippet(
-      transport,
-      ExtendScriptSnippets.skyReplacement(skyPath)
-    );
+    const raw = await runGenerativeSnippet(transport, ExtendScriptSnippets.skyReplacement(skyPath));
     const nativeResult = parseGenerativeResult(raw);
     if (!nativeResult.isError) {
-      const text =
-        nativeResult.content[0]?.type === 'text' ? nativeResult.content[0].text : '{}';
+      const text = nativeResult.content[0]?.type === 'text' ? nativeResult.content[0].text : '{}';
       try {
         const body = JSON.parse(text) as Record<string, unknown>;
         return {
@@ -141,12 +134,12 @@ async function runSkyBlend(
   const startPct = Math.max(0, horizonPct - featherPct);
   const endPct = Math.min(100, horizonPct + featherPct);
   const endpoints = gradientMaskAxisPercents('top_to_bottom', startPct, endPct);
-  const escapedPath = jsString(skyPath);
+  const pathLiteral = jsxStringLiteral(skyPath);
 
   const body = `
-    var imageFile = new File("${escapedPath}");
+    var imageFile = new File(${pathLiteral});
     if (!imageFile.exists) {
-      return { ok: false, code: 'file_not_found', message: 'Image file not found: ${escapedPath}' };
+      return { ok: false, code: 'file_not_found', message: 'Image file not found: ' + ${pathLiteral} };
     }
 
     app.displayDialogs = DialogModes.NO;
@@ -193,7 +186,7 @@ async function runSkyBlend(
       undo_history_states_consumed: 1,
       next_suggested_tool: 'photoshop_get_preview',
       details: {
-        sky_image_path: '${escapedPath}',
+        sky_image_path: ${pathLiteral},
         layer_name: skyLayer.name,
         horizon_pct: ${horizonPct},
         feather_pct: ${featherPct},
