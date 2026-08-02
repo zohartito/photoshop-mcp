@@ -9,7 +9,7 @@ import {
   type GeminiChatWorkspaceFiles,
   writeGeminiChatWorkspaceFiles,
 } from './cli-account-security.js';
-import { buildMcpServerConfig } from './mcp-transport.js';
+import { buildGeminiMcpServerConfig } from './mcp-transport.js';
 import {
   buildPromptWithHistory,
   isToolOutputOk,
@@ -56,7 +56,10 @@ export async function createGeminiAccountWorkspace(
   const workspace = await createCliAccountWorkspace('gemini-account');
 
   try {
-    const files = await writeGeminiChatWorkspaceFiles(workspace, buildMcpServerConfig(chatId));
+    const files = await writeGeminiChatWorkspaceFiles(
+      workspace,
+      buildGeminiMcpServerConfig(chatId)
+    );
     return { ...workspace, ...files };
   } catch (error) {
     await workspace.cleanup();

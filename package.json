@@ -39,6 +39,7 @@
     "test:extendscript-result": "tsx scripts/test-extendscript-result.ts",
     "test:tool-input-validation": "tsx scripts/test-tool-input-validation.ts",
     "test:cli-account-capability-boundary": "tsx scripts/test-cli-account-capability-boundary.ts",
+    "test:gemini-env-settings": "tsx scripts/test-gemini-env-settings.ts",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build"
   },
