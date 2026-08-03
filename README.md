@@ -6,138 +6,33 @@
   </a>
 </p>
 
-*v1.1+ — recipe workflows, fewer round-trips, snappier sessions. Standalone UI ships **Action Plan (beta)** for plan-then-execute runs.*
+*Recipe workflows reduce round-trips and make Photoshop automation more reliable.*
 
 > **Note:** This is an unofficial, community-maintained project and is not affiliated with or endorsed by Adobe Inc.
 
 [![npm version](https://img.shields.io/npm/v/@alisaitteke/photoshop-mcp.svg)](https://www.npmjs.com/package/@alisaitteke/photoshop-mcp)
 [![GitHub release](https://img.shields.io/github/v/release/alisaitteke/photoshop-mcp?include_prereleases)](https://github.com/alisaitteke/photoshop-mcp/releases)
-[![Action Plan](https://img.shields.io/badge/Action%20Plan-beta-amber.svg)](#action-plan-beta)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey.svg)]()
 
-A Model Context Protocol (MCP) server that enables AI assistants like Claude and Cursor to control Adobe Photoshop programmatically. This allows you to create designs, manipulate images, and automate Photoshop workflows through natural language commands while working in your IDE — or through the bundled **standalone web UI**, which supports both API keys and CLI subscription accounts (Claude Code / Gemini CLI). The UI also offers an opt-in **Action Plan (beta)** mode that plans every Photoshop step in one LLM call, then runs them in a single pass.
+A Model Context Protocol (MCP) server that enables AI assistants like Claude and Cursor to control Adobe Photoshop programmatically. Create designs, manipulate images, and automate Photoshop workflows through natural-language commands from an MCP-capable host.
 
 ## Why this exists
 
 Designers and developers want to drive Photoshop from AI assistants, but raw ExtendScript calls are brittle: agents waste tokens on trial-and-error, layer types break filters, and one failed command leaves the document in an unknown state.
 
-Photoshop MCP adds **state awareness** (`get_state`, `get_preview`, `get_capabilities`), **recipe tools** that wrap multi-step outcomes in a single undo step, and **structured error envelopes** so agents know what to try next. The optional standalone UI and Action Plan mode reduce round-trips for longer workflows — so natural language can actually ship pixels, not just suggest them.
+Photoshop MCP adds **state awareness** (`get_state`, `get_preview`, `get_capabilities`), **recipe tools** that wrap multi-step outcomes in a single undo step, and **structured error envelopes** so agents know what to try next.
 
 Engineering deep-dive: [`docs/architecture.md`](docs/architecture.md).
 
-## 🖥️ Standalone UI (no IDE required)
+## Standalone browser UI (security-disabled)
 
-Don't want to wire this into Claude Desktop or Cursor? The same package ships a
-fully local web UI that lets you chat with an AI model and drive Photoshop
-through this MCP server underneath. Connect with a provider API key **or**, for
-Anthropic and Google, reuse the OAuth session from **Claude Code** or **Gemini
-CLI** — no separate API key required.
-
-![Standalone UI Screenshot](./images/frame_generic_light.png)
-
-```bash
-npx -p @alisaitteke/photoshop-mcp photoshop-mcp-ui
-```
-
-That's it. A local server starts on `127.0.0.1` (random free port) and your
-default browser opens the chat UI automatically.
-
-### Supported providers
-
-Pick any of the following on first launch — use an API key **or** your existing
-CLI subscription account (Anthropic and Google):
-
-| Provider | Models | API key | CLI account |
-|---|---|---|---|
-| **Anthropic** | Claude Sonnet / Opus / Haiku | [console.anthropic.com](https://console.anthropic.com/settings/keys) | `npm i -g @anthropic-ai/claude-code` → `claude auth login` |
-| **OpenAI** | GPT-5, GPT-4.1, o-series | [platform.openai.com](https://platform.openai.com/api-keys) | — |
-| **Google** | Gemini 2.5 Pro / Flash / Flash-Lite | [aistudio.google.com](https://aistudio.google.com/apikey) | `npm i -g @google/gemini-cli` → `gemini auth login` |
-| **OpenRouter** | 100+ models from any provider | [openrouter.ai](https://openrouter.ai/keys) | — |
-
-### Authentication modes
-
-- **`api_key` (default)** — Vercel AI SDK + your provider API key. Usage is billed
-  per token at API rates; the UI shows estimated cost per chat.
-- **`cli_account`** — Uses your local Claude Code or Gemini CLI OAuth session.
-  No API key is stored; the UI probes `claude auth status` / `gemini` headless
-  to verify login. Usage counts against your **subscription quota**, not API
-  billing — the status bar shows "Included in subscription".
-
-You can switch auth method per provider in Settings without losing the other
-credential (e.g. keep an API key while trying CLI account, then switch back).
-
-### Action Plan (beta)
-
-An optional execution mode in the standalone web UI for **API key auth only**
-(`cli_account` always uses the default agentic flow). Turn it on with the
-**Action Plan** toggle next to the model selector in the composer.
-
-Instead of a per-step ReAct loop (model → tool → model → tool …), Action Plan:
-
-1. Makes **one** planning LLM call that outputs an ordered todo list of
-   Photoshop MCP tool calls with parameters.
-2. Executes those tools **directly** in sequence — no extra model round-trips
-   between steps.
-3. On a failed step or unresolved dependency, runs a bounded **repair** loop
-   (re-plans only the remaining steps, up to 3 times).
-
-The plan appears as a live todo list above the tool-call cards, with per-step
-status (`pending` → `running` → `done` / `error`). Plans are persisted in chat
-history so they survive reload. The toggle is off by default; the existing
-agentic flow is unchanged when Action Plan is disabled.
-
-Good for multi-step prompts such as *"remove the background and export for web"*
-where you want fewer model calls and faster end-to-end execution.
-
-### What happens on first launch
-
-1. Pick a provider and choose **API key** or **Uses your account**.
-2. Validate the key or check the CLI connection. Config is stored locally at
-   `~/.photoshop-mcp/data.db` (SQLite, `chmod 600`). API keys never leave your
-   machine; CLI mode inherits OAuth from `~/.claude/` or `~/.gemini/`.
-3. Type natural-language prompts. The UI streams the model's reply, runs
-   Photoshop tool calls in real time, and renders each tool call as an
-   inspectable card (input + result).
-4. Switch provider, auth method, or model anytime from Settings / model selector
-   — chats, costs and tool history are persisted across sessions.
-
-### Switching auth method later
-
-Open **Settings** from the sidebar at any time:
-
-| Action | API key mode | CLI account mode |
-|---|---|---|
-| Set up | Paste key → **Save** | Install CLI → `auth login` → **Check connection** |
-| Switch away | Choose **API key** — stored key is kept | Choose **Uses your account** — key is not deleted |
-| Custom binary | — | Optional **CLI path** if `claude` / `gemini` is not on `PATH` |
-| Cost display | Per-token estimate in status bar | **Included in subscription** badge |
-
-Auth method is stored per provider in `~/.photoshop-mcp/data.db` (`authMethod`:
-`api_key` or `cli_account`). Existing configs without `authMethod` default to
-`api_key` and keep working unchanged.
-
-### CLI flags
-
-```
-photoshop-mcp-ui [--port 5174] [--host 127.0.0.1] [--dev-origin http://127.0.0.1:5173] [--no-open]
-```
-
-### Notes
-
-- The agent is restricted to Photoshop MCP tools only — built-in shell, file
-  and web tools are disabled.
-- Tech stack: Vue 3 + Tailwind v4 + [shadcn-vue](https://www.shadcn-vue.com/)
-  on the frontend; [Hono](https://hono.dev/) on the backend. API-key mode uses
-  the [Vercel AI SDK](https://sdk.vercel.ai/); CLI account mode uses the
-  [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/mcp) (Anthropic)
-  or Gemini CLI headless `stream-json` (Google). All paths talk to this same
-  Photoshop MCP server over STDIO.
-- **CLI account limitations:** Gemini headless may open a new session each turn
-  (history is prepended to the prompt). Anthropic CLI account consumes
-  subscription quota. OAuth login is macOS-first (`claude auth login` /
-  `gemini auth login` in Terminal).
+The `photoshop-mcp-ui` compatibility command is intentionally disabled. It
+always fails closed and starts no listener, browser, analytics identity, or
+database work. It will remain unavailable until authenticated pairing and TLS
+are implemented. The `web/` source and its build remain in the repository, but
+are not a supported path to the privileged Photoshop API.
 
 ---
 
@@ -456,10 +351,8 @@ Never guess — read get_state after a failure and propose the next single step.
 
 ## Features
 
-- **Standalone web UI** — local chat interface (`photoshop-mcp-ui`); API key or CLI
-  subscription auth per provider (Anthropic, Google)
-- **Action Plan (beta)** — opt-in plan-then-execute mode in the web UI (API key
-  only): one planning call, direct tool execution, bounded repair on failure
+- **Standalone browser UI security boundary** — `photoshop-mcp-ui` is retained as
+  a clear failing compatibility command until authenticated pairing and TLS exist
 - **Works on both Windows and macOS**
 - **Supports Photoshop 2012-2025+**
 - **ExtendScript API**: Universal compatibility via AppleScript/COM automation
@@ -546,8 +439,6 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 
 Full reference for all atomic `photoshop_*` tools (parameters, examples, and usage):
 [`docs/available-tools.md`](docs/available-tools.md).
-
-
 ## Context Tracking
 
 Each tool returns comprehensive context information about the current state of Photoshop, including:
@@ -611,9 +502,6 @@ This context helps AI assistants remember what document and layer they're workin
 - Uses AppleScript/OSA for Photoshop communication
 - Spotlight-based auto-detection
 - Supports multiple Photoshop versions installed simultaneously
-- **CLI account auth** (standalone UI) is macOS-first: run `claude auth login` /
-  `gemini auth login` in Terminal; credentials live under `~/.claude/` and
-  `~/.gemini/`
 
 ## Supported Photoshop Versions
 
@@ -625,16 +513,6 @@ This context helps AI assistants remember what document and layer they're workin
 
 Common connection, scripting, and logging issues:
 [`docs/troubleshooting.md`](docs/troubleshooting.md).
-
-### Standalone UI — CLI account auth
-
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| `cli_not_found` | Claude Code / Gemini CLI not installed | `npm i -g @anthropic-ai/claude-code` or `npm i -g @google/gemini-cli` |
-| `not_authenticated` | No OAuth session | Run `claude auth login` or `gemini auth login` in Terminal |
-| `claude` / `gemini` not on `PATH` | Custom install location | Settings → **CLI path** → **Check connection** |
-| Chat works in IDE but not UI (CLI mode) | OAuth tokens are CLI-only | Use **CLI account** in UI; API keys and CLI sessions are separate |
-| Gemini multi-turn feels forgetful | Headless CLI may start a fresh session each turn | Known limitation; history is prepended to the prompt (MVP) |
 
 ## Development
 
@@ -660,13 +538,11 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before
 
 This project started from a practical question: *how do you make Photoshop reliably
 controllable by LLMs without fragile one-off scripts?* It grew into an MCP server
-with 80 tools, a recipe/prompt layer for dependable multi-step workflows, and a
-local web UI so creative work does not require an IDE.
+with 80 tools and a recipe/prompt layer for dependable multi-step workflows.
 
 **What this codebase demonstrates:** TypeScript systems design, MCP protocol
 integration, cross-platform desktop automation (macOS AppleScript / Windows COM),
-structured error recovery for agentic loops, and a production-minded local-first UI
-(Vue 3 + Hono + SQLite).
+and structured error recovery for agentic loops.
 
 - [Portfolio](https://alisait.com) · [GitHub](https://github.com/alisaitteke) · [LinkedIn](https://www.linkedin.com/in/alisait/)
 

@@ -1,15 +1,6 @@
 #!/usr/bin/env node
 
-import getPort from 'get-port';
-import open from 'open';
-import {
-  capture,
-  ensureAnalyticsIdentity,
-  getAppVersion,
-  identifyAnalyticsPerson,
-  shutdownAnalytics,
-} from '../analytics/index.js';
-import { Logger } from '../utils/logger.js';
+import { getAppVersion } from '../analytics/app-version.js';
 import { startUIServer } from './server.js';
 
 interface CliFlags {
@@ -46,19 +37,20 @@ function parseFlags(argv: string[]): CliFlags {
 function printHelp(): void {
   process.stdout.write(
     [
-      'photoshop-mcp-ui — Browser UI for the Photoshop MCP server',
+      'photoshop-mcp-ui — Browser UI compatibility command',
       '',
       'Usage: photoshop-mcp-ui [options]',
       '',
+      'Normal standalone browser UI startup is security-disabled until authenticated',
+      'pairing and TLS are implemented. No option can bypass this refusal.',
+      '',
       'Options:',
-      '  -p, --port <number>   Port to listen on (default: random free port)',
-      '      --host <host>     Host to bind to (default: 127.0.0.1)',
-      '      --dev-origin <origin>  Exact Vite development origin (loopback only)',
-      '      --no-open         Do not auto-open the browser',
+      '  -p, --port <number>   Retained for compatibility (ignored)',
+      '      --host <host>     Retained for compatibility (ignored)',
+      '      --dev-origin <origin>  Retained for compatibility (ignored)',
+      '      --no-open         Retained for compatibility (ignored)',
       '  -h, --help            Show this help',
       '  -v, --version         Show version',
-      '',
-      'Configuration is stored at ~/.photoshop-mcp/config.json (chmod 600).',
       '',
     ].join('\n')
   );
@@ -69,55 +61,12 @@ function printVersion(): void {
 }
 
 async function main(): Promise<void> {
-  const logger = new Logger('UI');
   const flags = parseFlags(process.argv.slice(2));
-  const startedAt = Date.now();
-
-  ensureAnalyticsIdentity();
-  identifyAnalyticsPerson({
-    usage_surface: 'server',
-    event_source: 'server',
-  });
-
-  const port = flags.port ?? (await getPort({ port: [5174, 5175, 5176, 5180] }));
-
-  const server = await startUIServer({
+  await startUIServer({
     host: flags.host,
-    port,
+    port: flags.port ?? 0,
     devOrigin: flags.devOrigin,
   });
-
-  capture('ui_server_started', {
-    port,
-    host: flags.host,
-    no_open: flags.noOpen,
-    event_source: 'server',
-  });
-
-  const url = server.url;
-  process.stdout.write(`\nPhotoshop MCP UI ready at:\n  ${url}\n\n`);
-
-  if (!flags.noOpen) {
-    try {
-      await open(url);
-    } catch (err) {
-      logger.warn('Failed to auto-open browser', err);
-    }
-  }
-
-  const shutdown = async (signal: string) => {
-    logger.info(`Received ${signal}, shutting down`);
-    capture('ui_server_ended', {
-      duration_ms: Date.now() - startedAt,
-      shutdown_reason: signal.toLowerCase(),
-      event_source: 'server',
-    });
-    await server.close();
-    await shutdownAnalytics();
-    process.exit(0);
-  };
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 main().catch((err) => {

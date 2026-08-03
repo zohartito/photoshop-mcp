@@ -37,13 +37,15 @@ npm run build
 
 ### UI development
 
-The standalone web UI runs a Hono backend and a Vite + Vue frontend:
+The preserved Vite + Vue frontend source can be developed with:
 
 ```bash
-npm run dev:ui
+npm run dev:web
 ```
 
-This starts the server on port 5174 (with hot reload) and the web dev server concurrently.
+No privileged UI backend is available: the standalone browser UI is
+security-disabled pending authenticated pairing and TLS. `dev:web` serves only
+the frontend source and is not a route to Photoshop operations.
 
 ## Releasing
 
@@ -52,9 +54,9 @@ separate steps: pushing a version tag triggers a GitHub Release automatically; n
 publish stays manual on the maintainer machine (OTP/2FA).
 
 1. Merge feature work to `master`.
-2. Bump the `version` field in the root [`package.json`](package.json) only (the
-   standalone UI package in `web/package.json` uses its own semver and is bumped
-   separately when needed).
+2. Bump the `version` field in the root [`package.json`](package.json) only.
+   `web/package.json` belongs to dormant, preserved frontend source and is not a
+   separately released standalone UI package.
 3. Regenerate [`CHANGELOG.md`](CHANGELOG.md) and commit the release (tag is
    created **after** the commit — `backfill-changelog.sh` reads `package.json`
    for the pending version):
@@ -111,8 +113,8 @@ To rewrite release notes on existing releases (e.g. after improving the template
 
 | Path | Purpose |
 | --- | --- |
-| `src/` | MCP server core, tools, recipes, and UI backend |
-| `web/` | Vue 3 standalone UI (Tailwind v4, shadcn-vue) |
+| `src/` | MCP server core, tools, recipes, plus retired UI compatibility tombstone and dormant backend source |
+| `web/` | Dormant, preserved Vue frontend source; no privileged runnable UI |
 | `scripts/` | Integration and verification test scripts |
 | `docs/` | Additional documentation |
 

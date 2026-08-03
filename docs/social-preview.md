@@ -25,7 +25,7 @@ If you add a project page, set Open Graph tags to the same image and point `og:u
 
 ## Suggested LinkedIn post
 
-Copy, adjust, and attach `images/og-social.png` or a short screen recording of the standalone UI.
+Copy, adjust, and attach `images/og-social.png`.
 
 ---
 
@@ -41,8 +41,7 @@ When LLMs call Photoshop one command at a time, they burn tokens, guess layer ty
 
 - **Photoshop MCP** — 80 tools + 12 recipe workflows (single-undo outcomes)
 - Cross-platform: macOS (AppleScript) + Windows (COM)
-- Bundled **standalone web UI** — chat with Claude, GPT, or Gemini; drive Photoshop without an IDE
-- **Action Plan (beta)** — plan all steps in one LLM call, execute without per-step round-trips
+- MCP tools and recipe workflows for reliable Photoshop automation from supported AI hosts
 
 **Technical call**
 
@@ -51,7 +50,7 @@ External automation can't invoke UXP plugins — only ExtendScript via AppleScri
 **Links**
 
 - GitHub: https://github.com/alisaitteke/photoshop-mcp
-- `npx @alisaitteke/photoshop-mcp` (MCP) · `npx -p @alisaitteke/photoshop-mcp photoshop-mcp-ui` (UI)
+- `npx @alisaitteke/photoshop-mcp` (MCP)
 - Architecture write-up: https://github.com/alisaitteke/photoshop-mcp/blob/main/docs/architecture.md
 
 Feedback and contributors welcome. If your team builds agent tooling or creative automation, happy to connect.
@@ -62,6 +61,6 @@ Feedback and contributors welcome. If your team builds agent tooling or creative
 
 Set in repository **About** sidebar:
 
-- **Description:** `MCP server + local UI for AI-driven Photoshop automation. 80 tools, recipe workflows, cross-platform.`
+- **Description:** `MCP server for AI-driven Photoshop automation. 80 tools, recipe workflows, cross-platform.`
 - **Website:** `https://alisait.com`
 - **Topics:** `mcp`, `model-context-protocol`, `typescript`, `ai-agents`, `photoshop`, `automation`, `vue`, `hono`, `developer-tools`, `cursor`, `claude`, `extendscript`

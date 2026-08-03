@@ -10,20 +10,16 @@ Engineering overview of **Photoshop MCP** — how AI assistants reach Adobe Phot
 
 ## System overview
 
-The project is a **local-first bridge** between MCP-capable AI hosts (Cursor, Claude Desktop, or the bundled web UI) and a running Photoshop instance. Nothing runs in the cloud: the MCP server, UI, credentials, and exports all stay on the user's machine.
+The project is a **local-first bridge** between MCP-capable AI hosts (such as Cursor or Claude Desktop) and a running Photoshop instance. Nothing runs in the cloud: the MCP server, credentials, and exports all stay on the user's machine.
 
 ```mermaid
 flowchart TB
   subgraph hosts [AI hosts]
     IDE[Cursor / Claude Desktop]
-    UI[Standalone Web UI]
   end
 
   subgraph node [Node.js process]
     MCP[PhotoshopMCPServer]
-    Hono[Hono HTTP server]
-    Agent[Agent layer]
-    SQLite[(SQLite ~/.photoshop-mcp)]
   end
 
   subgraph ps [Adobe Photoshop]
@@ -32,10 +28,6 @@ flowchart TB
   end
 
   IDE -->|stdio MCP| MCP
-  UI --> Agent
-  Agent -->|stdio MCP| MCP
-  Hono --> UI
-  Hono --> SQLite
   MCP -->|AppleScript / COM| ES
   MCP -->|HTTP poll 127.0.0.1:38452| UXP
 ```
@@ -47,7 +39,7 @@ flowchart TB
 | **Tools** | 74 atomic + 12 recipe MCP tools (+ generative & neural) | `src/tools/` |
 | **Prompt layer** | Server instructions, 19 MCP prompt templates | `src/prompts/` |
 | **Errors** | Structured envelopes for agent self-correction | `src/errors/envelope.ts` |
-| **Standalone UI** | Hono API, multi-provider agent, chat persistence | `src/ui/`, `web/` |
+| **Retired browser UI** | Preserved source; startup tombstone rejects before any listener | `src/ui/`, `web/` |
 | **Analytics** | Opt-out anonymous usage (Mixpanel / PostHog) | `src/analytics/` |
 
 ---
@@ -98,25 +90,14 @@ Full prompt-layer mapping: [`docs/prompt-layer.md`](prompt-layer.md).
 
 ---
 
-## Standalone web UI
+## Standalone browser UI (security-disabled)
 
-Shipped in the same npm package (`photoshop-mcp-ui` bin). Stack:
-
-| Concern | Choice |
-| ------- | ------ |
-| Frontend | Vue 3, Tailwind v4, shadcn-vue |
-| Backend | Hono on Node (`src/ui/server.ts`) |
-| Persistence | better-sqlite3 at `~/.photoshop-mcp/data.db` |
-| LLM (API key) | Vercel AI SDK — Anthropic, OpenAI, Google, OpenRouter |
-| LLM (CLI account) | Claude Agent SDK / Gemini CLI headless |
-| Photoshop | Same MCP server over stdio (`src/ui/agent/mcp-transport.ts`) |
-
-### Agent modes
-
-1. **Default (ReAct)** — model calls tools iteratively; `src/ui/agent/api-key.ts` and provider-specific CLI paths.
-2. **Action Plan (beta)** — one planning LLM call produces an ordered tool list; direct execution with bounded repair (`src/ui/agent/action-plan.ts`). Fewer round-trips for multi-step prompts.
-
-The UI restricts the agent to **Photoshop MCP tools only** — no shell, filesystem, or web tools from the host.
+The `photoshop-mcp-ui` bin remains only as a compatibility tombstone. Its
+startup function rejects with a stable security-disabled error before opening a
+listener or initializing analytics or SQLite. The Vue source and web build are
+preserved, but they are not a supported path to the privileged Photoshop API.
+The UI will remain disabled until authenticated pairing and TLS are designed and
+implemented.
 
 ---
 
@@ -140,8 +121,8 @@ photoshop-mcp/
 │   ├── prompts/           # Instructions + prompt templates
 │   ├── errors/            # Structured error envelopes
 │   ├── analytics/         # Anonymous usage telemetry
-│   └── ui/                # Standalone UI server, agent, providers, store
-├── web/                   # Vue SPA (built to web/dist, bundled in npm)
+│   └── ui/                # Retired browser UI source and compatibility tombstone
+├── web/                   # Preserved Vue SPA source and build
 ├── docs/                  # Architecture, development, prompt layer, …
 ├── images/                # README screenshots, OG social preview
 ├── uxp-plugin/            # Optional UXP bridge for Neural Filters
@@ -156,8 +137,7 @@ photoshop-mcp/
 2. **State before action** — `photoshop_get_state` / `get_preview` / `get_capabilities` cheapen verification and vision checks.
 3. **Recipes over atomic chains** — fewer LLM turns, one undo per outcome.
 4. **Cross-platform parity** — same tool surface on macOS and Windows; platform quirks isolated in `src/platform/`.
-5. **Swappable AI providers** — registry pattern in `src/ui/providers/`; custom OpenAI-compatible endpoints supported.
-6. **Observable, not invasive** — analytics are anonymous and opt-out (`ANALYTICS_DISABLED=1`).
+5. **Observable, not invasive** — analytics are anonymous and opt-out (`ANALYTICS_DISABLED=1`).
 
 ---
 
@@ -174,7 +154,7 @@ photoshop-mcp/
 
 **Ali Sait Teke** — Full-Stack engineer and AI-era software architect (Python, Go, Node.js, React, Next.js, Vue).
 
-This project demonstrates end-to-end systems work: MCP protocol integration, cross-platform desktop automation, structured error design for LLM agents, and a production-minded local UI — built as open source for the creative-automation and developer-tools community.
+This project demonstrates end-to-end systems work: MCP protocol integration, cross-platform desktop automation, and structured error design for LLM agents — built as open source for the creative-automation and developer-tools community.
 
 - **Portfolio:** [alisait.com](https://alisait.com)
 - **GitHub:** [github.com/alisaitteke](https://github.com/alisaitteke)

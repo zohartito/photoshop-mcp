@@ -50,7 +50,11 @@ Neural Filters (`photoshop_neural_filter`) require the companion plugin in `uxp-
 1. Install [Adobe UXP Developer Tools](https://developer.adobe.com/photoshop/uxp/2022/guides/devtool/).
 2. **Load Plugin** → select the `uxp-plugin/` folder in this repo.
 3. Open the **MCP Bridge** panel in Photoshop (keeps polling the MCP server on `127.0.0.1:38452`).
-4. Start `photoshop-mcp` or the web UI — the server starts the bridge HTTP listener automatically.
+4. Start `photoshop-mcp` — the server starts the bridge HTTP listener automatically.
+
+The standalone browser UI is security-disabled pending authenticated pairing and
+TLS. `npm run dev:web` only serves the preserved frontend source; it is not a
+supported route to the privileged Photoshop API.
 
 Override port with `PHOTOSHOP_UXP_BRIDGE_PORT` (default `38452`).
 

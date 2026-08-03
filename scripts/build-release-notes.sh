@@ -44,9 +44,6 @@ CONTRIBUTORS="$(new_contributors "$PREV" "$TAG")"
   echo "# MCP server (Cursor, Claude Desktop, etc.)"
   echo "npx ${PKG}@${VERSION}"
   echo
-  echo "# Standalone web UI"
-  echo "npx -p ${PKG}@${VERSION} photoshop-mcp-ui"
-  echo
   echo "# Pin in package.json"
   echo "npm install ${PKG}@${VERSION}"
   echo '```'

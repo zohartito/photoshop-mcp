@@ -58,8 +58,9 @@ Twelve recipes in [`src/tools/recipes/`](../src/tools/recipes/), sharing
 [`src/tools/recipes/_shared.ts`](../src/tools/recipes/_shared.ts) (`executeRecipe`,
 `suspendHistory`, uniform `{ ok, summary, ... }` envelope).
 
-Export recipes write to `~/.photoshop-mcp/exports` (or `~/.photoshop-mcp/exports/<chat-id>`
-when the standalone UI passes `PHOTOSHOP_EXPORT_CHAT_ID` to the MCP child).
+Export recipes write to `~/.photoshop-mcp/exports`. The `PHOTOSHOP_EXPORT_CHAT_ID`
+path remains in dormant standalone-UI source; it is not a currently running
+integration because the standalone browser UI is security-disabled.
 
 ## 4. State & preview tools
 
