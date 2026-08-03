@@ -424,17 +424,6 @@ Save as vintage-photo.jpg.
 </details>
 
 <details>
-<summary>⚡ Custom Script Execution</summary>
-
-```
-Execute this custom ExtendScript code:
-app.beep();
-alert('Processing started!');
-```
-
-</details>
-
-<details>
 <summary>⏮️ Undo/Redo Operations</summary>
 
 ```
@@ -486,7 +475,7 @@ Never guess — read get_state after a failure and propose the next single step.
 - **Color Adjustments**: Brightness/Contrast, Hue/Saturation, Curves, Auto Levels/Contrast
 - **Selections & Masks**: Rectangular selections, select subject, content-aware fill, gradient mask, layer masks
 - **History Control**: Undo/Redo operations, view history states
-- **Actions**: Play recorded actions, execute custom scripts
+- **Actions**: Play recorded actions. Arbitrary caller-supplied scripts are intentionally unavailable for security; use supported atomic tools or recipes instead.
 - **Auto-Rasterize**: Automatically converts layers when needed for filters
 - **Context Tracking**: Returns document/layer state after each operation for AI context awareness
 

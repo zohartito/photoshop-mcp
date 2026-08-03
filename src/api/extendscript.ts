@@ -1757,13 +1757,6 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Execute custom JavaScript code
-   */
-  executeCustomScript: (code: string) => `
-    ${code}
-  `,
-
-  /**
    * Rasterize active layer
    */
   rasterizeLayer: () => `

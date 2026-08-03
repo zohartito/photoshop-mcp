@@ -494,7 +494,7 @@ List installed fonts available to Photoshop. First call may be slow (`app.fonts`
 
 **Returns:** `{ fonts: [{ name, postScriptName, family, style }], total, truncated }`
 
-Use `postScriptName` when setting fonts manually via `execute_script`; `photoshop_set_text_font` and `photoshop_create_text_layer` resolve display names automatically.
+`photoshop_set_text_font` and `photoshop_create_text_layer` accept display or PostScript font names and resolve them automatically.
 
 ```javascript
 // Example: Find Arial variants
@@ -713,18 +713,7 @@ photoshop_play_action({
 })
 ```
 
-#### `photoshop_execute_script`
-Execute custom ExtendScript code (advanced).
-
-**Parameters:**
-- `code` (string, required): ExtendScript code
-
-```javascript
-// Example: Execute custom code
-photoshop_execute_script({
-  code: "app.beep();"
-})
-```
+Arbitrary caller-supplied scripts are intentionally unavailable for security. Use recorded Actions, supported atomic tools, or recipes for automation.
 
 ### Image Manipulation
 

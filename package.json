@@ -37,6 +37,7 @@
     "test:intent-expansion": "tsx scripts/test-intent-expansion-local.ts",
     "test:extendscript-literals": "tsx scripts/test-extendscript-literals.ts",
     "test:extendscript-result": "tsx scripts/test-extendscript-result.ts",
+    "test:custom-script-disabled": "tsx scripts/test-custom-script-disabled.ts",
     "test:tool-input-validation": "tsx scripts/test-tool-input-validation.ts",
     "test:ui-origin-policy": "tsx scripts/test-ui-origin-policy.ts",
     "test:cli-account-capability-boundary": "tsx scripts/test-cli-account-capability-boundary.ts",

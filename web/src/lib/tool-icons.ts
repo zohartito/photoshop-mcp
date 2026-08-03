@@ -46,7 +46,6 @@ const EXACT_ICONS: Record<string, Component> = {
   photoshop_get_preview: Eye,
   photoshop_get_capabilities: Eye,
   photoshop_play_action: Play,
-  photoshop_execute_script: Play,
   photoshop_content_aware_fill: Eraser,
   photoshop_deselect: BoxSelect,
   photoshop_invert_selection: BoxSelect,
