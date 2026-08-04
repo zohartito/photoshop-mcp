@@ -42,6 +42,7 @@
     "test:cli-account-capability-boundary": "tsx scripts/test-cli-account-capability-boundary.ts",
     "test:gemini-env-settings": "tsx scripts/test-gemini-env-settings.ts",
     "test:p2-security": "tsx scripts/test-p2-security.ts",
+    "test:p3-security": "node scripts/test-uxp-execution-guard.mjs && node scripts/run-p3-security.mjs",
     "test:uxp-quarantine": "node scripts/test-uxp-execution-guard.mjs",
     "test:uxp-session-authority": "tsx scripts/test-uxp-session-authority.ts",
     "test:uxp-replay-tombstones": "tsx scripts/test-uxp-replay-tombstones.ts",

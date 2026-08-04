@@ -96,6 +96,12 @@ export const googleAdapter: ProviderAdapter = {
         cwd: invocation.cwd,
         env: invocation.env,
       });
+      if (result.outputLimitExceeded) {
+        return { ok: false, error: 'cli_output_limit_exceeded' };
+      }
+      if (result.timedOut) {
+        return { ok: false, error: 'cli_timeout' };
+      }
       if (result.exitCode === 41) {
         return { ok: false, error: 'not_authenticated' };
       }

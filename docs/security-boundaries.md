@@ -23,3 +23,20 @@ dispatched again because a Photoshop mutation may still be running. Only a bridg
 process restart followed by plugin reload and a fresh initial handshake clears quarantine;
 a plugin reload alone or late session cannot take ownership. Settled uncertain IDs become bounded
 TTL replay tombstones, so an exact late replay is rejected.
+
+Curves adjustment remains preset-only with static control points; no caller-supplied
+point array reaches sorting or generated ExtendScript.
+
+CLI-account validation treats executable output as untrusted: combined stdout
+and stderr capture stops at 64 KiB, closes both pipes, and terminates the child
+process tree with TERM followed by a short forced-kill escalation. POSIX probes
+run in an isolated process group; Windows resolves and validates the absolute
+`%SystemRoot%\System32\taskkill.exe`, then awaits bounded `/T` and `/F /T`
+tree commands before falling back to the leader. A final deadline resolves
+fail-closed even when descendants hold inherited pipes. An exceeded cap or
+timeout is a validation failure; partial output is never parsed as an account
+assertion.
+
+The release and release-note workflows hold write-capable GitHub permissions.
+All third-party actions in those workflows are pinned to reviewed, immutable
+commit IDs; update those pins only as a deliberate, reviewed maintenance change.

@@ -70,6 +70,12 @@ export const anthropicAdapter: ProviderAdapter = {
       };
     }
     const result = await runCommand(binary, ['auth', 'status'], { timeoutMs: 15_000 });
+    if (result.outputLimitExceeded) {
+      return { ok: false, error: 'cli_output_limit_exceeded' };
+    }
+    if (result.timedOut) {
+      return { ok: false, error: 'cli_timeout' };
+    }
     if (result.exitCode !== 0) {
       return { ok: false, error: 'not_authenticated' };
     }
