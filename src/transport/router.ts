@@ -5,7 +5,7 @@
  * Responsibilities the design pins to one place:
  *   - env override  PHOTOSHOP_MCP_TRANSPORT = extendscript | uxp | auto (default auto)
  *   - per-command pins (registry metadata, §4.3): neural filters → uxp;
- *     execute_script + preview/export → extendscript
+ *     internal recipe operations + preview/export → extendscript
  *   - capability gating (auto: preferred backend → isAvailable() → fall back)
  *   - ONE GLOBAL command queue across BOTH backends (§6.2): MacOSExecutor's FIFO
  *     only serializes the ExtendScript channel and executeAsModal only serializes
@@ -20,26 +20,27 @@
  * rewrite — tool names, schemas, descriptions, and error envelopes are untouched.
  */
 import type { PhotoshopConnection, PhotoshopInfo } from '../platform/connection.js';
+import { isUxpBridgeExecutionUncertain } from '../platform/uxp-bridge-server.js';
 import { ExtendScriptTransport } from './extendscript-transport.js';
 import { UxpTransport } from './uxp-transport.js';
-import type {
-  CommandMeta,
-  PhotoshopTransport,
-  PsCommand,
-  TransportId,
-} from './types.js';
+import type { CommandMeta, PhotoshopTransport, PsCommand, TransportId } from './types.js';
 
 export type TransportPreference = 'extendscript' | 'uxp' | 'auto';
 
+const MAX_QUEUED_COMMANDS = 32;
+const MAX_QUEUED_COMMAND_BYTES = 1024 * 1024;
+const DEFAULT_COMMAND_DEADLINE_MS = 120_000;
+const MAX_COMMAND_DEADLINE_MS = 120_000;
+
 /**
  * M2 routing table (§4.3, §6): 100% extendscript except the neural command,
- * which is uxp-pinned. execute_script and preview/export stay extendscript-pinned
- * (binary temp-file dance / escape hatch). Registered here as command metadata so
- * routing stays per-command — a global switch could not honor these pins.
+ * which is uxp-pinned. Internal recipe operations and preview/export stay
+ * extendscript-pinned. Registered here as command metadata so routing stays
+ * per-command — a global switch could not honor these pins.
  */
 const COMMAND_REGISTRY: Record<string, CommandMeta> = {
   neural_filter: { pin: 'uxp' },
-  execute_script: { pin: 'extendscript' },
+  extendscript_operation: { pin: 'extendscript' },
   get_preview: { pin: 'extendscript' },
   export_preview: { pin: 'extendscript' },
   save_document: { pin: 'extendscript' },
@@ -74,6 +75,8 @@ export class TransportRouter {
 
   /** The one global command queue (§6.2): a single serial tail all work awaits. */
   private queueTail: Promise<unknown> = Promise.resolve();
+  private queuedCommands = 0;
+  private queuedBytes = 0;
 
   constructor(connection: PhotoshopConnection) {
     this.extendscript = new ExtendScriptTransport(connection);
@@ -92,7 +95,11 @@ export class TransportRouter {
    * lives); pins/auto only matter for the command API below.
    */
   runScript(script: string, timeoutMs?: number): Promise<unknown> {
-    return this.enqueue(() => this.extendscript.runScript(script, timeoutMs));
+    return this.enqueue(
+      (remainingMs) => this.extendscript.runScript(script, remainingMs),
+      timeoutMs,
+      Buffer.byteLength(script)
+    );
   }
 
   getVersion(): Promise<string> {
@@ -111,10 +118,14 @@ export class TransportRouter {
 
   /** Route one command to its backend (pin → auto) and run it on the global queue. */
   run(command: PsCommand): Promise<unknown> {
-    return this.enqueue(async () => {
-      const transport = await this.selectBackend(command.name);
-      return transport.run(command);
-    });
+    return this.enqueue(
+      async (remainingMs) => {
+        const transport = await this.selectBackend(command.name);
+        return transport.run({ ...command, timeoutMs: remainingMs });
+      },
+      command.timeoutMs,
+      estimateCommandBytes(command)
+    );
   }
 
   /**
@@ -123,17 +134,27 @@ export class TransportRouter {
    * a single unit so nothing interleaves between the operation's commands.
    */
   runOperation(name: string, commands: PsCommand[]): Promise<unknown> {
-    return this.enqueue(async () => {
-      const backends = new Set<TransportId>();
-      for (const c of commands) backends.add(this.pinFor(c.name) ?? 'extendscript');
-      if (backends.size > 1) {
-        throw new Error(
-          `runOperation("${name}"): an operation cannot span backends (${[...backends].join(', ')})`
+    return this.enqueue(
+      async (remainingMs) => {
+        const backends = new Set<TransportId>();
+        for (const c of commands) backends.add(this.pinFor(c.name) ?? 'extendscript');
+        if (backends.size > 1) {
+          throw new Error(
+            `runOperation("${name}"): an operation cannot span backends (${[...backends].join(', ')})`
+          );
+        }
+        const transport = await this.selectBackend(commands[0]?.name ?? name);
+        return transport.runOperation(
+          name,
+          commands.map((command) => ({ ...command, timeoutMs: remainingMs }))
         );
-      }
-      const transport = await this.selectBackend(commands[0]?.name ?? name);
-      return transport.runOperation(name, commands);
-    });
+      },
+      undefined,
+      commands.reduce(
+        (total, command) => total + estimateCommandBytes(command),
+        Buffer.byteLength(name)
+      )
+    );
   }
 
   // --- routing internals ---
@@ -153,11 +174,12 @@ export class TransportRouter {
     if (this.preference === 'extendscript') return this.extendscript;
     if (this.preference === 'uxp') return this.uxp;
 
-    // auto: prefer ExtendScript (the default backend until M5 packaging), fall
-    // back to UXP only if ExtendScript is somehow unavailable but UXP is live.
+    // Auto mode never selects a disabled/unreachable backend. On macOS the
+    // ExtendScript executor is tombstoned, so only a live authenticated UXP
+    // peer may be selected.
     if (await this.extendscript.isAvailable()) return this.extendscript;
     if (await this.uxp.isAvailable()) return this.uxp;
-    return this.extendscript;
+    throw new Error('No live authenticated Photoshop transport is available.');
   }
 
   private transportById(id: TransportId): PhotoshopTransport {
@@ -170,12 +192,73 @@ export class TransportRouter {
    * chain continues with a resolved sentinel so one command's error never blocks
    * later commands (the old MacOSExecutor queue had the same property).
    */
-  private enqueue<T>(task: () => Promise<T>): Promise<T> {
-    const run = this.queueTail.then(task, task);
+  private enqueue<T>(
+    task: (remainingMs: number) => Promise<T>,
+    timeoutMs?: number,
+    bytes = 0
+  ): Promise<T> {
+    this.assertExecutionSafe();
+    const deadlineMs = normalizeDeadline(timeoutMs);
+    if (this.queuedCommands >= MAX_QUEUED_COMMANDS) {
+      return Promise.reject(
+        new Error(`Photoshop command queue is full (${MAX_QUEUED_COMMANDS} commands).`)
+      );
+    }
+    if (bytes > MAX_QUEUED_COMMAND_BYTES || this.queuedBytes + bytes > MAX_QUEUED_COMMAND_BYTES) {
+      return Promise.reject(new Error('Photoshop command queue byte budget is exhausted.'));
+    }
+    this.queuedCommands += 1;
+    this.queuedBytes += bytes;
+    const deadline = Date.now() + deadlineMs;
+    const runTask = async (): Promise<T> => {
+      this.assertExecutionSafe();
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        throw new Error('Photoshop command expired while waiting in the queue.');
+      }
+      // Both current backends receive this remaining deadline: ExtendScript
+      // passes it to the platform executor and UXP passes it to the bridge.
+      // A backend that cannot honor cancellation must fail rather than running
+      // after this deadline.
+      return task(remainingMs);
+    };
+    const run = this.queueTail.then(runTask, runTask);
     this.queueTail = run.then(
       () => undefined,
       () => undefined
     );
+    // Do not race a detached timer: it would reject the caller while leaving a
+    // mutation live. The dispatched backend gets the same remaining deadline,
+    // and admission remains occupied until its real completion/failure.
+    void run.then(
+      () => {
+        this.queuedCommands -= 1;
+        this.queuedBytes -= bytes;
+      },
+      () => {
+        this.queuedCommands -= 1;
+        this.queuedBytes -= bytes;
+      }
+    );
     return run;
   }
+
+  private assertExecutionSafe(): void {
+    if (isUxpBridgeExecutionUncertain()) {
+      throw new Error(
+        'Photoshop execution is quarantined after an uncertain UXP mutation. Restart the bridge process, then reload the authenticated UXP bridge plugin and complete a fresh handshake before sending more commands.'
+      );
+    }
+  }
+}
+
+function normalizeDeadline(timeoutMs: number | undefined): number {
+  if (timeoutMs === undefined) return DEFAULT_COMMAND_DEADLINE_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
+    throw new Error('Command timeout must be a positive finite number.');
+  return Math.min(timeoutMs, MAX_COMMAND_DEADLINE_MS);
+}
+
+function estimateCommandBytes(command: PsCommand): number {
+  return Buffer.byteLength(JSON.stringify(command.params ?? {}), 'utf8');
 }

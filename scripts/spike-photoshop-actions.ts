@@ -163,7 +163,7 @@ function wrapForExternalExecution(script: string): string {
       ${script}
     })();
     if (typeof result === 'object' && result !== null) {
-      return result.toSource ? result.toSource() : String(result);
+      return JSON.stringify(result);
     }
     return String(result);
   } catch (error) {
@@ -649,7 +649,9 @@ function parseProbePayload(raw: unknown): Omit<SpikeRow, 'ps_version_tested'> | 
   return parseProbeRecord(payload as Record<string, unknown>);
 }
 
-function parseProbeRecord(rec: Record<string, unknown>): Omit<SpikeRow, 'ps_version_tested'> | null {
+function parseProbeRecord(
+  rec: Record<string, unknown>
+): Omit<SpikeRow, 'ps_version_tested'> | null {
   const status = rec.status;
   if (status !== 'scriptable' && status !== 'partial' && status !== 'manual_only') return null;
   return {
@@ -715,9 +717,7 @@ async function main(): Promise<void> {
     ps_version: psVersion,
     probes: rows,
     winning_action_ids: Object.fromEntries(
-      rows
-        .filter((r) => r.status !== 'manual_only')
-        .map((r) => [r.action_id, r.descriptor])
+      rows.filter((r) => r.status !== 'manual_only').map((r) => [r.action_id, r.descriptor])
     ),
   };
 

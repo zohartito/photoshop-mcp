@@ -2,7 +2,6 @@ import type { ToolDefinition } from '../../core/tool-registry.js';
 import type { TransportRouter } from '../../transport/index.js';
 import { bindRemoveBackground } from './remove-background.js';
 import { bindEnhancePortrait } from './enhance-portrait.js';
-import { bindPrepareForWeb } from './prepare-for-web.js';
 import { bindExportSocialVariants } from './export-social-variants.js';
 import { bindApplyColorGrade } from './apply-color-grade.js';
 import { bindFrequencySeparation } from './frequency-separation.js';
@@ -17,7 +16,6 @@ export function createRecipeTools(transport: TransportRouter): ToolDefinition[] 
   return [
     bindRemoveBackground(transport),
     bindEnhancePortrait(transport),
-    bindPrepareForWeb(transport),
     bindExportSocialVariants(transport),
     bindApplyColorGrade(transport),
     bindFrequencySeparation(transport),
@@ -33,7 +31,6 @@ export function createRecipeTools(transport: TransportRouter): ToolDefinition[] 
 export const PHOTOSHOP_RECIPE_TOOL_NAMES = [
   'photoshop_recipe_remove_background',
   'photoshop_recipe_enhance_portrait',
-  'photoshop_recipe_prepare_for_web',
   'photoshop_recipe_export_social_variants',
   'photoshop_recipe_apply_color_grade',
   'photoshop_recipe_frequency_separation',

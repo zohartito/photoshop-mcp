@@ -2,7 +2,6 @@ import type { PromptRegistry } from '../core/prompt-registry.js';
 import { toPromptDefinition } from './_shared.js';
 import { enhancePortraitTemplate } from './templates/enhance-portrait.js';
 import { removeBackgroundTemplate } from './templates/remove-background.js';
-import { prepareForWebTemplate } from './templates/prepare-for-web.js';
 import { exportSocialVariantsTemplate } from './templates/export-social-variants.js';
 import { applyColorGradeTemplate } from './templates/apply-color-grade.js';
 import { frequencySeparationTemplate } from './templates/frequency-separation.js';
@@ -33,7 +32,6 @@ export const PHOTOSHOP_GUIDE_PROMPT_NAMES = [
 export const PHOTOSHOP_PROMPT_TEMPLATES = [
   enhancePortraitTemplate,
   removeBackgroundTemplate,
-  prepareForWebTemplate,
   exportSocialVariantsTemplate,
   applyColorGradeTemplate,
   frequencySeparationTemplate,

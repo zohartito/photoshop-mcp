@@ -4,12 +4,12 @@ Assets and copy for sharing this project on LinkedIn, GitHub, and other channels
 
 ## Open Graph image
 
-| Asset | Path | Size |
-| ----- | ---- | ---- |
-| Social preview | [`images/og-social.png`](../images/og-social.png) | 1200×630 (LinkedIn / GitHub recommended) |
-| README hero | [`images/readme-hero.png`](../images/readme-hero.png) | 1280×400 (GitHub README banner) |
+| Asset          | Path                                                  | Size                                     |
+| -------------- | ----------------------------------------------------- | ---------------------------------------- |
+| Social preview | [`images/og-social.png`](../images/og-social.png)     | 1200×630 (LinkedIn / GitHub recommended) |
+| README hero    | [`images/readme-hero.png`](../images/readme-hero.png) | 1280×400 (GitHub README banner)          |
 
-Branding matches [alisait.com](https://alisait.com): cyan logo gradient (`#06b6d4` → `#67e8f9`), Photoshop icon (`#001E36` / `#31A8FF`), and **Ali** + *said* footer text.
+Branding matches [alisait.com](https://alisait.com): cyan logo gradient (`#06b6d4` → `#67e8f9`), Photoshop icon (`#001E36` / `#31A8FF`), and **Ali** + _said_ footer text.
 
 ### GitHub repository social preview
 
@@ -39,13 +39,16 @@ When LLMs call Photoshop one command at a time, they burn tokens, guess layer ty
 
 **What I built (open source)**
 
-- **Photoshop MCP** — 80 tools + 12 recipe workflows (single-undo outcomes)
-- Cross-platform: macOS (AppleScript) + Windows (COM)
+- **Photoshop MCP** — 85 tools + 11 recipe workflows (single-undo outcomes)
+- Windows COM automation plus an optional authenticated macOS UXP bridge
 - MCP tools and recipe workflows for reliable Photoshop automation from supported AI hosts
 
 **Technical call**
 
-External automation can't invoke UXP plugins — only ExtendScript via AppleScript/COM. I chose compatibility across Photoshop 2012–2025 over bleeding-edge APIs. Structured error envelopes tell the agent which tool to call next when something fails.
+Windows external automation uses ExtendScript through COM. The macOS direct
+script-execution path is security-disabled; supported macOS UXP commands require
+the companion authenticated bridge plugin. Structured error envelopes tell the
+agent which tool to call next when something fails.
 
 **Links**
 
@@ -61,6 +64,6 @@ Feedback and contributors welcome. If your team builds agent tooling or creative
 
 Set in repository **About** sidebar:
 
-- **Description:** `MCP server for AI-driven Photoshop automation. 80 tools, recipe workflows, cross-platform.`
+- **Description:** `MCP server for AI-driven Photoshop automation. 85 tools, 11 recipes, 18 prompts.`
 - **Website:** `https://alisait.com`
 - **Topics:** `mcp`, `model-context-protocol`, `typescript`, `ai-agents`, `photoshop`, `automation`, `vue`, `hono`, `developer-tools`, `cursor`, `claude`, `extendscript`

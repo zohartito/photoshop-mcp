@@ -3,12 +3,7 @@ import { extname, isAbsolute, join } from 'node:path';
 import { ToolDefinition, ToolResult } from '../../core/tool-registry.js';
 import { resolveExportPath } from '../../lib/export-paths.js';
 import type { TransportRouter } from '../../transport/index.js';
-import {
-  clampInt,
-  executeRecipe,
-  jsString,
-  toolFailure,
-} from './_shared.js';
+import { clampInt, executeRecipe, jsString, toolFailure } from './_shared.js';
 
 const TOOL_NAME = 'photoshop_recipe_batch_mockup_replace';
 
@@ -22,6 +17,9 @@ const SUPPORTED_ASSET_EXTS = new Set([
   '.psb',
   '.webp',
 ]);
+const MAX_BATCH_ASSETS = 32;
+const MAX_BATCH_ASSET_BYTES = 256 * 1024 * 1024;
+const MAX_BATCH_SCRIPT_BYTES = 1024 * 1024;
 
 export function bindBatchMockupReplace(transport: TransportRouter): ToolDefinition {
   return {
@@ -120,6 +118,35 @@ async function runBatchMockupReplace(
       message: `No supported assets in ${assetsDir}. Supported: ${[...SUPPORTED_ASSET_EXTS].join(', ')}`,
     });
   }
+  if (assets.length > MAX_BATCH_ASSETS) {
+    return toolFailure({
+      ok: false,
+      code: 'resource_limit',
+      message: `Batch mockup replacement is limited to ${MAX_BATCH_ASSETS} assets per invocation. Split the directory into smaller batches.`,
+    });
+  }
+
+  let aggregateBytes = 0;
+  try {
+    for (const asset of assets) {
+      const assetStat = await stat(asset);
+      if (!assetStat.isFile()) continue;
+      aggregateBytes += assetStat.size;
+      if (aggregateBytes > MAX_BATCH_ASSET_BYTES) {
+        return toolFailure({
+          ok: false,
+          code: 'resource_limit',
+          message: `Batch assets exceed the ${MAX_BATCH_ASSET_BYTES / (1024 * 1024)} MiB aggregate limit. Split the batch.`,
+        });
+      }
+    }
+  } catch (error) {
+    return toolFailure({
+      ok: false,
+      code: 'file_not_found',
+      message: `Cannot inspect batch assets: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
 
   const variantsLiteral = assets
     .map((assetPath) => {
@@ -128,6 +155,14 @@ async function runBatchMockupReplace(
       return `{ asset: "${jsString(assetPath)}", base: "${jsString(baseName)}", out: "${jsString(outPath)}" }`;
     })
     .join(', ');
+
+  if (Buffer.byteLength(variantsLiteral, 'utf8') > MAX_BATCH_SCRIPT_BYTES) {
+    return toolFailure({
+      ok: false,
+      code: 'resource_limit',
+      message: 'Batch command exceeds the generated-script size limit.',
+    });
+  }
 
   const body = `
     var doc = app.activeDocument;

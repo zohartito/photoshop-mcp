@@ -1,27 +1,12 @@
-/**
- * MCP-hosted UXP bridge server — companion Photoshop plugin polls for commands.
- * See docs/plans/2026-07-03-1149-photoshop-ai-features/ and uxp-plugin/.
- *
- * M3 (docs/design/transport-layer.md §6.7, §6.9) hardens delivery on the SAME
- * HTTP long-poll channel §7 keeps (no WebSocket):
- *   - Handshake file (§6.7): the server auto-increments its port on EADDRINUSE,
- *     but the plugin cannot guess the resulting port. On listen we write the real
- *     port to a well-known temp file the plugin reads each poll cycle, killing the
- *     silent-disconnect port drift. Fail-loud was rejected: refusing to increment
- *     would take the whole in-process MCP server (and backend A, the default path)
- *     down whenever a stale process holds 38452.
- *   - Lease-on-poll with requeue (§6.9): GET /poll used to `shift()` the command
- *     off the queue before the plugin acknowledged running it, so a plugin crash
- *     after fetch silently lost the command and the caller burned the full timeout.
- *     Now a poll LEASES the command (moves it to `leased`); the plugin's POST
- *     /result is the ack. A lease with no result older than LEASE_TTL_MS is
- *     requeued on the next poll so another poll cycle re-delivers it.
- */
-import { createServer, type Server } from 'node:http';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+/** Authenticated, bounded localhost bridge for the optional UXP plugin. */
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Logger } from '../utils/logger.js';
+import { UxpBridgeSessionAuthority } from './uxp-bridge-session.js';
+import { UxpReplayTombstones } from './uxp-replay-tombstones.js';
 
 const logger = new Logger('UxpBridgeServer');
 
@@ -38,56 +23,59 @@ export interface UxpBridgeResult {
   error?: string;
 }
 
-/** A command handed to the plugin on /poll, awaiting a /result ack (§6.9). */
 interface LeasedCommand {
   command: UxpBridgeCommand;
   leasedAt: number;
+  deadline: number;
+  bytes: number;
+  ownerSession: string;
+  uncertain: boolean;
 }
 
+interface PendingCommand {
+  command: UxpBridgeCommand;
+  deadline: number;
+  bytes: number;
+}
+
+interface RetainedResult {
+  result: UxpBridgeResult;
+  bytes: number;
+}
+
+export const UXP_BRIDGE_PROTOCOL_VERSION = 4;
 const DEFAULT_PORT = Number.parseInt(process.env.PHOTOSHOP_UXP_BRIDGE_PORT ?? '38452', 10);
-
-/**
- * Handshake-file path (§6.7). Under the user's HOME, not the OS temp dir: UXP's
- * manifest-v5 `os` shim has no `tmpdir()` (macOS temp dirs are per-user randomized
- * and unguessable without it — the v1.0 plugin crashed at load on exactly this),
- * while `os.homedir()` survives in UXP. Both sides resolve the same fixed path.
- */
 const HANDSHAKE_FILE = join(homedir(), '.photoshop-mcp', 'bridge.json');
-
-/**
- * How long a leased-but-unacked command may sit before it is requeued (§6.9). The
- * plugin loop is ~400ms and a batchPlay descriptor set is normally sub-second;
- * ~10s tolerates a slow neural filter or generative step without prematurely
- * re-delivering (which would double-apply). The per-command timeout in
- * `invokeUxpBridge` still bounds total wait; this only governs requeue-on-crash.
- */
-const LEASE_TTL_MS = 10_000;
+const MAX_EXECUTION_MS = 120_000;
+const ACK_MARGIN_MS = 5_000;
+const MAX_COMMANDS = 32;
+const MAX_COMMAND_BYTES = 256 * 1024;
+const MAX_PENDING_LEASED_BYTES = 1024 * 1024;
+const MAX_RESULT_BYTES = 256 * 1024;
+const MAX_RETAINED_RESULT_BYTES = 1024 * 1024;
+const MAX_REPLAY_TOMBSTONES = 64;
+const MAX_REPLAY_TOMBSTONE_BYTES = 16 * 1024;
+const REPLAY_TOMBSTONE_TTL_MS = 5 * 60_000;
 
 let server: Server | null = null;
+let starting: Promise<number> | null = null;
 let listenPort = DEFAULT_PORT;
-const pendingCommands: UxpBridgeCommand[] = [];
-const leased = new Map<string, LeasedCommand>();
-const results = new Map<string, UxpBridgeResult>();
-
-/**
- * Epoch-ms of the last time the UXP plugin hit `GET /poll`. Zero ⇒ never polled.
- * The in-process HTTP server always answers `/health`, which proves the SERVER is
- * up but says nothing about the plugin; a truthful "plugin connected" signal is a
- * recent poll (docs/design/transport-layer.md §4.1, Codex finding #3).
- */
+let bridgeToken: string | null = null;
+let bridgeExecutionUncertain = false;
 let lastPollAt = 0;
+let retainedResultBytes = 0;
+const pendingCommands: PendingCommand[] = [];
+const leased = new Map<string, LeasedCommand>();
+const results = new Map<string, RetainedResult>();
+const sessionAuthority = new UxpBridgeSessionAuthority();
+const replayTombstones = new UxpReplayTombstones(
+  MAX_REPLAY_TOMBSTONES,
+  MAX_REPLAY_TOMBSTONE_BYTES,
+  REPLAY_TOMBSTONE_TTL_MS
+);
 
 export function getUxpBridgeLastPollAt(): number {
   return lastPollAt;
-}
-
-function json(res: import('node:http').ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Content-Length': Buffer.byteLength(payload),
-  });
-  res.end(payload);
 }
 
 export function getUxpBridgePort(): number {
@@ -98,121 +86,277 @@ export function getUxpBridgeHandshakePath(): string {
   return HANDSHAKE_FILE;
 }
 
-/**
- * Write the handshake file so the plugin can discover the actual bound port (§6.7).
- * Best-effort: a write failure must not stop the server from serving — it only
- * degrades the plugin back to guessing the default port.
- */
+/** A timed-out UXP mutation is unsafe until bridge restart, plugin reload, and fresh handshake. */
+export function isUxpBridgeExecutionUncertain(): boolean {
+  return bridgeExecutionUncertain;
+}
+
+function json(res: ServerResponse, status: number, body: unknown): void {
+  const payload = JSON.stringify(body);
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Content-Length': Buffer.byteLength(payload),
+  });
+  res.end(payload);
+}
+
+function bridgeCommandCount(): number {
+  // Uncertain ids are terminal notices for callers, not live work. Counting
+  // them would let an old plugin reload permanently exhaust a fresh session.
+  return pendingCommands.length + leased.size + results.size;
+}
+
+function pendingAndLeasedBytes(): number {
+  let bytes = 0;
+  for (const entry of pendingCommands) bytes += entry.bytes;
+  for (const entry of leased.values()) bytes += entry.bytes;
+  return bytes;
+}
+
 function writeHandshakeFile(): void {
   try {
-    mkdirSync(join(homedir(), '.photoshop-mcp'), { recursive: true });
+    mkdirSync(join(homedir(), '.photoshop-mcp'), { recursive: true, mode: 0o700 });
     writeFileSync(
       HANDSHAKE_FILE,
-      JSON.stringify({ port: listenPort, pid: process.pid, startedAt: Date.now() }),
-      'utf8'
+      JSON.stringify({
+        protocolVersion: UXP_BRIDGE_PROTOCOL_VERSION,
+        port: listenPort,
+        token: bridgeToken,
+        pid: process.pid,
+        startedAt: Date.now(),
+      }),
+      { encoding: 'utf8', mode: 0o600 }
     );
-  } catch (err) {
-    logger.warn(`Could not write bridge handshake file ${HANDSHAKE_FILE}: ${String(err)}`);
+    chmodSync(HANDSHAKE_FILE, 0o600);
+  } catch (error) {
+    logger.warn(`Could not write authenticated UXP handshake: ${String(error)}`);
   }
 }
 
-/**
- * Requeue any leased command whose ack (POST /result) never arrived within
- * LEASE_TTL_MS (§6.9). Called on every poll so a crashed-after-fetch command gets
- * re-delivered on a later poll instead of being lost. If a result did land, the
- * lease is simply dropped (the command is done).
- */
-function reclaimExpiredLeases(now: number): void {
+function isAuthenticated(req: IncomingMessage): boolean {
+  const supplied = req.headers.authorization;
+  if (!bridgeToken || typeof supplied !== 'string') return false;
+  const expected = Buffer.from(`Bearer ${bridgeToken}`);
+  const received = Buffer.from(supplied);
+  return expected.length === received.length && timingSafeEqual(expected, received);
+}
+
+/** Read, but do not establish or mutate, a presented plugin session id. */
+function readPluginSession(req: IncomingMessage): string | null {
+  const session = req.headers['x-photoshop-mcp-session'];
+  if (typeof session !== 'string' || session.length < 16 || session.length > 256) return null;
+  return session;
+}
+
+function markExecutionUncertain(id: string, reason: string): void {
+  const entry = leased.get(id);
+  if (entry) entry.uncertain = true;
+  bridgeExecutionUncertain = true;
+  logger.warn(`UXP command ${id} is execution-uncertain (${reason}); bridge is quarantined.`);
+}
+
+function expireLeases(now: number): void {
   for (const [id, entry] of leased) {
-    if (results.has(id)) {
-      leased.delete(id);
-      continue;
-    }
-    if (now - entry.leasedAt >= LEASE_TTL_MS) {
-      leased.delete(id);
-      pendingCommands.unshift(entry.command);
-      logger.warn(`Requeued unacked UXP command ${id} (${entry.command.action}) after lease expiry`);
-    }
+    if (now < entry.deadline || entry.uncertain) continue;
+    // A Photoshop mutation may still be running. Keep the lease solely so a
+    // later real settlement can receive its exact terminal acknowledgement;
+    // never redeliver it and quarantine all subsequent commands meanwhile.
+    markExecutionUncertain(id, 'lease_deadline_exceeded');
   }
+}
+
+async function readBoundedJson(
+  req: IncomingMessage
+): Promise<{ body?: UxpBridgeResult; error?: string }> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let oversized = false;
+    req.on('data', (chunk: Buffer) => {
+      if (oversized) return;
+      bytes += chunk.length;
+      if (bytes > MAX_RESULT_BYTES) {
+        oversized = true;
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('error', () => resolve({ error: 'invalid_body' }));
+    req.on('end', () => {
+      if (oversized) return resolve({ error: 'result_too_large' });
+      try {
+        resolve({
+          body: JSON.parse(Buffer.concat(chunks, bytes).toString('utf8')) as UxpBridgeResult,
+        });
+      } catch {
+        resolve({ error: 'invalid_json' });
+      }
+    });
+  });
+}
+
+function removeResult(id: string): UxpBridgeResult | undefined {
+  const entry = results.get(id);
+  if (!entry) return undefined;
+  results.delete(id);
+  retainedResultBytes -= entry.bytes;
+  return entry.result;
+}
+
+function handleRequest(req: IncomingMessage, res: ServerResponse): void {
+  const url = new URL(req.url ?? '/', `http://127.0.0.1:${listenPort}`);
+  if (req.method === 'GET' && url.pathname === '/health') {
+    json(res, 200, {
+      ok: true,
+      commands: bridgeCommandCount(),
+      retainedResultBytes,
+      executionUncertain: bridgeExecutionUncertain,
+    });
+    return;
+  }
+  if (!isAuthenticated(req)) {
+    json(res, 401, { ok: false, error: 'unauthorized' });
+    return;
+  }
+  const requestedSession = readPluginSession(req);
+  if (!requestedSession) {
+    json(res, 400, { ok: false, error: 'missing_or_invalid_plugin_session' });
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/handshake') {
+    if (!sessionAuthority.establishInitial(requestedSession, bridgeExecutionUncertain)) {
+      json(res, 409, { ok: false, error: 'bridge_session_already_owned_or_quarantined' });
+      return;
+    }
+    json(res, 200, {
+      ok: true,
+      sessionId: requestedSession,
+      protocolVersion: UXP_BRIDGE_PROTOCOL_VERSION,
+    });
+    return;
+  }
+  if (!sessionAuthority.isCurrent(requestedSession)) {
+    // A superseded, late, or never-handshaken session must have zero effects:
+    // no liveness update, lease mutation, or quarantine reset.
+    json(res, 409, { ok: false, error: 'stale_or_unowned_plugin_session' });
+    return;
+  }
+  const session = requestedSession;
+  if (req.method === 'GET' && url.pathname === '/poll') {
+    const now = Date.now();
+    lastPollAt = now;
+    expireLeases(now);
+    if (bridgeExecutionUncertain) {
+      json(res, 423, { ok: false, error: 'uxp_bridge_session_quarantined' });
+      return;
+    }
+    let pending = pendingCommands.shift();
+    while (pending && now >= pending.deadline) {
+      // Not dispatched; the caller's single command deadline will return a
+      // normal timeout, and this stale entry never reaches Photoshop.
+      pending = pendingCommands.shift();
+    }
+    if (!pending) {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    leased.set(pending.command.id, {
+      command: pending.command,
+      leasedAt: now,
+      deadline: pending.deadline,
+      bytes: pending.bytes,
+      ownerSession: session,
+      uncertain: false,
+    });
+    json(res, 200, pending.command);
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/uncertain') {
+    void readBoundedJson(req).then(({ body, error }) => {
+      const lease = body?.id ? leased.get(body.id) : undefined;
+      if (error || !body?.id || !lease || lease.ownerSession !== session) {
+        json(res, 409, { ok: false, error: error ?? 'unknown_or_unleased_command' });
+        return;
+      }
+      markExecutionUncertain(body.id, 'plugin_watchdog_expired');
+      json(res, 200, { ok: true, id: body.id, protocolVersion: UXP_BRIDGE_PROTOCOL_VERSION });
+    });
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/result') {
+    void readBoundedJson(req).then(({ body, error }) => {
+      if (error) {
+        json(res, error === 'result_too_large' ? 413 : 400, { ok: false, error });
+        return;
+      }
+      const lease = body?.id ? leased.get(body.id) : undefined;
+      if (!body?.id || !lease || lease.ownerSession !== session || results.has(body.id)) {
+        json(res, 409, {
+          ok: false,
+          error:
+            body?.id && replayTombstones.has(body.id)
+              ? 'replayed_terminal_result'
+              : 'unknown_or_unleased_command',
+        });
+        return;
+      }
+      if (
+        typeof body.ok !== 'boolean' ||
+        (body.error !== undefined && typeof body.error !== 'string')
+      ) {
+        json(res, 400, { ok: false, error: 'invalid_result' });
+        return;
+      }
+      const bytes = Buffer.byteLength(JSON.stringify(body));
+      if (bytes > MAX_RESULT_BYTES || retainedResultBytes + bytes > MAX_RETAINED_RESULT_BYTES) {
+        json(res, 413, { ok: false, error: 'result_capacity_exhausted' });
+        return;
+      }
+      leased.delete(body.id);
+      if (lease.uncertain) {
+        // The caller was already told execution is uncertain. The plugin may
+        // still acknowledge its real late settlement, but it cannot turn the
+        // session back into a dispatchable state.
+        replayTombstones.add(body.id);
+        json(res, 200, { ok: true, id: body.id, protocolVersion: UXP_BRIDGE_PROTOCOL_VERSION });
+        return;
+      }
+      results.set(body.id, { result: body, bytes });
+      retainedResultBytes += bytes;
+      json(res, 200, { ok: true, id: body.id, protocolVersion: UXP_BRIDGE_PROTOCOL_VERSION });
+    });
+    return;
+  }
+  json(res, 404, { ok: false, error: 'not_found' });
 }
 
 export async function ensureUxpBridgeServer(): Promise<number> {
   if (server) return listenPort;
-
-  return new Promise((resolve, reject) => {
-    const s = createServer((req, res) => {
-      const url = new URL(req.url ?? '/', `http://127.0.0.1:${listenPort}`);
-
-      if (req.method === 'GET' && url.pathname === '/health') {
-        json(res, 200, { ok: true, pending: pendingCommands.length, leased: leased.size });
-        return;
-      }
-
-      if (req.method === 'GET' && url.pathname === '/poll') {
-        // A poll is the plugin's liveness heartbeat — record it even when the
-        // queue is empty so isAvailable() reflects a connected-but-idle plugin.
-        const now = Date.now();
-        lastPollAt = now;
-        // Requeue anything the plugin fetched but never acked (§6.9) before we
-        // hand out the next command, so a lost command re-enters the queue.
-        reclaimExpiredLeases(now);
-        const cmd = pendingCommands.shift();
-        if (!cmd) {
-          res.writeHead(204);
-          res.end();
-          return;
-        }
-        // Lease instead of drop: the command is only truly consumed once the
-        // plugin POSTs /result for its id (§6.9).
-        leased.set(cmd.id, { command: cmd, leasedAt: now });
-        json(res, 200, cmd);
-        return;
-      }
-
-      if (req.method === 'POST' && url.pathname === '/result') {
-        let body = '';
-        req.on('data', (chunk) => {
-          body += chunk;
-        });
-        req.on('end', () => {
-          try {
-            const parsed = JSON.parse(body) as UxpBridgeResult;
-            if (parsed?.id) {
-              results.set(parsed.id, parsed);
-              // The result IS the ack — the lease is satisfied (§6.9).
-              leased.delete(parsed.id);
-            }
-            json(res, 200, { ok: true });
-          } catch {
-            json(res, 400, { ok: false, error: 'invalid_json' });
-          }
-        });
-        return;
-      }
-
-      json(res, 404, { ok: false, error: 'not_found' });
-    });
-
-    s.listen(listenPort, '127.0.0.1', () => {
-      server = s;
-      const addr = s.address();
-      if (addr && typeof addr === 'object') {
-        listenPort = addr.port;
-      }
+  if (starting) return starting;
+  bridgeToken = randomBytes(32).toString('base64url');
+  starting = new Promise<number>((resolve, reject) => {
+    const candidate = createServer(handleRequest);
+    const fail = (error: Error) => {
+      bridgeToken = null;
+      reject(error);
+    };
+    candidate.once('error', fail);
+    candidate.listen(listenPort, '127.0.0.1', () => {
+      candidate.removeListener('error', fail);
+      server = candidate;
+      const address = candidate.address();
+      if (address && typeof address === 'object') listenPort = address.port;
       writeHandshakeFile();
-      logger.info(`UXP bridge listening on 127.0.0.1:${listenPort} (handshake ${HANDSHAKE_FILE})`);
+      logger.info(`Authenticated UXP bridge listening on 127.0.0.1:${listenPort}`);
       resolve(listenPort);
     });
-
-    s.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        listenPort += 1;
-        s.listen(listenPort, '127.0.0.1');
-        return;
-      }
-      reject(err);
-    });
   });
+  try {
+    return await starting;
+  } finally {
+    starting = null;
+  }
 }
 
 export async function invokeUxpBridge(
@@ -221,35 +365,77 @@ export async function invokeUxpBridge(
   timeoutMs = 60_000
 ): Promise<UxpBridgeResult> {
   await ensureUxpBridgeServer();
-  const id = `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  pendingCommands.push({ id, action, params });
-
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const hit = results.get(id);
-    if (hit) {
-      results.delete(id);
-      return hit;
-    }
-    await new Promise((r) => setTimeout(r, 250));
+  if (bridgeExecutionUncertain) {
+    return { id: '', ok: false, error: 'uxp_bridge_session_quarantined' };
   }
-
-  // Timed out: stop tracking this command so a late poll cannot re-lease it and a
-  // late result cannot pile up unread. The caller sees a normal timeout error.
-  const idx = pendingCommands.findIndex((c) => c.id === id);
-  if (idx >= 0) pendingCommands.splice(idx, 1);
-  leased.delete(id);
-  results.delete(id);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_EXECUTION_MS) {
+    return { id: '', ok: false, error: 'invalid_timeout' };
+  }
+  const id = `cmd-${randomBytes(16).toString('hex')}`;
+  const command: UxpBridgeCommand = { id, action, params };
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(command);
+  } catch {
+    return { id, ok: false, error: 'uxp_bridge_command_not_serializable' };
+  }
+  const bytes = Buffer.byteLength(serialized, 'utf8');
+  if (bytes > MAX_COMMAND_BYTES) {
+    return { id: '', ok: false, error: 'uxp_bridge_command_too_large' };
+  }
+  if (
+    bridgeCommandCount() >= MAX_COMMANDS ||
+    pendingAndLeasedBytes() + bytes > MAX_PENDING_LEASED_BYTES
+  ) {
+    return { id: '', ok: false, error: 'uxp_bridge_overloaded' };
+  }
+  // The one command deadline covers its maximum 120s Photoshop execution plus
+  // a bounded authenticated acknowledgement window. No lease has an unrelated
+  // short TTL that can reject a legitimate neural filter.
+  const deadline = Date.now() + timeoutMs + ACK_MARGIN_MS;
+  pendingCommands.push({ command, deadline, bytes });
+  while (Date.now() < deadline) {
+    const result = removeResult(id);
+    if (result) return result;
+    if (leased.get(id)?.uncertain || replayTombstones.has(id)) {
+      return { id, ok: false, error: 'uxp_bridge_execution_uncertain' };
+    }
+    if (bridgeExecutionUncertain) {
+      const pendingIndex = pendingCommands.findIndex((entry) => entry.command.id === id);
+      if (pendingIndex >= 0) pendingCommands.splice(pendingIndex, 1);
+      return { id, ok: false, error: 'uxp_bridge_session_quarantined' };
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(250, deadline - Date.now())));
+  }
+  const pendingIndex = pendingCommands.findIndex((entry) => entry.command.id === id);
+  if (pendingIndex >= 0) pendingCommands.splice(pendingIndex, 1);
+  if (leased.has(id)) {
+    markExecutionUncertain(id, 'caller_deadline_exceeded');
+    return { id, ok: false, error: 'uxp_bridge_execution_uncertain' };
+  }
+  if (replayTombstones.has(id)) {
+    return { id, ok: false, error: 'uxp_bridge_execution_uncertain' };
+  }
+  removeResult(id);
   return { id, ok: false, error: 'uxp_bridge_timeout' };
 }
 
 export async function shutdownUxpBridgeServer(): Promise<void> {
-  if (!server) return;
-  await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (starting) await starting.catch(() => undefined);
+  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
   server = null;
+  pendingCommands.length = 0;
+  leased.clear();
+  results.clear();
+  replayTombstones.clear();
+  retainedResultBytes = 0;
+  bridgeToken = null;
+  sessionAuthority.clearForProcessShutdown();
+  bridgeExecutionUncertain = false;
+  lastPollAt = 0;
   try {
     rmSync(HANDSHAKE_FILE, { force: true });
   } catch {
-    // Handshake file cleanup is best-effort.
+    // Best-effort cleanup only.
   }
 }

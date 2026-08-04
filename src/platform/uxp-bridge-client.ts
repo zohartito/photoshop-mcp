@@ -5,6 +5,7 @@ import {
   ensureUxpBridgeServer,
   getUxpBridgeLastPollAt,
   invokeUxpBridge,
+  isUxpBridgeExecutionUncertain,
 } from './uxp-bridge-server.js';
 
 /**
@@ -17,6 +18,7 @@ import {
 const POLL_FRESHNESS_MS = 2_000;
 
 export async function isUxpBridgeReachable(): Promise<boolean> {
+  if (isUxpBridgeExecutionUncertain()) return false;
   try {
     await ensureUxpBridgeServer();
   } catch {
@@ -38,7 +40,7 @@ export async function invokeNeuralFilter(
   filter: NeuralFilterKind,
   params: NeuralFilterParams = {}
 ): Promise<{ ok: boolean; data?: unknown; error?: string }> {
-  const result = await invokeUxpBridge('neural_filter', { filter, ...params }, 90_000);
+  const result = await invokeUxpBridge('neural_filter', { filter, ...params }, 120_000);
   if (!result.ok) {
     return { ok: false, error: result.error ?? 'neural_filter_failed' };
   }

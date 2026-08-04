@@ -1,4 +1,4 @@
-import { exec, spawn } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
@@ -8,11 +8,19 @@ import { parseExtendScriptPayload } from '../utils/extendscript-result.js';
 import { Logger } from '../utils/logger.js';
 import { ScriptExecutor } from './script-executor.js';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+interface QueuedScript {
+  script: string;
+  deadline: number;
+  settled: boolean;
+  resolve: (result: unknown) => void;
+  reject: (error: Error) => void;
+}
 
 export class WindowsExecutor implements ScriptExecutor {
   private logger: Logger;
-  private scriptQueue: Array<() => Promise<unknown>> = [];
+  private scriptQueue: QueuedScript[] = [];
   private isProcessing = false;
 
   constructor() {
@@ -20,23 +28,41 @@ export class WindowsExecutor implements ScriptExecutor {
   }
 
   async execute(script: string, timeout: number = 30000): Promise<unknown> {
+    if (!Number.isFinite(timeout) || timeout <= 0) {
+      return Promise.reject(new Error('Script execution timeout must be a positive finite number'));
+    }
     return new Promise((resolve, reject) => {
+      const task: QueuedScript = {
+        script,
+        deadline: Date.now() + timeout,
+        settled: false,
+        resolve,
+        reject,
+      };
       const timeoutId = setTimeout(() => {
+        if (task.settled) return;
+        task.settled = true;
+        const index = this.scriptQueue.indexOf(task);
+        if (index >= 0) this.scriptQueue.splice(index, 1);
         reject(new Error('Script execution timeout'));
       }, timeout);
-
-      this.scriptQueue.push(async () => {
-        try {
-          const result = await this.executeScript(script);
-          clearTimeout(timeoutId);
-          resolve(result);
-          return result;
-        } catch (error) {
-          clearTimeout(timeoutId);
-          reject(error);
-          throw error;
+      const originalResolve = task.resolve;
+      const originalReject = task.reject;
+      task.resolve = (result) => {
+        clearTimeout(timeoutId);
+        if (!task.settled) {
+          task.settled = true;
+          originalResolve(result);
         }
-      });
+      };
+      task.reject = (error) => {
+        clearTimeout(timeoutId);
+        if (!task.settled) {
+          task.settled = true;
+          originalReject(error);
+        }
+      };
+      this.scriptQueue.push(task);
 
       this.processQueue();
     });
@@ -53,8 +79,14 @@ export class WindowsExecutor implements ScriptExecutor {
       const task = this.scriptQueue.shift();
       if (task) {
         try {
-          await task();
+          if (task.settled || Date.now() >= task.deadline) {
+            task.reject(new Error('Script execution timeout'));
+            continue;
+          }
+          const result = await this.executeScript(task.script, task.deadline - Date.now());
+          task.resolve(result);
         } catch (error) {
+          task.reject(error instanceof Error ? error : new Error(String(error)));
           this.logger.error('Script execution failed:', error);
         }
       }
@@ -63,24 +95,27 @@ export class WindowsExecutor implements ScriptExecutor {
     this.isProcessing = false;
   }
 
-  private async executeScript(script: string): Promise<unknown> {
+  private async executeScript(script: string, timeout: number): Promise<unknown> {
     // For Windows, we'll use a combination of VBScript/JScript to communicate with Photoshop via COM
     // Write script to temporary file
     const tempScriptPath = join(tmpdir(), `photoshop-script-${Date.now()}.jsx`);
-    
+
     try {
       await writeFile(tempScriptPath, prefixExtendScriptBom(script), 'utf8');
 
       // Use VBScript to execute the JSX script via COM
       const vbsScript = this.createVBSWrapper(tempScriptPath);
       const vbsPath = join(tmpdir(), `photoshop-vbs-${Date.now()}.vbs`);
-      
+
       await writeFile(vbsPath, vbsScript, 'utf8');
 
       try {
         // Execute VBScript
-        const { stdout, stderr } = await execAsync(`cscript //nologo "${vbsPath}"`);
-        
+        const { stdout, stderr } = await execFileAsync('cscript', ['//nologo', vbsPath], {
+          timeout,
+          windowsHide: true,
+        });
+
         if (stderr) {
           this.logger.warn('Script execution warning:', stderr);
         }
@@ -123,7 +158,7 @@ End If
 
   private parseResult(output: string): unknown {
     const trimmed = output.trim();
-    
+
     // Check for error
     if (trimmed.startsWith('ERROR:')) {
       throw new Error(trimmed.substring(6).trim());
@@ -134,7 +169,9 @@ End If
 
   async isPhotoshopRunning(): Promise<boolean> {
     try {
-      const { stdout } = await execAsync('tasklist /FI "IMAGENAME eq Photoshop.exe"');
+      const { stdout } = await execFileAsync('tasklist', ['/FI', 'IMAGENAME eq Photoshop.exe'], {
+        windowsHide: true,
+      });
       return stdout.toLowerCase().includes('photoshop.exe');
     } catch {
       return false;

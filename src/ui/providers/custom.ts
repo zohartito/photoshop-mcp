@@ -3,9 +3,7 @@
  * Reads endpoint, models, and credentials from `UIConfig.customProvider`.
  * See docs/plans/2026-06-26-1250-custom-api-provider-pr3/ (cap-phase-0-cherry-pick.md).
  */
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createOpenAI } from '@ai-sdk/openai';
-import { getCustomProvider } from '../config.js';
+import { CUSTOM_PROVIDER_DISABLED_MESSAGE, getCustomProvider } from '../config.js';
 import type { ProviderAdapter, ProviderModel } from './types.js';
 
 export const customAdapter: ProviderAdapter = {
@@ -21,29 +19,10 @@ export const customAdapter: ProviderAdapter = {
     return getCustomProvider()?.websiteUrl || '';
   },
   validateApiKeyFormat(_key: string) {
-    return true;
+    return false;
   },
-  async validateApiKey(key: string) {
-    const cfg = getCustomProvider();
-    if (!cfg) return { ok: false, error: 'Custom provider not configured' };
-    try {
-      const url =
-        cfg.apiFormat === 'anthropic'
-          ? `${cfg.baseUrl.replace(/\/+$/, '')}/v1/models?limit=1`
-          : `${cfg.baseUrl.replace(/\/+$/, '')}/models`;
-      const headers: Record<string, string> =
-        cfg.apiFormat === 'anthropic'
-          ? { 'x-api-key': key, 'anthropic-version': '2023-06-01' }
-          : { Authorization: `Bearer ${key}` };
-      const res = await fetch(url, { headers });
-      if (!res.ok) {
-        const text = await res.text().catch(() => res.statusText);
-        return { ok: false, error: text };
-      }
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: (err as Error).message };
-    }
+  async validateApiKey(_key: string) {
+    return { ok: false, error: CUSTOM_PROVIDER_DISABLED_MESSAGE };
   },
   listModels(): ProviderModel[] {
     const cfg = getCustomProvider();
@@ -54,12 +33,9 @@ export const customAdapter: ProviderAdapter = {
     return getCustomProvider()?.defaultModel || '';
   },
   getLanguageModel({ apiKey, modelId }) {
-    const cfg = getCustomProvider();
-    if (cfg?.apiFormat === 'anthropic') {
-      return createAnthropic({ apiKey, baseURL: cfg.baseUrl })(modelId);
-    }
-    const baseUrl = cfg?.baseUrl;
-    return createOpenAI({ apiKey, ...(baseUrl ? { baseURL: baseUrl } : {}) }).chat(modelId);
+    void apiKey;
+    void modelId;
+    throw new Error(CUSTOM_PROVIDER_DISABLED_MESSAGE);
   },
   getModelPricing(_modelId: string) {
     return undefined;

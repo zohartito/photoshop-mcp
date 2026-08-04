@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, normalize, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 
 const EXPORTS_SUBDIR = 'exports';
 
@@ -50,8 +50,9 @@ function assertResolvedUnderExports(exportsDir: string, resolved: string): void 
 }
 
 /**
- * Resolve a save/export path: optional user path, default file under
- * ~/.photoshop-mcp/exports (or ~/.photoshop-mcp/exports/<chatId> in UI mode).
+ * Resolve a save/export path inside ~/.photoshop-mcp/exports. Model-selected
+ * absolute destinations are intentionally refused: this API has no user-issued
+ * filesystem capability to authorize a write outside its export root.
  */
 export function resolveExportPath(userPath: string | undefined, ext: string): string {
   const exportsDir = getPhotoshopExportsWorkingDir();
@@ -64,7 +65,9 @@ export function resolveExportPath(userPath: string | undefined, ext: string): st
   }
 
   if (isAbsolute(trimmed)) {
-    return normalize(trimmed);
+    throw new Error(
+      'Absolute export paths are not permitted; use a relative path under the Photoshop MCP exports directory.'
+    );
   }
 
   const resolved = resolve(exportsDir, trimmed);

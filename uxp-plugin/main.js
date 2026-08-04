@@ -14,26 +14,28 @@
  *   - Silent dialogs per descriptor (§6.5): batchPlay has no whole-script
  *     DialogModes.NO. Every descriptor gets `dialogOptions:'silent'` and the call
  *     runs with `modalBehavior:'execute'` so nothing blocks on a dialog.
- *   - Handshake-file port discovery (§6.7): the MCP server may bind a port other
- *     than 38452 (EADDRINUSE → +1). Each poll cycle the plugin reads the handshake
- *     file the server writes and retargets, so a port change never silently
- *     disconnects the plugin.
- *   - Ack on result (§6.9): posting /result acknowledges the leased command. The
- *     server requeues any lease that never acks, so a crash mid-command re-delivers.
+ *   - Handshake-file discovery (§6.7): the bridge binds only its configured port.
+ *     If it is occupied, startup fails closed rather than selecting a fallback
+ *     port. The plugin reads the authenticated handshake before polling.
+ *   - Protocol v4 acknowledgment: posting /result is complete only after a
+ *     matching authenticated 2xx acknowledgment. An expired dispatched lease is
+ *     terminally uncertain and never dispatched again because it may have mutated Photoshop.
  *
- * v1.1 (parity session, 2026-07-05) — hang-proofing after the first live run froze
+ * v1.4 — authenticated protocol and execution quarantine:
  * the poll loop: the manifest lacked `manifestVersion: 5`, the plugin loaded as
  * legacy API v1 where `core.executeAsModal` cannot run, and the poll loop awaited
  * the never-settling call — alive-but-deaf, the exact §6 failure class:
  *   - manifestVersion 5 declared (UXP API v2 — executeAsModal available). If
  *     executeAsModal is STILL missing at runtime, fall back to direct batchPlay
  *     with a loud log instead of hanging.
- *   - The poll loop never awaits command execution (fire-and-forget + in-flight
- *     dedupe): liveness polling continues during long commands, and a requeued
- *     redelivery of a still-running command id is skipped, not double-applied.
+ *   - The poll loop never overlaps commands. Result posts retry only after a
+ *     non-2xx or malformed acknowledgment.
  *   - Per-action watchdog (batch_play 20s, neural_filter 120s): a hung execution
- *     still posts {ok:false} so the server-side caller fails fast. Only the FIRST
- *     result per command id is posted; a late real result is logged, not posted.
+ *     reports uncertainty and quarantines this plugin session. Only actual
+ *     promise settlement can post the exact terminal result, and no later command
+ *     is polled until the bridge process restarts, then the plugin reloads and
+ *     completes a fresh initial handshake. A plugin reload alone cannot take
+ *     over the existing session.
  *   - console.log breadcrumbs throughout — read them in the UDT Debug console.
  *   - Polling no longer stops on panel hide: plugin loaded ⇒ polling.
  *   - No module-scope `os`/`path` dependency: manifest-v5 UXP strips `os.tmpdir`
@@ -45,15 +47,20 @@ const { entrypoints } = require('uxp');
 const photoshop = require('photoshop');
 const { action, core } = photoshop;
 const fs = require('uxp').storage.localFileSystem;
+const { ExecutionGuard } = require('./execution-guard');
 
 const DEFAULT_BRIDGE_PORT = 38452;
-/** Per-action execution budget before the watchdog posts a failure result. */
+const BRIDGE_PROTOCOL_VERSION = 4;
+/** Per-action execution budget before the watchdog quarantines this plugin session. */
 const WATCHDOG_MS = { batch_play: 20_000, neural_filter: 120_000 };
+// Bridge-process restart followed by plugin reload and a fresh handshake is the
+// only supported recovery path after an uncancellable Photoshop operation expires.
+const BRIDGE_SESSION_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
 let bridgePort = DEFAULT_BRIDGE_PORT;
+let bridgeToken = null;
+let sessionEstablished = false;
 let polling = false;
-/** Command ids currently executing — a requeued redelivery of these is skipped. */
-const inFlight = new Set();
 /** Command ids already answered — only the first result per id is posted. */
 const reported = new Set();
 
@@ -63,6 +70,15 @@ function log(msg) {
 
 function bridgeBase() {
   return `http://127.0.0.1:${bridgePort}`;
+}
+
+function authenticatedHeaders(contentType) {
+  const headers = {
+    Authorization: `Bearer ${bridgeToken}`,
+    'X-Photoshop-MCP-Session': BRIDGE_SESSION_ID,
+  };
+  if (contentType) headers['Content-Type'] = contentType;
+  return headers;
 }
 
 /**
@@ -98,36 +114,154 @@ async function refreshBridgePort() {
     const entry = await fs.getEntryWithUrl(url);
     const text = await entry.read();
     const info = JSON.parse(text);
-    if (info && typeof info.port === 'number' && info.port > 0) {
+    if (
+      info &&
+      info.protocolVersion === BRIDGE_PROTOCOL_VERSION &&
+      typeof info.port === 'number' &&
+      info.port > 0 &&
+      typeof info.token === 'string' &&
+      info.token.length >= 32
+    ) {
+      const tokenChanged = bridgeToken !== info.token;
       if (info.port !== bridgePort) log(`bridge port → ${info.port} (handshake)`);
       bridgePort = info.port;
+      bridgeToken = info.token;
+      if (tokenChanged) sessionEstablished = false;
+    } else if (info?.protocolVersion !== BRIDGE_PROTOCOL_VERSION) {
+      bridgeToken = null;
+      sessionEstablished = false;
+      log(
+        `bridge protocol mismatch (plugin=${BRIDGE_PROTOCOL_VERSION}, server=${info?.protocolVersion ?? 'missing'})`
+      );
     }
   } catch {
     // No handshake file yet (server not up) — keep the default/last-known port.
   }
 }
 
-/** Post a result exactly once per command id (§6.9: the post IS the ack). */
-async function postResultOnce(payload) {
-  if (reported.has(payload.id)) {
-    log(`result for ${payload.id} already posted — dropping duplicate (ok=${payload.ok})`);
-    return;
-  }
-  reported.add(payload.id);
-  if (reported.size > 500) reported.clear(); // bounded memory; dev-bridge scale
+/** Claim the bridge only once, after a server-process start with no owner. */
+async function establishSession() {
+  if (!bridgeToken) return false;
   try {
-    await fetch(`${bridgeBase()}/result`, {
+    const response = await fetch(`${bridgeBase()}/handshake`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      headers: authenticatedHeaders(),
     });
-    log(`posted result ${payload.id} ok=${payload.ok}${payload.error ? ` error=${payload.error}` : ''}`);
+    if (response.status === 401) {
+      bridgeToken = null;
+      sessionEstablished = false;
+      return false;
+    }
+    if (!response.ok) {
+      log(`initial handshake rejected (${response.status}); server session remains owned`);
+      return false;
+    }
+    const ack = await response.json();
+    if (
+      ack?.ok !== true ||
+      ack.sessionId !== BRIDGE_SESSION_ID ||
+      ack.protocolVersion !== BRIDGE_PROTOCOL_VERSION
+    ) {
+      log('initial handshake received an invalid acknowledgement');
+      return false;
+    }
+    sessionEstablished = true;
+    log('authenticated bridge session established');
+    return true;
   } catch (err) {
-    // Allow a retry by a later watchdog/real result if the POST itself failed.
-    reported.delete(payload.id);
-    log(`POST /result failed for ${payload.id}: ${err?.message || err}`);
+    log(`initial handshake failed: ${err?.message || err}`);
+    return false;
   }
 }
+
+/** Return true only when the current bridge explicitly acknowledges this result. */
+async function postResultOnce(payload) {
+  if (reported.has(payload.id)) {
+    return true;
+  }
+  if (!bridgeToken) {
+    log(`cannot report ${payload.id}: no authenticated bridge token`);
+    return false;
+  }
+  try {
+    const response = await fetch(`${bridgeBase()}/result`, {
+      method: 'POST',
+      headers: authenticatedHeaders('application/json'),
+      body: JSON.stringify(payload),
+    });
+    if (response.status === 401) bridgeToken = null;
+    if (!response.ok) {
+      log(`result ${payload.id} rejected (${response.status})`);
+      return false;
+    }
+    const ack = await response.json();
+    if (
+      ack?.ok !== true ||
+      ack.id !== payload.id ||
+      ack.protocolVersion !== BRIDGE_PROTOCOL_VERSION
+    ) {
+      log(`result ${payload.id} received invalid acknowledgement`);
+      return false;
+    }
+    reported.add(payload.id);
+    if (reported.size > 32) reported.clear();
+    log(
+      `posted result ${payload.id} ok=${payload.ok}${payload.error ? ` error=${payload.error}` : ''}`
+    );
+    return true;
+  } catch (err) {
+    log(`POST /result failed for ${payload.id}: ${err?.message || err}`);
+    return false;
+  }
+}
+
+async function postResultWithRetry(payload) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (await postResultOnce(payload)) return true;
+    await new Promise((resolve) => setTimeout(resolve, attempt * 250));
+  }
+  log(`result ${payload.id} was not acknowledged; bridge will report execution uncertainty`);
+  return false;
+}
+
+/** Tell the bridge that the command may still be mutating Photoshop. */
+async function postUncertainOnce(id) {
+  if (!bridgeToken) return false;
+  try {
+    const response = await fetch(`${bridgeBase()}/uncertain`, {
+      method: 'POST',
+      headers: authenticatedHeaders('application/json'),
+      body: JSON.stringify({ id }),
+    });
+    if (response.status === 401) bridgeToken = null;
+    if (!response.ok) return false;
+    const ack = await response.json();
+    return ack?.ok === true && ack.id === id && ack.protocolVersion === BRIDGE_PROTOCOL_VERSION;
+  } catch (err) {
+    log(`POST /uncertain failed for ${id}: ${err?.message || err}`);
+    return false;
+  }
+}
+
+async function postUncertainWithRetry(id) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (await postUncertainOnce(id)) return true;
+    await new Promise((resolve) => setTimeout(resolve, attempt * 250));
+  }
+  log(`uncertainty for ${id} was not acknowledged; this plugin remains quarantined`);
+  return false;
+}
+
+const executionGuard = new ExecutionGuard({
+  onUncertain: async (id) => {
+    log(`command ${id} exceeded its watchdog; quarantining this plugin session`);
+    await postUncertainWithRetry(id);
+  },
+  onSettled: async (result) => {
+    log(`command ${result.id} actually settled ok=${result.ok}; posting the only terminal result`);
+    await postResultWithRetry(result);
+  },
+});
 
 /**
  * Build neural-filter descriptors from a filter name. Kept plugin-side only so the
@@ -185,47 +319,38 @@ async function runBatchPlay(descriptors, commandName) {
   return action.batchPlay(silenced, opts);
 }
 
-/** Race a promise against the per-action watchdog budget. */
-function withWatchdog(promise, actionName, id) {
-  const budget = WATCHDOG_MS[actionName] ?? 20_000;
-  return Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`plugin_watchdog_timeout:${actionName}:${budget}ms`)), budget)
-    ),
-  ]);
-}
-
-async function handleCommand(cmd) {
+function handleCommand(cmd) {
   const { id, action: cmdAction, params = {} } = cmd;
-  inFlight.add(id);
   const started = Date.now();
   log(`command ${id} (${cmdAction}) received`);
+  let execute;
 
   try {
-    let resultPromise;
     if (cmdAction === 'batch_play') {
       const descriptors = params.descriptors;
       if (!Array.isArray(descriptors)) {
         throw new Error('batch_play requires params.descriptors to be an array');
       }
-      resultPromise = runBatchPlay(descriptors, params.commandName);
+      execute = () => runBatchPlay(descriptors, params.commandName);
     } else if (cmdAction === 'neural_filter') {
       // Route the legacy neural path through the same generic executor (§4.2).
-      resultPromise = runBatchPlay(neuralDescriptors(params.filter, params), `neural_filter:${params.filter}`);
+      execute = () =>
+        runBatchPlay(neuralDescriptors(params.filter, params), `neural_filter:${params.filter}`);
     } else {
-      await postResultOnce({ id, ok: false, error: `unknown_action:${cmdAction}` });
+      void postResultWithRetry({ id, ok: false, error: `unknown_action:${cmdAction}` });
       return;
     }
-
-    const result = await withWatchdog(resultPromise, cmdAction, id);
-    log(`command ${id} done in ${Date.now() - started}ms`);
-    await postResultOnce({ id, ok: true, data: result });
   } catch (error) {
     log(`command ${id} failed after ${Date.now() - started}ms: ${error?.message || error}`);
-    await postResultOnce({ id, ok: false, error: error?.message || String(error) });
-  } finally {
-    inFlight.delete(id);
+    void postResultWithRetry({ id, ok: false, error: error?.message || String(error) });
+    return;
+  }
+
+  if (!executionGuard.start(id, execute, WATCHDOG_MS[cmdAction] ?? 20_000)) {
+    // pollOnce gates this before fetching, but keep the handler fail-closed if a
+    // future caller invokes it directly.
+    log(`refusing ${id}: plugin execution is busy or quarantined`);
+    void postResultWithRetry({ id, ok: false, error: 'plugin_execution_quarantined' });
   }
 }
 
@@ -234,9 +359,22 @@ let pollEverSucceeded = false;
 
 async function pollOnce() {
   try {
+    // Never request a second command while Photoshop may still be executing.
+    // A late actual settlement does not clear quarantine; bridge-process
+    // restart followed by plugin reload and a fresh handshake creates a new
+    // session and guard.
+    if (executionGuard.isBusy() || executionGuard.isQuarantined()) return;
     // Retarget to the server's real port before each poll (§6.7).
     await refreshBridgePort();
-    const res = await fetch(`${bridgeBase()}/poll`);
+    if (!bridgeToken) return;
+    if (!sessionEstablished && !(await establishSession())) return;
+    const res = await fetch(`${bridgeBase()}/poll`, {
+      headers: authenticatedHeaders(),
+    });
+    if (res.status === 401) {
+      bridgeToken = null;
+      throw new Error('bridge authentication rejected');
+    }
     if (!pollEverSucceeded) {
       pollEverSucceeded = true;
       log(`bridge reachable at ${bridgeBase()} (first poll ok)`);
@@ -246,15 +384,12 @@ async function pollOnce() {
     if (!res.ok) return;
     const cmd = await res.json();
     if (!cmd?.id) return;
-    if (inFlight.has(cmd.id) || reported.has(cmd.id)) {
-      // A lease-expiry redelivery of a command we're still running (or already
-      // answered) — skip so it is not double-applied (§6.9).
-      log(`skipping redelivered command ${cmd.id} (in flight or already answered)`);
+    if (reported.has(cmd.id)) {
+      // A duplicate protocol delivery is invalid; never apply the command twice.
+      log(`skipping duplicate command ${cmd.id} (in flight or already acknowledged)`);
       return;
     }
-    // Fire-and-forget: the poll loop must keep beating (liveness) while a
-    // command runs. The watchdog guarantees a result is eventually posted.
-    handleCommand(cmd).catch((err) => log(`handleCommand crashed: ${err?.message || err}`));
+    handleCommand(cmd);
   } catch (err) {
     // Server may be down (normal between sessions) — but NEVER silently: a v5
     // network-permission denial looks identical to "server not running" without

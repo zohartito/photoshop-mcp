@@ -4,6 +4,7 @@ import { PhotoshopDetector } from './detector.js';
 import { ScriptExecutor } from './script-executor.js';
 import { WindowsExecutor } from './windows-executor.js';
 import { MacOSExecutor } from './macos-executor.js';
+import { MACOS_EXECUTOR_DISABLED_MESSAGE } from './macos-executor.js';
 
 export interface PhotoshopInfo {
   version: string;
@@ -18,6 +19,7 @@ export class PhotoshopConnection {
   private executor: ScriptExecutor;
   private photoshopInfo: PhotoshopInfo | null = null;
   private macosExecutor?: MacOSExecutor;
+  private readonly macosExecutionDisabled: boolean;
 
   constructor() {
     this.logger = new Logger('PhotoshopConnection');
@@ -25,6 +27,7 @@ export class PhotoshopConnection {
 
     // Initialize platform-specific executor
     const platformType = platform();
+    this.macosExecutionDisabled = platformType === 'darwin';
     if (platformType === 'win32') {
       this.executor = new WindowsExecutor();
     } else if (platformType === 'darwin') {
@@ -37,8 +40,9 @@ export class PhotoshopConnection {
 
   async ping(): Promise<boolean> {
     try {
+      if (this.macosExecutionDisabled) return false;
       this.logger.debug('Pinging Photoshop...');
-      
+
       // Try to detect Photoshop if not already detected
       if (!this.photoshopInfo) {
         this.photoshopInfo = await this.detector.detect();
@@ -54,6 +58,7 @@ export class PhotoshopConnection {
 
   async getVersion(): Promise<string> {
     try {
+      if (this.macosExecutionDisabled) throw new Error(MACOS_EXECUTOR_DISABLED_MESSAGE);
       if (!this.photoshopInfo) {
         this.photoshopInfo = await this.detector.detect();
       }
@@ -67,6 +72,7 @@ export class PhotoshopConnection {
 
   async executeScript(script: string, timeout?: number): Promise<unknown> {
     try {
+      if (this.macosExecutionDisabled) throw new Error(MACOS_EXECUTOR_DISABLED_MESSAGE);
       // Ensure Photoshop is detected
       if (!this.photoshopInfo) {
         this.photoshopInfo = await this.detector.detect();
@@ -98,6 +104,7 @@ export class PhotoshopConnection {
   }
 
   async ensurePhotoshopRunning(): Promise<void> {
+    if (this.macosExecutionDisabled) throw new Error(MACOS_EXECUTOR_DISABLED_MESSAGE);
     if (!this.photoshopInfo) {
       this.photoshopInfo = await this.detector.detect();
     }

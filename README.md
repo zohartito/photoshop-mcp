@@ -6,7 +6,7 @@
   </a>
 </p>
 
-*Recipe workflows reduce round-trips and make Photoshop automation more reliable.*
+_Recipe workflows reduce round-trips and make Photoshop automation more reliable._
 
 > **Note:** This is an unofficial, community-maintained project and is not affiliated with or endorsed by Adobe Inc.
 
@@ -14,7 +14,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/alisaitteke/photoshop-mcp?include_prereleases)](https://github.com/alisaitteke/photoshop-mcp/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey.svg)]()
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20UXP-lightgrey.svg)]()
 
 A Model Context Protocol (MCP) server that enables AI assistants like Claude and Cursor to control Adobe Photoshop programmatically. Create designs, manipulate images, and automate Photoshop workflows through natural-language commands from an MCP-capable host.
 
@@ -45,15 +45,15 @@ requests into reliable Photoshop actions:
 - **Server `instructions`** — workflow contract advertised on MCP `initialize`
   (ping once, state-before-action, prefer recipes, error recovery). See
   [`src/prompts/instructions.ts`](src/prompts/instructions.ts).
-- **MCP `prompts` primitive** — 19 pre-engineered templates (12 recipe + 7 guide:
+- **MCP `prompts` primitive** — 18 pre-engineered templates (11 recipe + 7 guide:
   `ps.enhance_portrait`, `ps.remove_background`, `ps.generative_fill`, …)
   via `prompts/list` and `prompts/get`.
-- **Recipe tools** — 12 outcome-oriented `photoshop_recipe_*` tools (remove
-  background, enhance portrait, prepare for web, export social variants, color
+- **Recipe tools** — 11 outcome-oriented `photoshop_recipe_*` tools (remove
+  background, enhance portrait, export social variants, color
   grade, frequency separation, batch mockup, organize layers, gradient fade,
   sky blend, dodge & burn, remove distraction). Each wraps steps in a single
-  Photoshop history state (one Undo reverts all). **86 tools total** (74 atomic
-  + 12 recipe).
+  Photoshop history state (one Undo reverts all). **85 tools total**, including
+  **11 recipe tools**.
 - **Generative AI** — `photoshop_generative_fill`, `photoshop_generative_remove`,
   `photoshop_generative_expand`, `photoshop_generative_upscale`, `photoshop_sky_replacement`,
   `photoshop_generate_image` (Firefly via ExtendScript; Adobe account + credits required).
@@ -140,15 +140,14 @@ Equivalent MCP prompt template: `ps.frequency_separation` with `{ radius_px: "6"
 </details>
 
 <details>
-<summary>🌐 Prepare for web + social export (recipes)</summary>
+<summary>🌐 Social export (recipe)</summary>
 
 ```
-Prepare the active document for web: sRGB, downscale, sharpen, export one optimized JPEG to ~/.photoshop-mcp/exports.
-Then export Instagram post and X post variants as separate JPEGs from the same document.
+Export Instagram post and X post variants as separate JPEGs from the active document.
 List the output paths in a table.
 ```
 
-Equivalent templates: `ps.prepare_for_web`, `ps.export_social_variants`.
+Equivalent template: `ps.export_social_variants`.
 
 </details>
 
@@ -210,7 +209,7 @@ Save as adventure.jpg with quality 10.
 Open photo.jpg from my Desktop in Photoshop.
 Get state, then run the enhance-portrait recipe at low intensity.
 If I only need quick tone fixes, apply auto levels, auto contrast, and unsharp mask (120%, 1.5, 0) on the active layer instead.
-Adjust hue +15 and saturation +15, or use prepare-for-web when I'm ready to export.
+Adjust hue +15 and saturation +15, then use the supported social-export recipe when I'm ready to export.
 Save as enhanced-photo.jpg with quality 12.
 ```
 
@@ -353,12 +352,12 @@ Never guess — read get_state after a failure and propose the next single step.
 
 - **Standalone browser UI security boundary** — `photoshop-mcp-ui` is retained as
   a clear failing compatibility command until authenticated pairing and TLS exist
-- **Works on both Windows and macOS**
-- **Supports Photoshop 2012-2025+**
-- **ExtendScript API**: Universal compatibility via AppleScript/COM automation
+- **Windows full automation** via ExtendScript/COM; **macOS optional UXP bridge** for supported UXP commands
+- **Supports Photoshop 2012-2026+** (UXP bridge requires Photoshop 26+)
+- **ExtendScript API**: Windows COM automation; macOS ExtendScript execution is security-disabled
 - **Auto-Detection**: Automatically finds Photoshop installation on your system
-- **78 Tools**: 66 atomic `photoshop_*` + 12 recipe `photoshop_recipe_*`
-- **AI/Prompt Layer**: 16 MCP prompt templates (12 recipe + 4 guide), server instructions, state/preview/capabilities tools
+- **85 Tools**: including 11 outcome-oriented `photoshop_recipe_*` tools
+- **AI/Prompt Layer**: 18 MCP prompt templates (11 recipe + 7 guide), server instructions, state/preview/capabilities tools
 - **Document Management**: Create, open, save, close, crop documents
 - **Layer Operations**: Create, delete, duplicate, merge, transform layers
 - **Layer Properties**: Opacity, blend modes, visibility, locking
@@ -439,6 +438,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 
 Full reference for all atomic `photoshop_*` tools (parameters, examples, and usage):
 [`docs/available-tools.md`](docs/available-tools.md).
+
 ## Context Tracking
 
 Each tool returns comprehensive context information about the current state of Photoshop, including:
@@ -449,12 +449,14 @@ Each tool returns comprehensive context information about the current state of P
 - **Operation Result**: Specific details about what was changed
 
 This allows AI assistants to maintain awareness of:
+
 - Which document is active
 - Which layer is being worked on
 - Current layer properties (opacity, blend mode, etc.)
 - Document dimensions and settings
 
 **Example Response:**
+
 ```javascript
 {
   "applied": true,
@@ -499,15 +501,17 @@ This context helps AI assistants remember what document and layer they're workin
 
 ### macOS
 
-- Uses AppleScript/OSA for Photoshop communication
 - Spotlight-based auto-detection
-- Supports multiple Photoshop versions installed simultaneously
+- ExtendScript execution is security-disabled; load the optional authenticated UXP bridge for supported UXP commands
 
 ## Supported Photoshop Versions
 
-- **All Photoshop versions** (2012-2025+): Uses ExtendScript API via AppleScript (macOS) or COM (Windows)
+- **Windows Photoshop 2012-2026+**: Uses ExtendScript API via COM automation
+- **macOS Photoshop 26+**: Optional authenticated UXP bridge for supported UXP commands; direct ExtendScript execution is unavailable
 
-**Important Note**: While Photoshop 2022+ supports UXP for plugins, external automation via AppleScript/COM can only use ExtendScript. UXP is designed for internal plugins and cannot be invoked from external scripts. Therefore, this MCP server uses ExtendScript for maximum compatibility across all Photoshop versions.
+**Important Note**: UXP commands require the companion plugin. The macOS direct
+script-execution path is intentionally unavailable pending a reviewed replacement
+transport.
 
 ## Troubleshooting
 
@@ -536,13 +540,13 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before
 **[Ali Sait Teke](https://alisait.com)** — Full-Stack engineer & AI-era software architect
 (Python, Go, Node.js, React, Next.js, Vue).
 
-This project started from a practical question: *how do you make Photoshop reliably
-controllable by LLMs without fragile one-off scripts?* It grew into an MCP server
-with 80 tools and a recipe/prompt layer for dependable multi-step workflows.
+This project started from a practical question: _how do you make Photoshop reliably
+controllable by LLMs without fragile one-off scripts?_ It grew into an MCP server
+with 85 tools, 11 recipes, and 18 prompts for dependable multi-step workflows.
 
 **What this codebase demonstrates:** TypeScript systems design, MCP protocol
-integration, cross-platform desktop automation (macOS AppleScript / Windows COM),
-and structured error recovery for agentic loops.
+integration, Windows COM automation plus an authenticated macOS UXP bridge, and
+structured error recovery for agentic loops.
 
 - [Portfolio](https://alisait.com) · [GitHub](https://github.com/alisaitteke) · [LinkedIn](https://www.linkedin.com/in/alisait/)
 

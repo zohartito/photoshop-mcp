@@ -36,7 +36,7 @@ npm run format
 
 ```bash
 npm run build:server
-npm run spike:issue-2     # issue #2 targeted regression (10 checks)
+npm run spike:issue-2     # issue #2 targeted regression (no alert-dialog check)
 npm run test:mcp-local    # prompt-layer smoke
 npm run test:mcp-all      # full sequential tool sweep
 npm run spike:photoshop-actions  # generative AI action probes → scripts/output/generative-probe-report.json
@@ -66,32 +66,32 @@ Firefly tools (`photoshop_generative_*`, `photoshop_generate_image`, `photoshop_
 - Signed-in Adobe account with generative credits
 - Optional live smoke: `PHOTOSHOP_AI_SMOKE=1 npm run test:mcp-all`
 
-## Integration test results
+## Integration-test status
 
-Local MCP integration tests run against a live Photoshop instance over stdio
-(same path as Cursor / Claude Desktop). Last verified on **Photoshop 26.5.0**
-(macOS).
+Live Photoshop coverage is **unverified for this checkout**. The owner must run
+the following harnesses against a prepared local Photoshop instance before
+recording pass/fail/skip totals; this document intentionally does not preserve
+historical totals as current evidence.
 
-*Recorded on PS 26.5.0 (macOS) after issue #2 fixes and Phase 2 test harness — re-run `npm run test:mcp-all` to refresh.*
+| Suite                    | Command                            | Current evidence                                                                                                         |
+| ------------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Issue #2 regression      | `npm run spike:issue-2`            | Owner live harness pending; covers metadata, layers, placement, Smart Object transforms, escaping, fonts, and CJK names. |
+| Full tool + recipe sweep | `npm run test:mcp-all`             | Owner live harness pending.                                                                                              |
+| Prompt-layer smoke       | `npm run test:mcp-local`           | Owner live harness pending.                                                                                              |
+| Prompt ↔ recipe parity   | `npm run verify:photoshop-prompts` | Static check; current catalog target is 11 recipe prompts and 7 guides.                                                  |
 
-| Suite | Command | Result |
-|-------|---------|--------|
-| Issue #2 regression | `npm run spike:issue-2` | Targeted checks (metadata, layers, place, Smart Object transform, jsString escapes, fonts, alert, CJK names) |
-| Full tool + recipe sweep | `npm run test:mcp-all` | **119 pass**, **0 fail**, **4 skip** (123 total) |
-| Prompt-layer smoke | `npm run test:mcp-local` | 16 prompt templates + core recipes |
-| Prompt ↔ recipe parity | `npm run verify:photoshop-prompts` | 12↔12 strict match + 4 guides |
-
-**Tool coverage:** 80 total tools (68 atomic `photoshop_*` + 12 recipe
-`photoshop_recipe_*`) — re-run `npm run test:mcp-all` for a fresh pass count.
+Static package metadata currently declares 85 tools, including 11
+`photoshop_recipe_*` tools, and 18 prompts (11 recipe + 7 guide). This is a
+catalog count, not live integration-test evidence.
 
 **Intentional skips** (environment-dependent, not regressions):
 
-| Tool | Reason |
-|------|--------|
-| `photoshop_play_action` | Requires a real Actions palette entry on the machine |
-| `photoshop_select_subject` | Requires a recognizable subject in the active layer |
-| `photoshop_recipe_remove_background` | Synthetic test canvas has no recognizable subject for Select Subject |
-| `photoshop_recipe_batch_mockup_replace` | Requires a Smart Object mockup PSD |
+| Tool                                    | Reason                                                               |
+| --------------------------------------- | -------------------------------------------------------------------- |
+| `photoshop_play_action`                 | Requires a real Actions palette entry on the machine                 |
+| `photoshop_select_subject`              | Requires a recognizable subject in the active layer                  |
+| `photoshop_recipe_remove_background`    | Synthetic test canvas has no recognizable subject for Select Subject |
+| `photoshop_recipe_batch_mockup_replace` | Requires a Smart Object mockup PSD                                   |
 
 **PS 26 compatibility notes** (ExtendScript): layer masks use `stringID make`;
 mask apply uses `delete` + `apply: true`; hue/saturation uses `Hst2` descriptors;
@@ -124,19 +124,19 @@ Combine with a [Pexels MCP server](https://github.com/modelcontextprotocol/serve
 
 ### Common Use Cases
 
-| Task | Prompt Example |
-|------|----------------|
-| **Basic Design** | "Create 1920x1080 document, add blue background, center text 'Hello'" |
-| **Photo Edit** | "Open photo.jpg, apply auto levels, sharpen 100%, save as edited.jpg" |
-| **Stock Image** | "Place image.jpg, fit to fill canvas, add overlay text 'Summer 2026'" |
-| **Layer Effects** | "Set active layer blend mode to MULTIPLY, opacity 80%" |
-| **Filters** | "Apply 10px Gaussian blur to current layer" |
-| **Text Styling** | "Change text to Helvetica 64pt, color red, center aligned" |
-| **Batch Work** | "Resize to 1080x1080, auto contrast, save as square.jpg, close" |
-| **Masks** | "Select rectangle 100,100 to 500,500, create layer mask" |
-| **Portrait recipe** | "Enhance portrait at medium intensity with skin smoothing, then preview" |
-| **Background removal** | "Remove background from active layer, 2px feather, non-destructive mask" |
-| **Web export** | "Prepare for web + export Instagram and X post variants to exports folder" |
-| **Color grade** | "Apply warm_film color grade as adjustment layers" |
-| **Frequency separation** | "Build FS stack at 6px — I'll paint the Low/High layers myself" |
-| **State check** | "Ping Photoshop, get capabilities, then get_state before editing" |
+| Task                     | Prompt Example                                                           |
+| ------------------------ | ------------------------------------------------------------------------ |
+| **Basic Design**         | "Create 1920x1080 document, add blue background, center text 'Hello'"    |
+| **Photo Edit**           | "Open photo.jpg, apply auto levels, sharpen 100%, save as edited.jpg"    |
+| **Stock Image**          | "Place image.jpg, fit to fill canvas, add overlay text 'Summer 2026'"    |
+| **Layer Effects**        | "Set active layer blend mode to MULTIPLY, opacity 80%"                   |
+| **Filters**              | "Apply 10px Gaussian blur to current layer"                              |
+| **Text Styling**         | "Change text to Helvetica 64pt, color red, center aligned"               |
+| **Batch Work**           | "Resize to 1080x1080, auto contrast, save as square.jpg, close"          |
+| **Masks**                | "Select rectangle 100,100 to 500,500, create layer mask"                 |
+| **Portrait recipe**      | "Enhance portrait at medium intensity with skin smoothing, then preview" |
+| **Background removal**   | "Remove background from active layer, 2px feather, non-destructive mask" |
+| **Social export**        | "Export Instagram and X post variants to the exports folder"             |
+| **Color grade**          | "Apply warm_film color grade as adjustment layers"                       |
+| **Frequency separation** | "Build FS stack at 6px — I'll paint the Low/High layers myself"          |
+| **State check**          | "Ping Photoshop, get capabilities, then get_state before editing"        |

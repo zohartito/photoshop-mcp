@@ -36,6 +36,9 @@ export interface UIConfig {
 
 const KV_KEY = 'config';
 
+export const CUSTOM_PROVIDER_DISABLED_MESSAGE =
+  'Custom providers are security-disabled until an authenticated UI and SSRF-safe egress policy are implemented.';
+
 const DEFAULT_CONFIG: UIConfig = {
   providers: {},
   activeProvider: 'anthropic',
@@ -61,7 +64,8 @@ export function saveConfig(patch: Partial<UIConfig>): UIConfig {
     ...current,
     ...patch,
     providers: { ...current.providers, ...(patch.providers ?? {}) },
-    customProvider: patch.customProvider !== undefined ? patch.customProvider : current.customProvider,
+    customProvider:
+      patch.customProvider !== undefined ? patch.customProvider : current.customProvider,
   };
   kvSet(KV_KEY, next);
   return next;
@@ -97,7 +101,8 @@ export function maskApiKey(apiKey?: string): string | null {
 }
 
 export function saveCustomProvider(config: CustomProviderConfig): UIConfig {
-  return saveConfig({ customProvider: config });
+  void config;
+  throw new Error(CUSTOM_PROVIDER_DISABLED_MESSAGE);
 }
 
 export function getCustomProvider(): CustomProviderConfig | null {

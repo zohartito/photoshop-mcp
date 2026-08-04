@@ -1,6 +1,12 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
+import {
+  MAX_DOCUMENT_DIMENSION_PX,
+  MAX_DOCUMENT_RESOLUTION_DPI,
+  validateIntegerInRange,
+  validatePixelDimensions,
+} from './resource-limits.js';
 
 export function createDocumentTools(transport: TransportRouter): ToolDefinition[] {
   return [
@@ -20,15 +26,19 @@ export function createDocumentTools(transport: TransportRouter): ToolDefinition[
               type: 'number',
               description: 'Document width in pixels',
               minimum: 1,
+              maximum: MAX_DOCUMENT_DIMENSION_PX,
             },
             height: {
               type: 'number',
               description: 'Document height in pixels',
               minimum: 1,
+              maximum: MAX_DOCUMENT_DIMENSION_PX,
             },
             resolution: {
               type: 'number',
               description: 'Document resolution in DPI (default: 72)',
+              minimum: 1,
+              maximum: MAX_DOCUMENT_RESOLUTION_DPI,
               default: 72,
             },
             colorMode: {
@@ -60,7 +70,7 @@ export function createDocumentTools(transport: TransportRouter): ToolDefinition[
         description:
           'Save the active document to disk in PSD, JPEG, or PNG format.\n\n' +
           'Use when: user requests export/save with a specific path and format.\n' +
-          'Do NOT use when: web-optimized resize+sharpen pipeline is needed — use photoshop_recipe_prepare_for_web.\n\n' +
+          'Do NOT use when: a dedicated export workflow is unavailable; this tool saves the active document directly.\n\n' +
           'Returns: confirmation with saved path and format.\n' +
           'Preconditions: active document; path required. Side effects: writes file to disk.',
         inputSchema: {
@@ -115,8 +125,28 @@ async function createDocument(
 ): Promise<ToolResult> {
   const width = args.width as number;
   const height = args.height as number;
-  const resolution = (args.resolution as number) || 72;
+  const resolution = args.resolution === undefined ? 72 : args.resolution;
   const colorMode = (args.colorMode as string) || 'RGB';
+
+  const dimensionError = validatePixelDimensions(width, height);
+  if (dimensionError) {
+    return {
+      content: [{ type: 'text', text: `Error creating document: ${dimensionError}` }],
+      isError: true,
+    };
+  }
+  const resolutionError = validateIntegerInRange(
+    resolution,
+    1,
+    MAX_DOCUMENT_RESOLUTION_DPI,
+    'resolution'
+  );
+  if (resolutionError) {
+    return {
+      content: [{ type: 'text', text: `Error creating document: ${resolutionError}` }],
+      isError: true,
+    };
+  }
 
   try {
     const colorModeMap: Record<string, string> = {
@@ -128,7 +158,7 @@ async function createDocument(
     const script = ExtendScriptSnippets.newDocument(
       width,
       height,
-      resolution,
+      resolution as number,
       colorModeMap[colorMode] || 'NewDocumentMode.RGB'
     );
 
@@ -189,13 +219,27 @@ async function saveDocument(
 ): Promise<ToolResult> {
   const path = args.path as string;
   const format = (args.format as string) || 'PSD';
-  const quality = (args.quality as number) || 8;
+  const quality = args.quality === undefined ? 8 : args.quality;
+
+  if (typeof path !== 'string' || path.trim() === '') {
+    return {
+      content: [{ type: 'text', text: 'Error saving document: path is required.' }],
+      isError: true,
+    };
+  }
+  const qualityError = validateIntegerInRange(quality, 1, 12, 'quality');
+  if (qualityError) {
+    return {
+      content: [{ type: 'text', text: `Error saving document: ${qualityError}` }],
+      isError: true,
+    };
+  }
 
   try {
     let script;
     switch (format.toUpperCase()) {
       case 'JPEG':
-        script = ExtendScriptSnippets.saveAsJPEG(path, quality);
+        script = ExtendScriptSnippets.saveAsJPEG(path, quality as number);
         break;
       case 'PNG':
         script = ExtendScriptSnippets.saveAsPNG(path);

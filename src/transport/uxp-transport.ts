@@ -20,6 +20,7 @@ import {
   ensureUxpBridgeServer,
   getUxpBridgeLastPollAt,
   invokeUxpBridge,
+  isUxpBridgeExecutionUncertain,
 } from '../platform/uxp-bridge-server.js';
 import type { ActionDescriptor } from '../api/batch-play.js';
 import {
@@ -33,11 +34,7 @@ import {
   normalizeGetLayers,
   normalizeGetState,
 } from './uxp-commands/normalize.js';
-import type {
-  PhotoshopTransport,
-  PsCommand,
-  TransportCapabilities,
-} from './types.js';
+import type { PhotoshopTransport, PsCommand, TransportCapabilities } from './types.js';
 
 /**
  * How recently the plugin must have polled to count as "connected". The plugin
@@ -53,12 +50,7 @@ const POLL_FRESHNESS_MS = 2_000;
  * builders in ./uxp-commands/descriptors.ts (§6.8 groundwork) but are not routed
  * through run() until a plugin-connected session verifies their result parsing.
  */
-const UXP_COMMANDS = [
-  'neural_filter',
-  'get_state',
-  'get_layers',
-  'get_document_info',
-] as const;
+const UXP_COMMANDS = ['neural_filter', 'get_state', 'get_layers', 'get_document_info'] as const;
 
 /** A raw batchPlay result is an array of ActionDescriptor objects. */
 type BatchPlayResult = Record<string, unknown>[];
@@ -73,6 +65,7 @@ export class UxpTransport implements PhotoshopTransport {
    * is idempotent; we call it so the port is bound and the plugin can reach it.
    */
   async isAvailable(): Promise<boolean> {
+    if (isUxpBridgeExecutionUncertain()) return false;
     try {
       await ensureUxpBridgeServer();
     } catch {
@@ -98,15 +91,23 @@ export class UxpTransport implements PhotoshopTransport {
    * the router/tool sees a normal Error, never a leaked `{ ok:false }`.
    */
   async run(command: PsCommand): Promise<unknown> {
+    if (isUxpBridgeExecutionUncertain()) {
+      throw new Error('UXP bridge session is quarantined after an uncertain Photoshop mutation.');
+    }
+    const deadline =
+      Date.now() +
+      normalizeTimeout(
+        command.timeoutMs ?? (command.name === 'neural_filter' ? 120_000 : undefined)
+      );
     switch (command.name) {
       case 'get_state':
-        return this.getState(command.timeoutMs);
+        return this.getState(deadline);
       case 'get_document_info':
-        return this.getDocumentInfo(command.timeoutMs);
+        return this.getDocumentInfo(deadline);
       case 'get_layers':
-        return this.getLayers(command.timeoutMs);
+        return this.getLayers(deadline);
       case 'neural_filter':
-        return this.invokeRaw(command.name, command.params ?? {}, command.timeoutMs ?? 90_000);
+        return this.invokeRaw(command.name, command.params ?? {}, remainingMs(deadline));
       default:
         throw new Error(`UxpTransport: command "${command.name}" is not ported to backend B`);
     }
@@ -137,9 +138,9 @@ export class UxpTransport implements PhotoshopTransport {
    * false. Separate round-trip by design (the shared batch would fail wholesale
    * under continueOnError:false); merge once the plugin gains continueOnError.
    */
-  private async probeSelection(timeoutMs?: number): Promise<boolean> {
+  private async probeSelection(deadline: number): Promise<boolean> {
     try {
-      const raw = await this.runBatchPlay(getSelectionDescriptor(), 'probe_selection', timeoutMs);
+      const raw = await this.runBatchPlay(getSelectionDescriptor(), 'probe_selection', deadline);
       const selection = raw[0]?.selection;
       return !!selection && typeof selection === 'object';
     } catch {
@@ -147,15 +148,15 @@ export class UxpTransport implements PhotoshopTransport {
     }
   }
 
-  private async getState(timeoutMs?: number): Promise<unknown> {
-    const { docDesc, layerDesc } = await this.readDocumentAndLayer(timeoutMs);
-    const hasSelection = docDesc ? await this.probeSelection(timeoutMs) : false;
+  private async getState(deadline: number): Promise<unknown> {
+    const { docDesc, layerDesc } = await this.readDocumentAndLayer(deadline);
+    const hasSelection = docDesc ? await this.probeSelection(deadline) : false;
     return normalizeGetState(docDesc, layerDesc, hasSelection);
   }
 
-  private async getDocumentInfo(timeoutMs?: number): Promise<unknown> {
-    const { docDesc, layerDesc } = await this.readDocumentAndLayer(timeoutMs);
-    const hasSelection = docDesc ? await this.probeSelection(timeoutMs) : false;
+  private async getDocumentInfo(deadline: number): Promise<unknown> {
+    const { docDesc, layerDesc } = await this.readDocumentAndLayer(deadline);
+    const hasSelection = docDesc ? await this.probeSelection(deadline) : false;
     return normalizeGetDocumentInfo(docDesc, layerDesc, hasSelection);
   }
 
@@ -166,9 +167,9 @@ export class UxpTransport implements PhotoshopTransport {
    * the whole sync batchPlay — the first walk attempt proved the model. Iterate
    * N..1 then 0 to match the top-first order of the ExtendScript twin.
    */
-  private async getLayers(timeoutMs?: number): Promise<unknown> {
-    const { docDesc, layerDesc } = await this.readDocumentAndLayer(timeoutMs);
-    const hasSelection = docDesc ? await this.probeSelection(timeoutMs) : false;
+  private async getLayers(deadline: number): Promise<unknown> {
+    const { docDesc, layerDesc } = await this.readDocumentAndLayer(deadline);
+    const hasSelection = docDesc ? await this.probeSelection(deadline) : false;
     const context = normalizeGetState(docDesc, layerDesc, hasSelection);
 
     const numberOfLayers =
@@ -184,7 +185,7 @@ export class UxpTransport implements PhotoshopTransport {
       if (hasBackground) {
         gets.push(getLayerByIndexDescriptor(0));
       }
-      layerDescs = await this.runBatchPlay(gets, 'walk_layers', timeoutMs);
+      layerDescs = await this.runBatchPlay(gets, 'walk_layers', deadline);
     }
     return normalizeGetLayers(layerDescs, context);
   }
@@ -198,12 +199,12 @@ export class UxpTransport implements PhotoshopTransport {
   private async runBatchPlay(
     descriptors: ActionDescriptor[],
     commandName: string,
-    timeoutMs = 30_000
+    deadline: number
   ): Promise<BatchPlayResult> {
     const data = await this.invokeRaw(
       'batch_play',
       { descriptors, commandName },
-      timeoutMs
+      remainingMs(deadline)
     );
     return Array.isArray(data) ? (data as BatchPlayResult) : [];
   }
@@ -222,14 +223,28 @@ export class UxpTransport implements PhotoshopTransport {
   }
 
   /** Fetch the active-document and active-layer descriptors in one batch_play. */
-  private async readDocumentAndLayer(
-    timeoutMs?: number
-  ): Promise<{ docDesc: Record<string, unknown> | null; layerDesc: Record<string, unknown> | null }> {
+  private async readDocumentAndLayer(deadline: number): Promise<{
+    docDesc: Record<string, unknown> | null;
+    layerDesc: Record<string, unknown> | null;
+  }> {
     const descriptors = [...getDocumentDescriptor(), ...getActiveLayerDescriptor()];
-    const raw = await this.runBatchPlay(descriptors, 'read_state', timeoutMs);
+    const raw = await this.runBatchPlay(descriptors, 'read_state', deadline);
     return {
       docDesc: raw[0] ?? null,
       layerDesc: raw[1] ?? null,
     };
   }
+}
+
+function normalizeTimeout(timeoutMs: number | undefined): number {
+  const value = timeoutMs ?? 30_000;
+  if (!Number.isFinite(value) || value <= 0)
+    throw new Error('UXP command timeout must be positive.');
+  return value;
+}
+
+function remainingMs(deadline: number): number {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error('UXP command deadline exceeded.');
+  return remaining;
 }

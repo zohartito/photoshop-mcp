@@ -1,7 +1,7 @@
 {
   "name": "@alisaitteke/photoshop-mcp",
   "version": "1.4.0",
-  "description": "MCP server for Adobe Photoshop — 86 tools (generative AI + recipes). Control Photoshop from Cursor, Claude, or natural language.",
+  "description": "MCP server for Adobe Photoshop — 85 tools, 11 recipes, and 18 prompts. Control Photoshop from Cursor, Claude, or natural language.",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
@@ -41,6 +41,10 @@
     "test:ui-origin-policy": "npm run test:ui-security-disabled",
     "test:cli-account-capability-boundary": "tsx scripts/test-cli-account-capability-boundary.ts",
     "test:gemini-env-settings": "tsx scripts/test-gemini-env-settings.ts",
+    "test:p2-security": "tsx scripts/test-p2-security.ts",
+    "test:uxp-quarantine": "node scripts/test-uxp-execution-guard.mjs",
+    "test:uxp-session-authority": "tsx scripts/test-uxp-session-authority.ts",
+    "test:uxp-replay-tombstones": "tsx scripts/test-uxp-replay-tombstones.ts",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build"
   },

@@ -28,19 +28,19 @@ flowchart TB
   end
 
   IDE -->|stdio MCP| MCP
-  MCP -->|AppleScript / COM| ES
+  MCP -->|Windows COM| ES
   MCP -->|HTTP poll 127.0.0.1:38452| UXP
 ```
 
-| Layer | Responsibility | Key paths |
-| ----- | -------------- | --------- |
-| **MCP core** | Tool/prompt registry, session, MCP protocol | `src/core/` |
-| **Platform** | Photoshop detection, script execution | `src/platform/` |
-| **Tools** | 74 atomic + 12 recipe MCP tools (+ generative & neural) | `src/tools/` |
-| **Prompt layer** | Server instructions, 19 MCP prompt templates | `src/prompts/` |
-| **Errors** | Structured envelopes for agent self-correction | `src/errors/envelope.ts` |
-| **Retired browser UI** | Preserved source; startup tombstone rejects before any listener | `src/ui/`, `web/` |
-| **Analytics** | Opt-out anonymous usage (Mixpanel / PostHog) | `src/analytics/` |
+| Layer                  | Responsibility                                                  | Key paths                |
+| ---------------------- | --------------------------------------------------------------- | ------------------------ |
+| **MCP core**           | Tool/prompt registry, session, MCP protocol                     | `src/core/`              |
+| **Platform**           | Photoshop detection, script execution                           | `src/platform/`          |
+| **Tools**              | 85 MCP tools, including 11 recipes                              | `src/tools/`             |
+| **Prompt layer**       | Server instructions, 18 MCP prompt templates                    | `src/prompts/`           |
+| **Errors**             | Structured envelopes for agent self-correction                  | `src/errors/envelope.ts` |
+| **Retired browser UI** | Preserved source; startup tombstone rejects before any listener | `src/ui/`, `web/`        |
+| **Analytics**          | Opt-out anonymous usage (Mixpanel / PostHog)                    | `src/analytics/`         |
 
 ---
 
@@ -48,8 +48,8 @@ flowchart TB
 
 `PhotoshopMCPServer` wires the official MCP SDK with:
 
-- **86 tools** registered via `ToolRegistry` (atomic operations + outcome-oriented recipes + generative/neural AI).
-- **19 prompts** via `PromptRegistry` (`prompts/list`, `prompts/get`).
+- **85 tools** registered via `ToolRegistry` (atomic operations + outcome-oriented recipes + generative/neural AI).
+- **18 prompts** via `PromptRegistry` (`prompts/list`, `prompts/get`).
 - **Server instructions** on `initialize` — workflow contract for host LLMs (state-before-action, prefer recipes, error recovery). See [`src/prompts/instructions.ts`](../src/prompts/instructions.ts).
 - **Structured error wrapping** — every tool handler passes through `wrapToolHandler` so failures return JSON with `code` and `suggested_next_tool` for agentic repair loops.
 
@@ -59,16 +59,23 @@ Entry point: [`src/index.ts`](../src/index.ts) → stdio transport.
 
 ## Platform abstraction (`src/platform/`)
 
-Photoshop has no stable HTTP API for external automation. This server uses **ExtendScript** executed through platform-specific bridges:
+Photoshop has no stable HTTP API for external automation. Windows uses
+**ExtendScript** through COM; macOS direct ExtendScript execution is intentionally
+disabled and only the optional authenticated UXP bridge can serve supported UXP commands:
 
-| OS | Detection | Execution |
-| -- | --------- | --------- |
-| **macOS** | Spotlight / app bundle paths (`macos-detector.ts`) | AppleScript → `do javascript` (`macos-executor.ts`) |
-| **Windows** | Registry (`windows-detector.ts`) | COM automation (`windows-executor.ts`) |
+| OS          | Detection                                          | Execution                                   |
+| ----------- | -------------------------------------------------- | ------------------------------------------- |
+| **macOS**   | Spotlight / app bundle paths (`macos-detector.ts`) | Security-disabled; optional UXP bridge only |
+| **Windows** | Registry (`windows-detector.ts`)                   | COM automation (`windows-executor.ts`)      |
 
 `connection.ts` manages the lifecycle: find Photoshop, verify responsiveness, route scripts.
 
-**Design decision:** ExtendScript remains the default external automation path for **Photoshop 2012–2026+** on both platforms. **Generative Fill / Remove / Expand** run via ExtendScript `executeAction` with extended timeouts. **Neural Filters** require the optional **UXP bridge** (`uxp-plugin/` + MCP-hosted poll server on `127.0.0.1:38452`) because `batchPlay` is only available inside a UXP plugin.
+**Design decision:** ExtendScript remains the Windows external automation path for
+**Photoshop 2012–2026+**. **Generative Fill / Remove / Expand** run through that
+path with extended timeouts. **Neural Filters** require the optional **UXP bridge**
+(`uxp-plugin/` + MCP-hosted poll server on `127.0.0.1:38452`) because `batchPlay`
+is only available inside a UXP plugin. macOS direct ExtendScript execution remains
+disabled pending a reviewed replacement transport.
 
 ExtendScript snippets live in [`src/api/extendscript.ts`](../src/api/extendscript.ts); tools compose them rather than embedding raw strings inline.
 
@@ -82,7 +89,7 @@ Fine-grained operations: documents, layers, filters, masks, text, history, state
 
 ### Recipe tools (`photoshop_recipe_*`)
 
-Multi-step workflows wrapped in a **single Photoshop history state** — one Undo reverts the entire recipe. Examples: `enhance_portrait`, `remove_background`, `prepare_for_web`, `batch_mockup_replace`.
+Multi-step workflows wrapped in a **single Photoshop history state** — one Undo reverts the entire recipe. Examples: `enhance_portrait`, `remove_background`, `batch_mockup_replace`.
 
 Recipes reduce token burn and failure modes versus chaining many atomic calls without state awareness.
 
@@ -136,7 +143,7 @@ photoshop-mcp/
 1. **Local-first** — API keys and OAuth tokens stay on disk; Photoshop runs locally.
 2. **State before action** — `photoshop_get_state` / `get_preview` / `get_capabilities` cheapen verification and vision checks.
 3. **Recipes over atomic chains** — fewer LLM turns, one undo per outcome.
-4. **Cross-platform parity** — same tool surface on macOS and Windows; platform quirks isolated in `src/platform/`.
+4. **Explicit platform boundaries** — Windows COM and the optional macOS UXP bridge expose only the paths that are currently reviewed and supported.
 5. **Observable, not invasive** — analytics are anonymous and opt-out (`ANALYTICS_DISABLED=1`).
 
 ---

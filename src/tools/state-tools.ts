@@ -1,12 +1,46 @@
-import { readFile, unlink } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { mkdtemp, open, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 import { TransportRouter } from '../transport/index.js';
 import { resolvePhotoshopCapabilities } from '../platform/capabilities.js';
 import { envelopeToToolResult, classifyError } from '../errors/envelope.js';
 import { parseExtendScriptPayload } from '../utils/extendscript-result.js';
+import { MAX_PREVIEW_DIMENSION_PX, validateIntegerInRange } from './resource-limits.js';
 
 const PREVIEW_MAX_BYTES = 4 * 1024 * 1024;
+
+async function readPreviewWithLimit(path: string, limit: number): Promise<Buffer> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > limit) {
+      throw new Error(
+        `Preview exceeds ${limit} byte limit (${info.size} bytes). Lower max_dimension_px or quality.`
+      );
+    }
+    return await new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      const stream = handle.createReadStream({ autoClose: false, highWaterMark: 64 * 1024 });
+      stream.on('data', (chunk: string | Buffer) => {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        size += bytes.length;
+        if (size > limit) {
+          stream.destroy(new Error(`Preview exceeds ${limit} byte limit while reading.`));
+          return;
+        }
+        chunks.push(bytes);
+      });
+      stream.on('error', reject);
+      stream.on('end', () => resolve(Buffer.concat(chunks, size)));
+    });
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
 
 async function runScript(transport: TransportRouter, script: string): Promise<unknown> {
   return transport.runScript(script);
@@ -43,6 +77,7 @@ export function createStateTools(transport: TransportRouter): ToolDefinition[] {
               type: 'number',
               description: 'Maximum long edge in pixels (default 1024)',
               default: 1024,
+              maximum: MAX_PREVIEW_DIMENSION_PX,
             },
             quality: {
               type: 'number',
@@ -93,27 +128,39 @@ async function getPreview(
   transport: TransportRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
-  const maxDimension = (args.max_dimension_px as number) || 1024;
-  const quality = (args.quality as number) || 8;
+  const maxDimension = args.max_dimension_px === undefined ? 1024 : args.max_dimension_px;
+  const quality = args.quality === undefined ? 8 : args.quality;
 
+  let tempDir: string | undefined;
   let tempPath: string | undefined;
 
+  if (
+    typeof maxDimension !== 'number' ||
+    !Number.isInteger(maxDimension) ||
+    maxDimension < 1 ||
+    maxDimension > MAX_PREVIEW_DIMENSION_PX
+  ) {
+    return envelopeToToolResult(
+      classifyError(`max_dimension_px must be an integer from 1 to ${MAX_PREVIEW_DIMENSION_PX}.`)
+    );
+  }
+  const qualityError = validateIntegerInRange(quality, 1, 12, 'quality');
+  if (qualityError) {
+    return envelopeToToolResult(classifyError(qualityError));
+  }
+
   try {
+    tempDir = await mkdtemp(join(tmpdir(), 'photoshop-mcp-preview-'));
+    tempPath = join(tempDir, 'preview.jpg');
     const result = (await runScript(
       transport,
-      ExtendScriptSnippets.exportPreview(maxDimension, quality)
+      ExtendScriptSnippets.exportPreview(maxDimension, quality as number, tempPath)
     )) as { path: string; width: number; height: number; mimeType: string };
 
-    tempPath = result.path;
-    const buffer = await readFile(tempPath);
-
-    if (buffer.byteLength > PREVIEW_MAX_BYTES) {
-      return envelopeToToolResult(
-        classifyError(
-          `Preview exceeds ${PREVIEW_MAX_BYTES} byte limit (${buffer.byteLength} bytes). Lower max_dimension_px or quality.`
-        )
-      );
+    if (result.path !== tempPath) {
+      throw new Error('Photoshop preview returned an unexpected output path.');
     }
+    const buffer = await readPreviewWithLimit(tempPath, PREVIEW_MAX_BYTES);
 
     const base64 = buffer.toString('base64');
 
@@ -144,8 +191,10 @@ async function getPreview(
       classifyError(error instanceof Error ? error.message : String(error))
     );
   } finally {
-    if (tempPath) {
-      await unlink(tempPath).catch(() => undefined);
+    if (tempDir) {
+      // The directory was freshly created by this process. Removing it after
+      // closing the only descriptor cannot unlink an attacker-selected path.
+      await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 }

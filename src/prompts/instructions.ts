@@ -25,7 +25,7 @@ State before action
 Recipe tools over atomic chains
 - When the user's request matches a recipe purpose ("remove background",
   "cut out", "isolate subject", "enhance portrait", "smooth skin", "retouch",
-  "prepare for web", "export Instagram variants", "apply cinematic color grade",
+  "export Instagram variants", "apply cinematic color grade",
   "make it pop", "frequency separation", "replace mockup", "organize layers",
   "replace sky", "fade into background", "gradient mask", "dodge and burn",
   "remove that person", "erase distraction"), prefer the matching
@@ -42,8 +42,8 @@ Units & conventions
 - All numeric coordinates, widths, heights and bounds are pixels. The server
   forces pixel/point units around every script — do not translate to inches/cm/percent.
 - Font sizes are points. Colors are 0–255 RGB triplets.
-- Output files default to \`~/.photoshop-mcp/exports[/<chat-id>]\`. Pass an absolute
-  path only when the user explicitly asks for one.
+- Output paths are tool-specific. Never infer that a model-selected pathname is
+  authorized for a filesystem write.
 
 Error recovery contract
 - Tools return a structured envelope when something is wrong:
@@ -92,7 +92,7 @@ User intent glossary
 - light.dodge_burn — "dodge and burn", "sculpt light", "lighten face" →
   \`photoshop_recipe_dodge_burn\`; guide \`ps.dodge_burn_guide\` for atomic setup
 - export.social — "for Instagram", "web export" →
-  \`photoshop_recipe_export_social_variants\` or \`photoshop_recipe_prepare_for_web\`
+  \`photoshop_recipe_export_social_variants\`
 - layers.organize — "organize layers", "rename mess" → \`photoshop_recipe_organize_layers\`
 
 Degrade paths
@@ -114,14 +114,13 @@ Disambiguation
   Gradient Fill layer unless the user explicitly asks for a fill layer.
 - "remove" — prefer mask or content-aware inpainting; not deleting the layer
   unless the user explicitly wants pixels destroyed.
-- "sharpen" — web export sharpen pass → \`photoshop_recipe_prepare_for_web\`;
-  single-layer sharpen → \`photoshop_apply_sharpen\`.
+- "sharpen" — single-layer sharpen → \`photoshop_apply_sharpen\`.
 
 Guide prompts (MCP prompts/get)
 - Prefer matching \`ps.*\` **recipe** prompt when the user wants a one-undo outcome;
   use guide prompts for teaching atomic chains.
 - Recipe prompts (1:1 with \`photoshop_recipe_*\`): \`ps.remove_background\`,
-  \`ps.enhance_portrait\`, \`ps.prepare_for_web\`, \`ps.export_social_variants\`,
+  \`ps.enhance_portrait\`, \`ps.export_social_variants\`,
   \`ps.apply_color_grade\`, \`ps.frequency_separation\`, \`ps.batch_mockup_replace\`,
   \`ps.organize_layers\`, \`ps.gradient_fade\`, \`ps.sky_blend\`, \`ps.dodge_burn\`,
   \`ps.remove_distraction\`

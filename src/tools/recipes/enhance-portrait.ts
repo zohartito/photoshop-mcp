@@ -99,7 +99,7 @@ async function runEnhancePortrait(
           smoothness: intensity === 'high' ? 70 : intensity === 'low' ? 30 : 50,
           blur: intensity === 'high' ? 60 : intensity === 'low' ? 25 : 40,
         },
-        timeoutMs: 90_000,
+        timeoutMs: 120_000,
       });
     } catch (error) {
       return {

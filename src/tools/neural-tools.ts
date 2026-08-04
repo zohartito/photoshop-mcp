@@ -103,14 +103,15 @@ async function runNeuralFilter(
   };
 
   // UXP-pinned command (§4.3): route through the router so the neural filter runs
-  // on the UXP backend via the global queue. Params match the old invokeNeuralFilter
-  // → invokeUxpBridge('neural_filter', { filter, ...params }, 90_000) shape exactly.
+  // on the UXP backend via the global queue. Neural filters have one explicit
+  // 120s execution budget; the bridge adds only its bounded acknowledgement
+  // margin to the corresponding lease.
   let bridgeData: unknown;
   try {
     bridgeData = await transport.run({
       name: 'neural_filter',
       params: { filter, ...params },
-      timeoutMs: 90_000,
+      timeoutMs: 120_000,
     });
   } catch (error) {
     return atomicFailure({

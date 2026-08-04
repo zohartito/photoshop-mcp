@@ -180,15 +180,14 @@ async function main(): Promise<void> {
   await t.run('photoshop_get_capabilities', {}, { required: true });
   await t.run('photoshop_get_state');
 
-  await t.run('photoshop_execute_script', {
-    code: `while (app.documents.length > 0) { app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); } return { documentsClosed: true };`,
-  });
-
   console.log('\n=== Phase 1: Document ===');
   await t.run('photoshop_create_document', { width: 800, height: 600 }, { required: true });
 
   {
-    const docInfoResult = await client.callTool({ name: 'photoshop_get_document_info', arguments: {} });
+    const docInfoResult = await client.callTool({
+      name: 'photoshop_get_document_info',
+      arguments: {},
+    });
     const docInfoBody = textFrom(docInfoResult);
     if (docInfoResult.isError) {
       t.recordPrompt('assert:document_info_fields', 'fail', short(docInfoBody), 0);
@@ -234,21 +233,20 @@ async function main(): Promise<void> {
   });
   await t.run('photoshop_get_layers', {}, { required: true });
   await t.run('photoshop_select_layer_by_name', { name: 'MCP_Paint' }, { required: true });
-  await t.run('photoshop_select_layer_by_name', { name: '__MCP_MISSING_LAYER__' }, { expectError: true });
+  await t.run(
+    'photoshop_select_layer_by_name',
+    { name: '__MCP_MISSING_LAYER__' },
+    { expectError: true }
+  );
 
   console.log('\n=== Phase 3: Layer properties ===');
-  await t.run('photoshop_execute_script', {
-    code: `app.activeDocument.activeLayer = app.activeDocument.artLayers.getByName("MCP_Paint"); return { selected: app.activeDocument.activeLayer.name };`,
-  });
   await t.run('photoshop_set_layer_opacity', { opacity: 85 });
   await t.run('photoshop_set_layer_blend_mode', { blendMode: 'MULTIPLY' });
   await t.run('photoshop_set_layer_visibility', { visible: true });
   await t.run('photoshop_rename_layer', { name: 'MCP_Paint_Renamed' });
   await t.run('photoshop_duplicate_layer');
   await t.run('photoshop_set_layer_locked', { locked: false });
-  await t.run('photoshop_execute_script', {
-    code: `app.activeDocument.activeLayer = app.activeDocument.artLayers.getByName("MCP_Paint_Renamed"); return { active: app.activeDocument.activeLayer.name };`,
-  });
+  await t.run('photoshop_select_layer_by_name', { name: 'MCP_Paint_Renamed' });
 
   console.log('\n=== Phase 4: Layer transforms ===');
   await t.run('photoshop_move_layer', { deltaX: 10, deltaY: 5 });
@@ -267,9 +265,7 @@ async function main(): Promise<void> {
   await t.run('photoshop_move_layer_to_bottom');
 
   console.log('\n=== Phase 6: Selection & masks ===');
-  await t.run('photoshop_execute_script', {
-    code: `app.activeDocument.activeLayer = app.activeDocument.artLayers.getByName("MCP_Paint_Renamed"); return { active: app.activeDocument.activeLayer.name };`,
-  });
+  await t.run('photoshop_select_layer_by_name', { name: 'MCP_Paint_Renamed' });
   await t.run('photoshop_select_rectangle', { left: 50, top: 50, right: 300, bottom: 300 });
   await t.run('photoshop_content_aware_fill');
   await t.run('photoshop_select_all');
@@ -287,9 +283,7 @@ async function main(): Promise<void> {
 
   console.log('\n=== Phase 7: Adjustments ===');
   await t.run('photoshop_select_layer_by_name', { name: 'MCP_Paint_Renamed copy' });
-  await t.run('photoshop_execute_script', {
-    code: `var L=app.activeDocument.activeLayer; L.blendMode=BlendMode.NORMAL; return { selected: L.name, blendMode: String(L.blendMode) };`,
-  });
+  await t.run('photoshop_set_layer_blend_mode', { blendMode: 'NORMAL' });
   await t.run('photoshop_adjust_brightness_contrast', { brightness: 5, contrast: 5 });
   await t.run('photoshop_adjust_hue_saturation', { hue: 5, saturation: 5, lightness: 0 });
   await t.run('photoshop_auto_levels');
@@ -308,9 +302,7 @@ async function main(): Promise<void> {
 
   console.log('\n=== Phase 9: Text ===');
   await t.run('photoshop_list_fonts', { query: 'Arial', limit: 50 });
-  await t.run('photoshop_execute_script', {
-    code: `for (var i = 0; i < app.activeDocument.artLayers.length; i++) { var L = app.activeDocument.artLayers[i]; if (L.kind == LayerKind.TEXT) { app.activeDocument.activeLayer = L; break; } } return { active: app.activeDocument.activeLayer.name };`,
-  });
+  await t.run('photoshop_select_layer_by_name', { name: 'MCP Test' });
   await t.run('photoshop_set_text_font', { fontName: 'Arial', fontSize: 32 });
   await t.run('photoshop_create_text_layer', {
     text: 'MCP Arial',
@@ -326,9 +318,6 @@ async function main(): Promise<void> {
   console.log('\n=== Phase 10: Image placement ===');
   await t.run('photoshop_place_image', { filePath: testPng, x: 400, y: 200 });
   await t.run('photoshop_open_image', { filePath: testPng });
-  await t.run('photoshop_execute_script', {
-    code: `for (var i=0;i<app.documents.length;i++){var d=app.documents[i]; if(d.width.as('px')===800&&d.height.as('px')===600){app.activeDocument=d;break;}} return {active:app.activeDocument.name,width:app.activeDocument.width.as('px')};`,
-  }, { required: true });
 
   console.log('\n=== Phase 11: Image document ops ===');
   await t.run('photoshop_resize_image', { width: 640, height: 480 });
@@ -340,29 +329,27 @@ async function main(): Promise<void> {
   await t.run('photoshop_redo', { steps: 1 });
 
   console.log('\n=== Phase 13: Actions ===');
-  await t.run('photoshop_execute_script', {
-    code: 'return { documents: app.documents.length, active: app.activeDocument.name };',
-  });
   await t.run('photoshop_play_action', undefined, {
     skip: 'requires a real Actions palette entry — environment-specific',
   });
 
   console.log('\n=== Phase 14: Recipes ===');
-  await t.run('photoshop_execute_script', {
-    code: `var doc=app.activeDocument; for (var i=0;i<doc.artLayers.length;i++){var L=doc.artLayers[i]; if(String(L.kind)=='LayerKind.NORMAL'&&L.name.indexOf('Renamed')>=0){doc.activeLayer=L;break;}} return {active:doc.activeLayer.name,kind:String(doc.activeLayer.kind)};`,
-  });
+  await t.run('photoshop_select_layer_by_name', { name: 'MCP_Paint_Renamed copy' });
   await t.run('photoshop_recipe_frequency_separation', { radius_px: 6 });
   await t.run('photoshop_undo', { steps: 1 });
   await t.run('photoshop_recipe_enhance_portrait', { intensity: 'low', skin_smoothing: true });
   await t.run('photoshop_undo', { steps: 1 });
-  await t.run('photoshop_recipe_remove_background', { feather_px: 1, keep_shadow: false }, {
-    skip: 'requires a recognizable subject in the active layer — synthetic test canvas has none',
-  });
+  await t.run(
+    'photoshop_recipe_remove_background',
+    { feather_px: 1, keep_shadow: false },
+    {
+      skip: 'requires a recognizable subject in the active layer — synthetic test canvas has none',
+    }
+  );
   await t.run('photoshop_undo', { steps: 1 });
   await t.run('photoshop_recipe_apply_color_grade', { preset: 'warm_film' });
   await t.run('photoshop_undo', { steps: 1 });
   await t.run('photoshop_recipe_organize_layers', { auto_group: true, preserve: true });
-  await t.run('photoshop_recipe_prepare_for_web', { quality: 8 });
   await t.run('photoshop_recipe_export_social_variants', {
     platforms: ['instagram_post', 'x_post'],
   });
@@ -371,14 +358,12 @@ async function main(): Promise<void> {
   });
   await t.run('photoshop_recipe_gradient_fade', { direction: 'bottom_to_top' });
   await t.run('photoshop_undo', { steps: 1 });
-  await t.run('photoshop_execute_script', {
-    code: `var doc=app.activeDocument; var target=null; function findRaster(c){for(var i=0;i<c.layers.length;i++){var L=c.layers[i]; if(L.typename==='LayerSet'){var n=findRaster(L); if(n)return n;} else if(String(L.kind)==='LayerKind.NORMAL'&&!L.isBackgroundLayer){return L;}} return null;} target=findRaster(doc); if(!target) throw new Error('No raster layer'); doc.activeLayer=target; return {active:target.name,kind:String(target.kind)};`,
-  });
+  await t.run('photoshop_create_layer', { name: 'MCP_DodgeTarget' });
+  await t.run('photoshop_fill_layer', { red: 100, green: 100, blue: 100 });
   await t.run('photoshop_recipe_dodge_burn', { blend_mode: 'overlay' });
   await t.run('photoshop_undo', { steps: 1 });
-  await t.run('photoshop_execute_script', {
-    code: `var doc=app.activeDocument; var target=null; function findRaster(c){for(var i=0;i<c.layers.length;i++){var L=c.layers[i]; if(L.typename==='LayerSet'){var n=findRaster(L); if(n)return n;} else if(String(L.kind)==='LayerKind.NORMAL'&&!L.isBackgroundLayer){return L;}} return null;} target=findRaster(doc); if(!target) throw new Error('No raster layer'); doc.activeLayer=target; return {active:target.name,kind:String(target.kind)};`,
-  });
+  await t.run('photoshop_create_layer', { name: 'MCP_DistractionTarget' });
+  await t.run('photoshop_fill_layer', { red: 120, green: 120, blue: 120 });
   await t.run('photoshop_select_rectangle', { left: 80, top: 80, right: 200, bottom: 200 });
   await t.run('photoshop_recipe_remove_distraction', { feather_px: 1 });
   await t.run('photoshop_undo', { steps: 1 });
@@ -394,14 +379,22 @@ async function main(): Promise<void> {
   await t.run('photoshop_select_rectangle', { left: 100, top: 100, right: 250, bottom: 250 });
   await t.run('photoshop_generative_fill', { prompt: 'soft gradient' }, { skip: generativeSkip });
   await t.run('photoshop_generative_remove', { feather_px: 0 }, { skip: generativeSkip });
-  await t.run('photoshop_generative_expand', { prompt: 'extend background', direction: 'all' }, {
-    skip: generativeSkip,
-  });
+  await t.run(
+    'photoshop_generative_expand',
+    { prompt: 'extend background', direction: 'all' },
+    {
+      skip: generativeSkip,
+    }
+  );
   await t.run('photoshop_generative_upscale', { target_scale: 2 }, { skip: generativeSkip });
   await t.run('photoshop_sky_replacement', { sky_image_path: testPng }, { skip: generativeSkip });
-  await t.run('photoshop_generate_image', { prompt: 'abstract gradient', width: 512, height: 512 }, {
-    skip: generativeSkip,
-  });
+  await t.run(
+    'photoshop_generate_image',
+    { prompt: 'abstract gradient', width: 512, height: 512 },
+    {
+      skip: generativeSkip,
+    }
+  );
   await t.run(
     'photoshop_neural_filter',
     { filter: 'skin_smoothing', smoothness: 40, blur: 40 },
@@ -429,9 +422,6 @@ async function main(): Promise<void> {
     y: 80,
     fontSize: 24,
   });
-  await t.run('photoshop_execute_script', {
-    code: `for (var i=0;i<app.activeDocument.artLayers.length;i++){var L=app.activeDocument.artLayers[i]; if(String(L.kind)=='LayerKind.TEXT'&&L.name.indexOf('Rasterize')>=0){app.activeDocument.activeLayer=L; break;}} return {active:app.activeDocument.activeLayer.name,kind:String(app.activeDocument.activeLayer.kind)};`,
-  });
   await t.run('photoshop_rasterize_layer');
   await t.run('photoshop_merge_visible_layers');
   await t.run('photoshop_flatten_image');
@@ -439,11 +429,10 @@ async function main(): Promise<void> {
   console.log('\n=== Phase 17: Cleanup ===');
   await t.run('photoshop_close_document', { save: false });
 
-  console.log('\n=== Phase 18: Prompt templates (12 recipes) ===');
+  console.log('\n=== Phase 18: Prompt templates (11 recipes) ===');
   const prompts = [
     ['ps.remove_background', { feather_px: '1', keep_shadow: 'false' }],
     ['ps.enhance_portrait', { intensity: 'medium', skin_smoothing: 'true' }],
-    ['ps.prepare_for_web', { quality: '8' }],
     ['ps.export_social_variants', { platforms: 'instagram_post,x_post' }],
     ['ps.apply_color_grade', { preset: 'warm' }],
     ['ps.frequency_separation', { radius_px: '6' }],
@@ -478,7 +467,9 @@ async function main(): Promise<void> {
 
   const failed = t.getResults().filter((r) => r.outcome === 'fail').length;
   const requiredTools = 79;
-  const passedTools = t.getResults().filter((r) => r.outcome === 'pass' && r.name.startsWith('photoshop_')).length;
+  const passedTools = t
+    .getResults()
+    .filter((r) => r.outcome === 'pass' && r.name.startsWith('photoshop_')).length;
   console.log(`\nTool coverage: ${passedTools}/${requiredTools} atomic+recipe tools passed.`);
   process.exit(failed > 0 ? 1 : 0);
 }

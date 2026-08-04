@@ -77,7 +77,6 @@ async function main(): Promise<void> {
     'ps.frequency_separation',
     'ps.gradient_fade',
     'ps.organize_layers',
-    'ps.prepare_for_web',
     'ps.remove_background',
     'ps.remove_distraction',
     'ps.sky_blend',
@@ -91,11 +90,14 @@ async function main(): Promise<void> {
     'ps.generative_remove',
     'ps.generative_expand',
   ];
-  if (promptNames.length !== 19) fail('prompt count', String(promptNames.length));
+  if (promptNames.length !== 18) fail('prompt count', String(promptNames.length));
   for (const name of [...expectedRecipePrompts, ...expectedGuidePrompts]) {
     if (!promptNames.includes(name)) fail('missing prompt', name);
   }
-  ok('19 prompt templates', `${expectedRecipePrompts.length} recipe + ${expectedGuidePrompts.length} guide`);
+  ok(
+    '18 prompt templates',
+    `${expectedRecipePrompts.length} recipe + ${expectedGuidePrompts.length} guide`
+  );
 
   section('Get prompt (ps.remove_background)');
   const promptResult = await client.getPrompt({
@@ -109,7 +111,8 @@ async function main(): Promise<void> {
     fail('prompt content', 'missing recipe reference');
   }
   if (!promptText.includes('feather_px: 2')) fail('prompt content', 'missing feather_px coercion');
-  if (!promptText.includes('keep_shadow: true')) fail('prompt content', 'missing keep_shadow coercion');
+  if (!promptText.includes('keep_shadow: true'))
+    fail('prompt content', 'missing keep_shadow coercion');
   ok('ps.remove_background', `${promptText.length} chars`);
 
   section('Get prompt (ps.sky_blend)');
@@ -135,7 +138,6 @@ async function main(): Promise<void> {
     'photoshop_recipe_remove_background',
     'photoshop_recipe_enhance_portrait',
     'photoshop_recipe_frequency_separation',
-    'photoshop_recipe_prepare_for_web',
     'photoshop_recipe_export_social_variants',
     'photoshop_recipe_apply_color_grade',
     'photoshop_recipe_batch_mockup_replace',
@@ -181,7 +183,9 @@ async function main(): Promise<void> {
     const stateText = textFromToolResult(state);
     let hasDocument = false;
     if (state.isError) {
-      console.log(`  WARN get_state returned error (document may be in odd state): ${stateText.slice(0, 200)}`);
+      console.log(
+        `  WARN get_state returned error (document may be in odd state): ${stateText.slice(0, 200)}`
+      );
     } else {
       const stateJson = JSON.parse(stateText) as { hasDocument?: boolean };
       hasDocument = stateJson.hasDocument === true;
@@ -209,7 +213,7 @@ async function main(): Promise<void> {
 
   section('Export path env');
   if (process.env.PHOTOSHOP_EXPORT_CHAT_ID !== TEST_CHAT_ID) {
-    // env is on server child, not parent — verify via prepare_for_web path hint in instructions
+    // env is on server child; the smoke test only verifies that the child inherited it.
     ok('chat scoping', `server spawned with PHOTOSHOP_EXPORT_CHAT_ID=${TEST_CHAT_ID}`);
   }
 

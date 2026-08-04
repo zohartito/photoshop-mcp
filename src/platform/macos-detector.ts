@@ -1,10 +1,10 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { access, constants, readFile } from 'fs/promises';
 import { Logger } from '../utils/logger.js';
 import { PhotoshopInfo } from './connection.js';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export class MacOSDetector {
   private logger: Logger;
@@ -45,9 +45,9 @@ export class MacOSDetector {
   private async detectUsingSpotlight(): Promise<PhotoshopInfo | null> {
     try {
       // Use mdfind to search for Photoshop applications
-      const { stdout } = await execAsync(
-        'mdfind "kMDItemCFBundleIdentifier == com.adobe.Photoshop"'
-      );
+      const { stdout } = await execFileAsync('/usr/bin/mdfind', [
+        'kMDItemCFBundleIdentifier == com.adobe.Photoshop',
+      ]);
 
       const apps = stdout
         .split('\n')
@@ -97,7 +97,7 @@ export class MacOSDetector {
 
       // Get version from Info.plist
       const version = await this.extractVersionFromApp(cleanPath);
-      
+
       // Extract app name from path
       const appName = cleanPath.split('/').pop()?.replace('.app', '') || 'Adobe Photoshop 2025';
 
@@ -118,15 +118,17 @@ export class MacOSDetector {
     try {
       // Try to read version from Info.plist
       const plistPath = `${appPath}/Contents/Info.plist`;
-      
+
       try {
         await access(plistPath, constants.F_OK);
-        
+
         // Use PlistBuddy to extract version
-        const { stdout: version } = await execAsync(
-          `/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${plistPath}"`
-        );
-        
+        const { stdout: version } = await execFileAsync('/usr/libexec/PlistBuddy', [
+          '-c',
+          'Print :CFBundleShortVersionString',
+          plistPath,
+        ]);
+
         if (version.trim()) {
           return version.trim();
         }
@@ -136,7 +138,7 @@ export class MacOSDetector {
         const versionMatch = content.match(
           /<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/
         );
-        
+
         if (versionMatch) {
           return versionMatch[1];
         }
@@ -160,7 +162,7 @@ export class MacOSDetector {
       const appName = appPath.split('/').pop()?.replace('.app', '') || 'Adobe Photoshop';
 
       // Use pgrep to check if process is running
-      const { stdout } = await execAsync(`pgrep -f "${appName}"`);
+      const { stdout } = await execFileAsync('/usr/bin/pgrep', ['-f', appName]);
       return stdout.trim().length > 0;
     } catch {
       // pgrep returns non-zero exit code if no process found
@@ -171,9 +173,11 @@ export class MacOSDetector {
   async getAppBundleId(appPath: string): Promise<string | null> {
     try {
       const plistPath = `${appPath}/Contents/Info.plist`;
-      const { stdout } = await execAsync(
-        `/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "${plistPath}"`
-      );
+      const { stdout } = await execFileAsync('/usr/libexec/PlistBuddy', [
+        '-c',
+        'Print :CFBundleIdentifier',
+        plistPath,
+      ]);
       return stdout.trim();
     } catch {
       return null;

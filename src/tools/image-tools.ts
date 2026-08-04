@@ -1,6 +1,7 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { TransportRouter } from '../transport/index.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
+import { MAX_DOCUMENT_DIMENSION_PX, validatePixelDimensions } from './resource-limits.js';
 
 export function createImageTools(transport: TransportRouter): ToolDefinition[] {
   return [
@@ -15,11 +16,13 @@ export function createImageTools(transport: TransportRouter): ToolDefinition[] {
               type: 'number',
               description: 'New width in pixels',
               minimum: 1,
+              maximum: MAX_DOCUMENT_DIMENSION_PX,
             },
             height: {
               type: 'number',
               description: 'New height in pixels',
               minimum: 1,
+              maximum: MAX_DOCUMENT_DIMENSION_PX,
             },
           },
           required: ['width', 'height'],
@@ -69,6 +72,14 @@ async function resizeImage(
 ): Promise<ToolResult> {
   const width = args.width as number;
   const height = args.height as number;
+
+  const dimensionError = validatePixelDimensions(width, height);
+  if (dimensionError) {
+    return {
+      content: [{ type: 'text', text: `Error resizing image: ${dimensionError}` }],
+      isError: true,
+    };
+  }
 
   try {
     const script = ExtendScriptSnippets.resizeImage(width, height);

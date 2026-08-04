@@ -3,19 +3,14 @@
  *
  * Wraps the EXISTING machinery unchanged: PhotoshopConnection → ScriptExecutor,
  * PhotoshopAPIFactory / ExtendScriptPhotoshopAPI (px/pt unit forcing, DialogModes.NO,
- * alert/confirm/prompt shims, the "ERROR:" string protocol, toSource() serialization),
- * and parseExtendScriptPayload for result normalization. None of that logic is
+ * and dialog shims) plus strict JSON result normalization. None of that logic is
  * duplicated here — the transport is a thin altitude-lift so tools stop holding a
  * PhotoshopConnection directly. Result normalization stays internal to the backend
- * (§4.1): callers get parsed payloads, never raw ExtendScript strings.
+ * (§4.1): callers get parsed payloads, never evaluated source text.
  */
 import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
 import type { PhotoshopConnection, PhotoshopInfo } from '../platform/connection.js';
-import type {
-  PhotoshopTransport,
-  PsCommand,
-  TransportCapabilities,
-} from './types.js';
+import type { PhotoshopTransport, PsCommand, TransportCapabilities } from './types.js';
 
 /**
  * A command destined for the ExtendScript backend carries a ready-built
@@ -32,9 +27,7 @@ export interface ExtendScriptCommandParams extends Record<string, unknown> {
 function scriptFromCommand(command: PsCommand): { script: string; timeoutMs?: number } {
   const script = command.params?.script;
   if (typeof script !== 'string') {
-    throw new Error(
-      `ExtendScriptTransport: command "${command.name}" is missing params.script`
-    );
+    throw new Error(`ExtendScriptTransport: command "${command.name}" is missing params.script`);
   }
   const timeoutMs =
     command.timeoutMs ??

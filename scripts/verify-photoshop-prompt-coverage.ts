@@ -10,7 +10,10 @@ import assert from 'node:assert/strict';
 import { ToolRegistry } from '../src/core/tool-registry.js';
 import { PromptRegistry } from '../src/core/prompt-registry.js';
 import { registerPhotoshopPrompts } from '../src/prompts/registry.js';
-import { PHOTOSHOP_PROMPT_TEMPLATES, PHOTOSHOP_GUIDE_PROMPT_NAMES } from '../src/prompts/registry.js';
+import {
+  PHOTOSHOP_PROMPT_TEMPLATES,
+  PHOTOSHOP_GUIDE_PROMPT_NAMES,
+} from '../src/prompts/registry.js';
 import { buildPhotoshopInstructions } from '../src/prompts/instructions.js';
 import { createRecipeTools } from '../src/tools/recipes/index.js';
 import { PHOTOSHOP_RECIPE_TOOL_NAMES } from '../src/tools/recipes/index.js';
@@ -45,7 +48,6 @@ console.log(`Registered ${toolRegistry.count()} tools and ${promptRegistry.count
 const RECIPE_TO_PROMPT: Record<string, string> = {
   photoshop_recipe_remove_background: 'ps.remove_background',
   photoshop_recipe_enhance_portrait: 'ps.enhance_portrait',
-  photoshop_recipe_prepare_for_web: 'ps.prepare_for_web',
   photoshop_recipe_export_social_variants: 'ps.export_social_variants',
   photoshop_recipe_apply_color_grade: 'ps.apply_color_grade',
   photoshop_recipe_frequency_separation: 'ps.frequency_separation',
@@ -60,10 +62,10 @@ const RECIPE_TO_PROMPT: Record<string, string> = {
 const promptNames = new Set(PHOTOSHOP_PROMPT_TEMPLATES.map((p) => p.name));
 const guidePromptNames = new Set<string>(PHOTOSHOP_GUIDE_PROMPT_NAMES);
 
-assert.equal(PHOTOSHOP_RECIPE_TOOL_NAMES.length, 12);
-assert.equal(Object.keys(RECIPE_TO_PROMPT).length, 12);
+assert.equal(PHOTOSHOP_RECIPE_TOOL_NAMES.length, 11);
+assert.equal(Object.keys(RECIPE_TO_PROMPT).length, 11);
 assert.equal(PHOTOSHOP_GUIDE_PROMPT_NAMES.length, 7);
-assert.equal(PHOTOSHOP_PROMPT_TEMPLATES.length, 19);
+assert.equal(PHOTOSHOP_PROMPT_TEMPLATES.length, 18);
 
 for (const recipeName of PHOTOSHOP_RECIPE_TOOL_NAMES) {
   const promptName = RECIPE_TO_PROMPT[recipeName];
@@ -130,10 +132,7 @@ for (const marker of [
   'photoshop_neural_filter',
   'ps.generative_fill',
 ]) {
-  assert.ok(
-    instructions.includes(marker),
-    `Photoshop instructions should mention "${marker}".`
-  );
+  assert.ok(instructions.includes(marker), `Photoshop instructions should mention "${marker}".`);
 }
 
 console.log(

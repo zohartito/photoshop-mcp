@@ -264,7 +264,7 @@ export async function executeRecipe(
     // operation API so it takes the global queue (§6.2) as one indivisible unit.
     const script = wrapInSuspendHistory(historyName, body);
     const raw = await transport.runOperation(`recipe:${historyName}`, [
-      { name: 'execute_script', params: { script } },
+      { name: 'extendscript_operation', params: { script } },
     ]);
     const parsed = parseRecipeResult(raw);
     if (!parsed) {

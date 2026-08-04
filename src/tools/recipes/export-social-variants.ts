@@ -36,7 +36,7 @@ export function bindExportSocialVariants(transport: TransportRouter): ToolDefini
         'Render one JPEG per requested social-media platform from the active document. Each variant is center-cropped/resized to the platform spec and saved to disk.\n' +
         '\n' +
         'Use when: the user wants multi-platform deliverables in one shot.\n' +
-        'Do NOT use when: only one export is needed (use photoshop_recipe_prepare_for_web instead) or when platforms differ by content rather than crop (recipe does not change content, only frame).\n' +
+        'Do NOT use when: platforms differ by content rather than crop (recipe does not change content, only frame).\n' +
         '\n' +
         'Returns: { ok, summary, output_paths, details: { variants } }.\n' +
         '\n' +

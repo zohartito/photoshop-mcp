@@ -41,13 +41,18 @@ function short(text: string, max = 160): string {
 
 function record(group: string, name: string, outcome: Outcome, detail: string, ms: number): void {
   results.push({ group, name, outcome, detail, ms });
-  const tag = outcome === 'pass' ? 'OK  ' : outcome === 'skip' ? 'SKIP' : outcome === 'warn' ? 'WARN' : 'FAIL';
+  const tag =
+    outcome === 'pass'
+      ? 'OK  '
+      : outcome === 'skip'
+        ? 'SKIP'
+        : outcome === 'warn'
+          ? 'WARN'
+          : 'FAIL';
   console.log(`  ${tag} ${name} (${ms}ms) — ${short(detail)}`);
 }
 
-function textFrom(result: {
-  content?: Array<{ type: string; text?: string }>;
-}): string {
+function textFrom(result: { content?: Array<{ type: string; text?: string }> }): string {
   return (result.content ?? [])
     .filter((c) => c.type === 'text' && c.text)
     .map((c) => c.text!)
@@ -127,7 +132,9 @@ function summary(): void {
   const warn = results.filter((r) => r.outcome === 'warn').length;
 
   console.log('\n========================================');
-  console.log(`INTENT EXPANSION: ${pass} pass, ${fail} fail, ${skip} skip, ${warn} warn (${results.length} total)`);
+  console.log(
+    `INTENT EXPANSION: ${pass} pass, ${fail} fail, ${skip} skip, ${warn} warn (${results.length} total)`
+  );
   console.log('========================================');
 
   if (fail > 0) {
@@ -169,17 +176,20 @@ async function main(): Promise<void> {
   section('0 — Photoshop bağlantısı');
   const pingOk = await call(client, 'bootstrap', 'photoshop_ping', {}, { required: true });
   if (!pingOk) {
-    console.error('\nPhotoshop açık değil veya MCP bağlanamıyor. Photoshop\'u açıp tekrar deneyin.');
+    console.error("\nPhotoshop açık değil veya MCP bağlanamıyor. Photoshop'u açıp tekrar deneyin.");
     await transport.close();
     process.exit(1);
   }
   await call(client, 'bootstrap', 'photoshop_get_capabilities', {}, { required: true });
 
   section('1 — Test dokümanı hazırlığı');
-  await call(client, 'setup', 'photoshop_execute_script', {
-    code: `while (app.documents.length > 0) { app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); } return { closed: true };`,
-  });
-  await call(client, 'setup', 'photoshop_create_document', { width: 1200, height: 800 }, { required: true });
+  await call(
+    client,
+    'setup',
+    'photoshop_create_document',
+    { width: 1200, height: 800 },
+    { required: true }
+  );
   await call(client, 'setup', 'photoshop_create_layer', { name: 'Subject' });
   await call(client, 'setup', 'photoshop_fill_layer', { red: 200, green: 60, blue: 40 });
   await call(client, 'setup', 'photoshop_place_image', { filePath: testPng, x: 400, y: 300 });
@@ -194,22 +204,28 @@ async function main(): Promise<void> {
 
   section('2 — Yeni atomik araçlar (Phase 3)');
   // Curves + fill need a normal art layer (not Background / locked Smart Object-only path).
-  await call(client, 'atomic', 'photoshop_execute_script', {
-    code: `var doc=app.activeDocument; for(var i=0;i<doc.artLayers.length;i++){var L=doc.artLayers[i]; if(L.name.indexOf('Subject')>=0){doc.activeLayer=L;break;}} return {active:doc.activeLayer.name,kind:String(doc.activeLayer.kind)};`,
-  });
+  await call(client, 'atomic', 'photoshop_select_layer_by_name', { name: 'Subject' });
   await call(client, 'atomic', 'photoshop_adjust_curves', { preset: 'auto_tone' });
   await call(client, 'atomic', 'photoshop_undo', { steps: 1 });
 
-  // Content-aware fill edits the active layer's pixels — use Background (recipe path validated this).
-  await call(client, 'atomic', 'photoshop_execute_script', {
-    code: `app.activeDocument.activeLayer=app.activeDocument.layers[app.activeDocument.layers.length-1]; while(app.activeDocument.activeLayer.parent.typename==='LayerSet'){app.activeDocument.activeLayer=app.activeDocument.activeLayer.parent;} return {active:app.activeDocument.activeLayer.name};`,
+  // Content-aware fill edits the active layer's pixels — use the known raster Subject layer.
+  await call(client, 'atomic', 'photoshop_select_layer_by_name', { name: 'Subject' });
+  await call(client, 'atomic', 'photoshop_select_rectangle', {
+    left: 100,
+    top: 100,
+    right: 350,
+    bottom: 350,
   });
-  await call(client, 'atomic', 'photoshop_select_rectangle', { left: 100, top: 100, right: 350, bottom: 350 });
   await call(client, 'atomic', 'photoshop_content_aware_fill');
   await call(client, 'atomic', 'photoshop_undo', { steps: 1 });
   await call(client, 'atomic', 'photoshop_deselect');
 
-  await call(client, 'atomic', 'photoshop_select_rectangle', { left: 50, top: 50, right: 500, bottom: 500 });
+  await call(client, 'atomic', 'photoshop_select_rectangle', {
+    left: 50,
+    top: 50,
+    right: 500,
+    bottom: 500,
+  });
   await call(client, 'atomic', 'photoshop_create_layer_mask');
   await call(client, 'atomic', 'photoshop_apply_gradient_mask', { direction: 'bottom_to_top' });
   await call(client, 'atomic', 'photoshop_undo', { steps: 1 });
@@ -223,9 +239,7 @@ async function main(): Promise<void> {
   });
 
   section('3 — Yeni recipe araçları (Phase 4)');
-  await call(client, 'recipe', 'photoshop_execute_script', {
-    code: `var doc=app.activeDocument; for(var i=0;i<doc.artLayers.length;i++){var L=doc.artLayers[i]; if(L.name.indexOf('Subject')>=0){doc.activeLayer=L;break;}} return {active:doc.activeLayer.name,isBackground:L.isBackgroundLayer};`,
-  });
+  await call(client, 'recipe', 'photoshop_select_layer_by_name', { name: 'Subject' });
 
   await call(client, 'recipe', 'photoshop_recipe_gradient_fade', { direction: 'bottom_to_top' });
   await call(client, 'recipe', 'photoshop_undo', { steps: 1 });
@@ -233,7 +247,12 @@ async function main(): Promise<void> {
   await call(client, 'recipe', 'photoshop_recipe_dodge_burn', { blend_mode: 'overlay' });
   await call(client, 'recipe', 'photoshop_undo', { steps: 1 });
 
-  await call(client, 'recipe', 'photoshop_select_rectangle', { left: 200, top: 200, right: 400, bottom: 400 });
+  await call(client, 'recipe', 'photoshop_select_rectangle', {
+    left: 200,
+    top: 200,
+    right: 400,
+    bottom: 400,
+  });
   await call(client, 'recipe', 'photoshop_recipe_remove_distraction', { feather_px: 2 });
   await call(client, 'recipe', 'photoshop_undo', { steps: 1 });
 
@@ -248,10 +267,16 @@ async function main(): Promise<void> {
   await getPrompt(client, 'recipe-prompt', 'ps.gradient_fade', { direction: 'bottom_to_top' }, [
     'photoshop_recipe_gradient_fade',
   ]);
-  await getPrompt(client, 'recipe-prompt', 'ps.sky_blend', {
-    sky_image_path: skyPng,
-    horizon_pct: '40',
-  }, ['photoshop_recipe_sky_blend']);
+  await getPrompt(
+    client,
+    'recipe-prompt',
+    'ps.sky_blend',
+    {
+      sky_image_path: skyPng,
+      horizon_pct: '40',
+    },
+    ['photoshop_recipe_sky_blend']
+  );
   await getPrompt(client, 'recipe-prompt', 'ps.dodge_burn', { blend_mode: 'overlay' }, [
     'photoshop_recipe_dodge_burn',
   ]);

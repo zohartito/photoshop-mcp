@@ -1,5 +1,5 @@
 /**
- * Normalize values returned from ExtendScript via AppleScript stdout.
+ * Normalize values returned from ExtendScript transport stdout.
  * Repository-generated scripts serialize objects as strict JSON. Any result
  * that is not valid JSON remains an inert string; returned Photoshop text is
  * never evaluated in the Node process.

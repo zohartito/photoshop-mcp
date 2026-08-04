@@ -4,9 +4,9 @@
  *
  * A transport is the swappable seam between an MCP tool and Photoshop. It sits
  * ABOVE payload generation: the ExtendScript backend owns ExtendScript source
- * strings + the "ERROR:"/toSource() protocol internally; the UXP backend owns
- * batchPlay descriptors + the bridge JSON envelopes internally. Tools never see
- * which backend answered — result normalization lives inside each transport.
+ * strings plus strict JSON result parsing; the UXP backend owns batchPlay
+ * descriptors plus bridge JSON envelopes. Tools never see which backend answered
+ * — result normalization lives inside each transport.
  */
 
 /** Backend identifier. `firefly` is reserved for a hypothetical cloud backend C (§8). */

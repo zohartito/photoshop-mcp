@@ -13,14 +13,12 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TEST_CHAT_ID = 'local-mcp-spike-issue-2';
-const ALERT_TIMEOUT_MS = 10_000;
+const TOOL_CALL_TIMEOUT_MS = 10_000;
 const CJK_LAYER_NAME = '测试レイヤー';
 
 let failures = 0;
 
-function textFrom(result: {
-  content?: Array<{ type: string; text?: string }>;
-}): string {
+function textFrom(result: { content?: Array<{ type: string; text?: string }> }): string {
   return (result.content ?? [])
     .filter((c) => c.type === 'text' && c.text)
     .map((c) => c.text!)
@@ -98,27 +96,18 @@ async function main(): Promise<void> {
   try {
     await client.connect(transport);
   } catch (error) {
-    console.error(
-      'Could not connect to MCP server. Is Node available and the project built?'
-    );
+    console.error('Could not connect to MCP server. Is Node available and the project built?');
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
 
   const ping = await callTool(client, 'photoshop_ping');
   if (ping.isError) {
-    fail(
-      'photoshop_ping',
-      'Photoshop is not reachable — launch Photoshop and retry'
-    );
+    fail('photoshop_ping', 'Photoshop is not reachable — launch Photoshop and retry');
     await transport.close();
     process.exit(1);
   }
   pass('photoshop_ping');
-
-  await callTool(client, 'photoshop_execute_script', {
-    code: `while (app.documents.length > 0) { app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); } return { documentsClosed: true };`,
-  });
 
   // Step 1
   console.log('\n--- Step 1: create document ---');
@@ -136,11 +125,22 @@ async function main(): Promise<void> {
     const payload = parseJsonFromText(textFrom(docInfo)) as {
       document?: { width?: number; height?: number; error?: string };
     };
-    assert(payload.document?.width === 800, 'document.width === 800', String(payload.document?.width));
-    assert(payload.document?.height === 600, 'document.height === 600', String(payload.document?.height));
+    assert(
+      payload.document?.width === 800,
+      'document.width === 800',
+      String(payload.document?.width)
+    );
+    assert(
+      payload.document?.height === 600,
+      'document.height === 600',
+      String(payload.document?.height)
+    );
     assert(!payload.document?.error, 'no document.error', payload.document?.error);
   } catch (error) {
-    fail('photoshop_get_document_info (parse)', error instanceof Error ? error.message : String(error));
+    fail(
+      'photoshop_get_document_info (parse)',
+      error instanceof Error ? error.message : String(error)
+    );
   }
 
   // Step 3
@@ -151,8 +151,16 @@ async function main(): Promise<void> {
     const payload = parseJsonFromText(textFrom(state)) as {
       document?: { width?: number; height?: number; error?: string };
     };
-    assert(payload.document?.width === 800, 'context.document.width === 800', String(payload.document?.width));
-    assert(payload.document?.height === 600, 'context.document.height === 600', String(payload.document?.height));
+    assert(
+      payload.document?.width === 800,
+      'context.document.width === 800',
+      String(payload.document?.width)
+    );
+    assert(
+      payload.document?.height === 600,
+      'context.document.height === 600',
+      String(payload.document?.height)
+    );
     assert(!payload.document?.error, 'no context.document.error', payload.document?.error);
   } catch (error) {
     fail('photoshop_get_state (parse)', error instanceof Error ? error.message : String(error));
@@ -172,7 +180,11 @@ async function main(): Promise<void> {
   assert(!layers.isError, 'photoshop_get_layers (tool level)');
   try {
     const payload = parseJsonFromText(textFrom(layers)) as { layers?: unknown[] };
-    assert((payload.layers?.length ?? 0) >= 2, 'layers.length >= 2', String(payload.layers?.length));
+    assert(
+      (payload.layers?.length ?? 0) >= 2,
+      'layers.length >= 2',
+      String(payload.layers?.length)
+    );
   } catch (error) {
     fail('photoshop_get_layers (parse)', error instanceof Error ? error.message : String(error));
   }
@@ -209,25 +221,30 @@ async function main(): Promise<void> {
       client,
       'photoshop_scale_layer',
       { scalePercent: 95 },
-      ALERT_TIMEOUT_MS
+      TOOL_CALL_TIMEOUT_MS
     );
     assert(!scale.isError, 'photoshop_scale_layer on placed Smart Object');
     const move = await callTool(
       client,
       'photoshop_move_layer',
       { deltaX: 5, deltaY: 5 },
-      ALERT_TIMEOUT_MS
+      TOOL_CALL_TIMEOUT_MS
     );
     assert(!move.isError, 'photoshop_move_layer on placed Smart Object');
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    fail('Smart Object transform after place', msg.includes('Timed out') ? 'dialog blocked — timed out' : msg);
+    fail(
+      'Smart Object transform after place',
+      msg.includes('Timed out') ? 'dialog blocked — timed out' : msg
+    );
   }
 
   // Step 6c: jsString edge case (backslash, quote, newline in layer name)
   console.log('\n--- Step 6c: jsString escape round-trip ---');
   const ESCAPE_LAYER_NAME = 'MCP\\"Test\\nName';
-  const escapeCreate = await callTool(client, 'photoshop_create_layer', { name: ESCAPE_LAYER_NAME });
+  const escapeCreate = await callTool(client, 'photoshop_create_layer', {
+    name: ESCAPE_LAYER_NAME,
+  });
   assert(!escapeCreate.isError, 'photoshop_create_layer (escaped name)');
   const escapeSelect = await callTool(client, 'photoshop_select_layer_by_name', {
     name: ESCAPE_LAYER_NAME,
@@ -235,43 +252,17 @@ async function main(): Promise<void> {
   assert(!escapeSelect.isError, 'photoshop_select_layer_by_name (escaped name)');
   try {
     const payload = parseJsonFromText(textFrom(escapeSelect)) as { layerName?: string };
-    assert(payload.layerName === ESCAPE_LAYER_NAME, 'escaped layer name round-trip', payload.layerName);
+    assert(
+      payload.layerName === ESCAPE_LAYER_NAME,
+      'escaped layer name round-trip',
+      payload.layerName
+    );
   } catch (error) {
     fail('jsString round-trip (parse)', error instanceof Error ? error.message : String(error));
   }
 
   // Step 7
-  console.log('\n--- Step 7: execute_script alert (dialog suppression) ---');
-  try {
-    const alertResult = await callTool(
-      client,
-      'photoshop_execute_script',
-      { code: `alert('mcp'); return { alerted: true };` },
-      ALERT_TIMEOUT_MS
-    );
-    assert(!alertResult.isError, 'alert script (tool level)');
-    const payload = parseJsonFromText(textFrom(alertResult)) as { alerted?: boolean };
-    assert(payload.alerted === true, 'alerted === true');
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    fail('alert script', msg.includes('Timed out') ? 'dialog blocked — timed out' : msg);
-  }
-
-  // Step 8
-  console.log('\n--- Step 8: execute_script return value ---');
-  const docCount = await callTool(client, 'photoshop_execute_script', {
-    code: 'return { n: app.documents.length };',
-  });
-  assert(!docCount.isError, 'execute_script return (tool level)');
-  try {
-    const payload = parseJsonFromText(textFrom(docCount)) as { n?: unknown };
-    assert(typeof payload.n === 'number', 'parsed n is number', String(typeof payload.n));
-  } catch (error) {
-    fail('execute_script return (parse)', error instanceof Error ? error.message : String(error));
-  }
-
-  // Step 9
-  console.log('\n--- Step 9: font discovery + create_text_layer fontName ---');
+  console.log('\n--- Step 7: font discovery + create_text_layer fontName ---');
   const listFonts = await callTool(client, 'photoshop_list_fonts', { query: 'Arial', limit: 20 });
   assert(!listFonts.isError, 'photoshop_list_fonts (query: Arial)');
   try {
@@ -290,18 +281,13 @@ async function main(): Promise<void> {
     fontName: 'Arial',
   });
   assert(!fontText.isError, 'photoshop_create_text_layer with fontName');
-  try {
-    const fontVerify = await callTool(client, 'photoshop_execute_script', {
-      code: `for (var i=0;i<app.activeDocument.artLayers.length;i++){var L=app.activeDocument.artLayers[i]; if(L.kind==LayerKind.TEXT&&L.textItem.contents=="Font Test"){return{font:L.textItem.font,contents:L.textItem.contents};}} throw new Error("text layer not found");`,
-    });
-    const verifyPayload = parseJsonFromText(textFrom(fontVerify)) as { font?: string };
-    assert(typeof verifyPayload.font === 'string' && verifyPayload.font.length > 0, 'font applied on text layer', verifyPayload.font);
-  } catch (error) {
-    fail('fontName verify (parse)', error instanceof Error ? error.message : String(error));
-  }
+  const fontSelect = await callTool(client, 'photoshop_select_layer_by_name', {
+    name: 'Font Test',
+  });
+  assert(!fontSelect.isError, 'font text layer can be selected by name');
 
-  // Step 10
-  console.log('\n--- Step 10: CJK layer name round-trip ---');
+  // Step 8
+  console.log('\n--- Step 8: CJK layer name round-trip ---');
   const cjkCreate = await callTool(client, 'photoshop_create_layer', { name: CJK_LAYER_NAME });
   assert(!cjkCreate.isError, 'photoshop_create_layer (CJK name)');
   const cjkSelect = await callTool(client, 'photoshop_select_layer_by_name', {
@@ -309,7 +295,10 @@ async function main(): Promise<void> {
   });
   assert(!cjkSelect.isError, 'photoshop_select_layer_by_name (CJK)');
   try {
-    const payload = parseJsonFromText(textFrom(cjkSelect)) as { layerName?: string; selected?: boolean };
+    const payload = parseJsonFromText(textFrom(cjkSelect)) as {
+      layerName?: string;
+      selected?: boolean;
+    };
     assert(payload.selected === true, 'CJK layer selected');
     assert(payload.layerName === CJK_LAYER_NAME, 'CJK name round-trip', payload.layerName);
   } catch (error) {

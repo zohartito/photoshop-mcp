@@ -251,10 +251,7 @@ function __mcp_gradientFillLayerMask(fromXPx, fromYPx, toXPx, toYPx, reverseGrad
 export type CurvesPreset = 'auto_tone' | 'neutral';
 
 export type GradientMaskDirection =
-  | 'top_to_bottom'
-  | 'bottom_to_top'
-  | 'left_to_right'
-  | 'right_to_left';
+  'top_to_bottom' | 'bottom_to_top' | 'left_to_right' | 'right_to_left';
 
 /**
  * Common ExtendScript snippets
@@ -274,7 +271,12 @@ export const ExtendScriptSnippets = {
   /**
    * Create a new document
    */
-  newDocument: (width: number, height: number, resolution = 72, colorMode = 'NewDocumentMode.RGB') => `
+  newDocument: (
+    width: number,
+    height: number,
+    resolution = 72,
+    colorMode = 'NewDocumentMode.RGB'
+  ) => `
     var doc = app.documents.add(
       UnitValue(${width}, 'px'),
       UnitValue(${height}, 'px'),
@@ -1642,7 +1644,8 @@ export const ExtendScriptSnippets = {
       right_to_left: { fromH: endPct, fromV: 50, toH: startPct, toV: 50, reverse: false },
     };
     const endpoints = gradientEndpoints[direction];
-    const angle = angleDeg ?? (direction === 'left_to_right' || direction === 'right_to_left' ? 0 : 90);
+    const angle =
+      angleDeg ?? (direction === 'left_to_right' || direction === 'right_to_left' ? 0 : 90);
 
     return `
     ${helperFunctions}
@@ -2125,10 +2128,8 @@ export const ExtendScriptSnippets = {
     return getContextInfo();
   `,
 
-  /**
-   * Export a JPEG preview to the system temp folder. Returns filesystem path for Node to read.
-   */
-  exportPreview: (maxDimension = 1024, jpegQuality = 8) => `
+  /** Export a JPEG preview to a server-owned temporary path. */
+  exportPreview: (maxDimension: number, jpegQuality: number, outputPath: string) => `
     ${getContextInfo}
 
     if (app.documents.length === 0) {
@@ -2154,7 +2155,7 @@ export const ExtendScriptSnippets = {
       );
     }
 
-    var tmpFile = new File(Folder.temp.fsName + '/ps-preview-' + (new Date().getTime()) + '.jpg');
+    var tmpFile = new File(${jsxStringLiteral(outputPath)});
     var saveOptions = new JPEGSaveOptions();
     saveOptions.quality = ${jpegQuality};
     saveOptions.embedColorProfile = true;
