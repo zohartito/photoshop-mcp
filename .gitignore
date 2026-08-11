@@ -57,3 +57,4 @@ scripts/add-copyright-headers.ts
 # Spike probe output (generated locally)
 scripts/output/*.json
 scripts/output/parity-loop/
+.codegraph/
