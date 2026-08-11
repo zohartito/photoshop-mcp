@@ -7,6 +7,7 @@ TypeScript + ESM, Node >=18 (dev on 22). Docs use `npm`; package.json also decla
 - Lint/format: `npm run lint` (eslint src) · `npm run format` / `npm run format:check` (prettier).
 - Offline tests (no Photoshop; `tsx`/`node` scripts, run one at a time e.g. `npm run test:p3-security`): `test:uxp-normalize`, `test:intent-expansion`, `test:extendscript-literals`, `test:extendscript-result`, `test:custom-script-disabled`, `test:tool-input-validation`, `test:ui-security-disabled`, `test:cli-account-capability-boundary`, `test:gemini-env-settings`, `test:p2-security`, `test:p3-security`, `test:uxp-quarantine`, `test:uxp-session-authority`, `test:uxp-replay-tombstones`, `verify:photoshop-prompts`.
 - Integration (needs a running Photoshop): `test:mcp-local`, `test:mcp-all`, `spike:issue-2`, `spike:photoshop-actions`. There is no unit-test runner or CI test job — these scripts are the whole suite.
+- Parity loop: `npm run parity:loop` (= `scripts/parity-fix-loop.sh`) runs the M3 parity harness and, while dirty, hands the report to `claude -p` to fix backend B, capped at 6 fix attempts (`PARITY_LOOP_MAX`). Needs Photoshop + UXP plugin polling; `--dry-run` tests the loop logic offline. Logs per run under `scripts/output/parity-loop/<timestamp>/`.
 
 ## Structure
 - `src/index.ts` — entrypoint (builds to `dist/index.js`); boots `PhotoshopMCPServer` (`src/core/`) on stdio.

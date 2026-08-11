@@ -29,6 +29,7 @@
     "spike:photoshop-actions": "tsx scripts/spike-photoshop-actions.ts",
     "spike:issue-2": "tsx scripts/spike-issue-2.ts",
     "verify:photoshop-prompts": "tsx scripts/verify-photoshop-prompt-coverage.ts",
+    "parity:loop": "bash scripts/parity-fix-loop.sh",
     "test:mcp-local": "tsx scripts/test-mcp-local.ts",
     "test:mcp-all": "tsx scripts/test-all-mcp-tools.ts",
     "test:uxp-normalize": "tsx scripts/test-uxp-normalize.ts",
