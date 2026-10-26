@@ -1,6 +1,6 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { resolveCliBinary, runCommand } from './cli-utils.js';
-import type { ProviderAdapter, ProviderModel } from './types.js';
+import type { ModelPricing, ProviderAdapter, ProviderModel } from './types.js';
 
 // Curated to Gemini models that support tool calling on the Google AI Studio
 // (Generative Language) API. Prices in USD per 1M tokens; Pro tiers reflect
@@ -28,6 +28,13 @@ const MODELS: ProviderModel[] = [
     pricing: { inputUsdPerMTok: 0.1, outputUsdPerMTok: 0.4, cachedInputUsdPerMTok: 0.025 },
   },
 ];
+
+// Historical selections still need pricing after leaving the current picker.
+const LEGACY_PRICING: Record<string, ModelPricing> = {
+  'gemini-2.0-flash': { inputUsdPerMTok: 0.1, outputUsdPerMTok: 0.4 },
+  'gemini-1.5-pro': { inputUsdPerMTok: 1.25, outputUsdPerMTok: 5 },
+  'gemini-1.5-flash': { inputUsdPerMTok: 0.075, outputUsdPerMTok: 0.3 },
+};
 
 export const googleAdapter: ProviderAdapter = {
   id: 'google',
@@ -82,6 +89,7 @@ export const googleAdapter: ProviderAdapter = {
     return createGoogleGenerativeAI({ apiKey })(modelId);
   },
   getModelPricing(modelId) {
-    return MODELS.find((m) => m.id === modelId)?.pricing;
+    return MODELS.find((m) => m.id === modelId)?.pricing
+      ?? (Object.hasOwn(LEGACY_PRICING, modelId) ? LEGACY_PRICING[modelId] : undefined);
   },
 };
