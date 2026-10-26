@@ -1,5 +1,5 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import type { ProviderAdapter, ProviderModel } from './types.js';
+import type { ModelPricing, ProviderAdapter, ProviderModel } from './types.js';
 
 // Curated to models known to support tool calling on OpenRouter. Prices in USD
 // per 1M tokens; OpenRouter passes provider rates through without markup.
@@ -46,6 +46,16 @@ const MODELS: ProviderModel[] = [
   },
 ];
 
+// Preserve cost accounting for saved conversations using older picker entries.
+const LEGACY_PRICING: Record<string, ModelPricing> = {
+  'anthropic/claude-sonnet-4.5': {
+    inputUsdPerMTok: 3, outputUsdPerMTok: 15,
+    cachedInputUsdPerMTok: 0.3, cachedWriteUsdPerMTok: 3.75,
+  },
+  'openai/gpt-5': { inputUsdPerMTok: 1.25, outputUsdPerMTok: 10, cachedInputUsdPerMTok: 0.125 },
+  'openai/gpt-4.1-mini': { inputUsdPerMTok: 0.4, outputUsdPerMTok: 1.6, cachedInputUsdPerMTok: 0.1 },
+};
+
 export const openrouterAdapter: ProviderAdapter = {
   id: 'openrouter',
   label: 'OpenRouter',
@@ -79,6 +89,7 @@ export const openrouterAdapter: ProviderAdapter = {
     return createOpenRouter({ apiKey })(modelId);
   },
   getModelPricing(modelId) {
-    return MODELS.find((m) => m.id === modelId)?.pricing;
+    return MODELS.find((m) => m.id === modelId)?.pricing
+      ?? (Object.hasOwn(LEGACY_PRICING, modelId) ? LEGACY_PRICING[modelId] : undefined);
   },
 };
