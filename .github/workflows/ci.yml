@@ -36,6 +36,9 @@ jobs:
       - name: Compile TypeScript
         run: npm run build:server
 
+      - name: Test provider pricing compatibility
+        run: npx tsx scripts/test-provider-pricing.ts
+
       - name: Lint (eslint, non-blocking)
         run: npm run lint
         continue-on-error: true
